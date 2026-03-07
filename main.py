@@ -23,9 +23,10 @@ config["data_vendors"] = {
 # Initialize with custom config
 ta = TradingAgentsGraph(debug=True, config=config)
 
-# forward propagate
-_, decision = ta.propagate("NVDA", "2024-05-10")
-print(decision)
+# forward propagate for TODAY
+today_str = "2026-02-28"
+_, decision = ta.propagate("NVDA", today_str)
+print(f"Final Decision for {today_str}: {decision}")
 
 # Memorize mistakes and reflect
 # ta.reflect_and_remember(1000) # parameter is the position returns

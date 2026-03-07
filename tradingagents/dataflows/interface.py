@@ -22,6 +22,10 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_global_news as get_alpha_vantage_global_news,
 )
+from .longbridge import (
+    get_stock_data as get_longbridge_stock,
+    get_indicators as get_longbridge_indicators,
+)
 from .alpha_vantage_common import AlphaVantageRateLimitError
 
 # Configuration and routing logic
@@ -63,6 +67,7 @@ TOOLS_CATEGORIES = {
 VENDOR_LIST = [
     "yfinance",
     "alpha_vantage",
+    "longbridge",
 ]
 
 # Mapping of methods to their vendor-specific implementations
@@ -71,11 +76,13 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "longbridge": get_longbridge_stock,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "longbridge": get_longbridge_indicators,
     },
     # fundamental_data
     "get_fundamentals": {

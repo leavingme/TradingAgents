@@ -8,24 +8,25 @@ DEFAULT_CONFIG = {
         "dataflows/data_cache",
     ),
     # LLM settings
-    "llm_provider": "openai",
-    "deep_think_llm": "gemini-3-pro-preview",
-    "quick_think_llm": "gemini-3-pro-preview",
-    "backend_url": "http://127.0.0.1:18789/v1",
+    "llm_provider": "custom",
+    "deep_think_llm": os.getenv("CUSTOM_DEEP_MODEL", "kimi-code"),
+    "quick_think_llm": os.getenv("CUSTOM_QUICK_MODEL", "kimi-code"),
+    "backend_url": os.getenv("OPENAI_API_BASE", "http://127.0.0.1:4000/v1"),
+    "llm_timeout": 120,              # 单次 LLM 调用超时秒数（默认 120s）
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
     "openai_reasoning_effort": None,    # "medium", "high", "low"
     # Debate and discussion settings
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
-    "max_recur_limit": 100,
+    "max_recur_limit": 250,
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
-        "core_stock_apis": "longbridge",       # Options: alpha_vantage, yfinance, longbridge
-        "technical_indicators": "longbridge",  # Options: alpha_vantage, yfinance, longbridge
-        "fundamental_data": "yfinance",        # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",               # Options: alpha_vantage, yfinance
+        "core_stock_apis": "longbridge",       # 股价 K 线：长桥
+        "technical_indicators": "longbridge",  # 技术指标：长桥
+        "fundamental_data": "alpha_vantage",   # 基本面：Alpha Vantage（yfinance 在国内不稳定）
+        "news_data": "alpha_vantage, web_search, duckduckgo", # 新闻优先级：Alpha 第一, Kimi 第二, DDG 第三
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

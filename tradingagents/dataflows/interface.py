@@ -26,6 +26,15 @@ from .longbridge import (
     get_stock_data as get_longbridge_stock,
     get_indicators as get_longbridge_indicators,
 )
+from .web_search import (
+    get_news as get_web_search_news,
+    get_global_news as get_web_search_global_news,
+)
+from .internet_search import (
+    search_tavily,
+    search_serper,
+    search_duckduckgo,
+)
 from .alpha_vantage_common import AlphaVantageRateLimitError
 
 # Configuration and routing logic
@@ -68,6 +77,10 @@ VENDOR_LIST = [
     "yfinance",
     "alpha_vantage",
     "longbridge",
+    "web_search",
+    "tavily",
+    "serper",
+    "duckduckgo",
 ]
 
 # Mapping of methods to their vendor-specific implementations
@@ -105,10 +118,15 @@ VENDOR_METHODS = {
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
+        "web_search": get_web_search_news,
+        "tavily": search_tavily,
+        "serper": search_serper,
+        "duckduckgo": search_duckduckgo,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
+        "web_search": get_web_search_global_news,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,

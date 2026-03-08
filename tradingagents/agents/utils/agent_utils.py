@@ -16,8 +16,17 @@ from tradingagents.agents.utils.fundamental_data_tools import (
 from tradingagents.agents.utils.news_data_tools import (
     get_news,
     get_insider_transactions,
-    get_global_news
+    get_global_news,
+    search_internet_news
 )
+from tradingagents.agents.utils.social_media_tools import (
+    get_twitter_stock_sentiment,
+    get_twitter_trending_finance
+)
+
+# 语言输出控制：所有 agent prompt 末尾追加此常量即可切换输出语言
+CHINESE_OUTPUT = "\n\n**重要：请将你所有的分析、报告和回答都用简体中文（Simplified Chinese）撰写，不要使用英文输出。**"
+
 
 def create_msg_delete():
     def delete_messages(state):

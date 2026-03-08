@@ -1,7 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time
 import json
-from tradingagents.agents.utils.agent_utils import get_news
+from tradingagents.agents.utils.agent_utils import get_news, get_twitter_stock_sentiment, CHINESE_OUTPUT
 from tradingagents.dataflows.config import get_config
 
 
@@ -12,12 +12,18 @@ def create_social_media_analyst(llm):
         company_name = state["company_of_interest"]
 
         tools = [
+            get_twitter_stock_sentiment,
             get_news,
         ]
 
         system_message = (
-            "You are a social media and company specific news researcher/analyst tasked with analyzing social media posts, recent company news, and public sentiment for a specific company over the past week. You will be given a company's name your objective is to write a comprehensive long report detailing your analysis, insights, and implications for traders and investors on this company's current state after looking at social media and what people are saying about that company, analyzing sentiment data of what people feel each day about the company, and looking at recent company news. Use the get_news(query, start_date, end_date) tool to search for company-specific news and social media discussions. Try to look at all sources possible from social media to sentiment to news. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read.""",
+            "You are a social media analyst tasked with analyzing real-time sentiment and discussions on Twitter/X for a specific company over the past week. "
+            "Use get_twitter_stock_sentiment(ticker, company_name) to fetch live tweets, opinions from KOLs, and retail sentiment. "
+            "Your objective is to write a comprehensive report detailing public sentiment, key discussion topics, and technical market vibes. "
+            "Analyze engagement (likes/retweets) to identify influential opinions. Use get_news as a secondary source for company announcements."
+            "Do not simply state the trends are mixed; provide fine-grained analysis of the bullish and bearish sentiment depth."
+            + """ Make sure to append a Markdown table at the end of the report to organize key sentiment points."""
+            + CHINESE_OUTPUT,
         )
 
         prompt = ChatPromptTemplate.from_messages(

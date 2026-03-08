@@ -58,6 +58,13 @@ class OpenAIClient(BaseLLMClient):
         elif self.provider == "ollama":
             llm_kwargs["base_url"] = "http://localhost:11434/v1"
             llm_kwargs["api_key"] = "ollama"  # Ollama doesn't require auth
+        elif self.provider == "custom":
+            # 自定义接口：使用传入的 base_url，API Key 从环境变量读取
+            if self.base_url:
+                llm_kwargs["base_url"] = self.base_url
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if api_key:
+                llm_kwargs["api_key"] = api_key
         elif self.base_url:
             llm_kwargs["base_url"] = self.base_url
 

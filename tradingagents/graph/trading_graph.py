@@ -74,6 +74,10 @@ class TradingAgentsGraph:
         # Initialize LLMs with provider-specific thinking configuration
         llm_kwargs = self._get_provider_kwargs()
 
+        # Add timeout from config (default_config sets 120s)
+        if self.config.get("llm_timeout"):
+            llm_kwargs["timeout"] = self.config["llm_timeout"]
+
         # Add callbacks to kwargs if provided (passed to LLM constructor)
         if self.callbacks:
             llm_kwargs["callbacks"] = self.callbacks

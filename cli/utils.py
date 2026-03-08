@@ -1,3 +1,4 @@
+import os
 import questionary
 from typing import List, Optional, Tuple, Dict
 
@@ -125,6 +126,20 @@ def select_research_depth() -> int:
 def select_shallow_thinking_agent(provider) -> str:
     """Select shallow thinking llm engine using an interactive selection."""
 
+    # For custom provider, allow free-text model input
+    if provider.lower() == "custom":
+        default_model = os.environ.get("CUSTOM_QUICK_MODEL", "")
+        model = questionary.text(
+            "Enter Quick-Thinking model name (e.g. gemini-3-pro-preview, gpt-4o):",
+            default=default_model,
+            validate=lambda x: len(x.strip()) > 0 or "Model name cannot be empty.",
+            style=questionary.Style([("text", "fg:magenta"), ("highlighted", "noinherit")]),
+        ).ask()
+        if not model:
+            console.print("\n[red]No model name provided. Exiting...[/red]")
+            exit(1)
+        return model.strip()
+
     # Define shallow thinking llm engine options with their corresponding model names
     SHALLOW_AGENT_OPTIONS = {
         "openai": [
@@ -189,6 +204,20 @@ def select_shallow_thinking_agent(provider) -> str:
 
 def select_deep_thinking_agent(provider) -> str:
     """Select deep thinking llm engine using an interactive selection."""
+
+    # For custom provider, allow free-text model input
+    if provider.lower() == "custom":
+        default_model = os.environ.get("CUSTOM_DEEP_MODEL", "")
+        model = questionary.text(
+            "Enter Deep-Thinking model name (e.g. gemini-3-pro-preview, gpt-4o):",
+            default=default_model,
+            validate=lambda x: len(x.strip()) > 0 or "Model name cannot be empty.",
+            style=questionary.Style([("text", "fg:magenta"), ("highlighted", "noinherit")]),
+        ).ask()
+        if not model:
+            console.print("\n[red]No model name provided. Exiting...[/red]")
+            exit(1)
+        return model.strip()
 
     # Define deep thinking llm engine options with their corresponding model names
     DEEP_AGENT_OPTIONS = {
@@ -262,6 +291,7 @@ def select_llm_provider() -> tuple[str, str]:
         ("xAI", "https://api.x.ai/v1"),
         ("Openrouter", "https://openrouter.ai/api/v1"),
         ("Ollama", "http://localhost:11434/v1"),
+        ("Custom", "__custom__"),  # 自定义接口占位符
     ]
     
     choice = questionary.select(
@@ -285,7 +315,26 @@ def select_llm_provider() -> tuple[str, str]:
         exit(1)
     
     display_name, url = choice
-    print(f"You selected: {display_name}\tURL: {url}")
+
+    # 如果选择了 Custom，弹出输入框并以 OPENAI_API_BASE 作为默认值，用户可直接回车或修改
+    if url == "__custom__":
+        default_url = os.environ.get("OPENAI_API_BASE", "http://127.0.0.1:18789/v1")
+        url = questionary.text(
+            "Enter your custom API Base URL:",
+            default=default_url,
+            validate=lambda x: x.strip().startswith(("http://", "https://"))
+                or "URL must start with http:// or https://",
+            style=questionary.Style(
+                [("text", "fg:cyan"), ("highlighted", "noinherit")]
+            ),
+        ).ask()
+        if not url:
+            console.print("\n[red]No URL provided. Exiting...[/red]")
+            exit(1)
+        url = url.strip()
+        print(f"You selected: Custom\tURL: {url}")
+    else:
+        print(f"You selected: {display_name}\tURL: {url}")
 
     return display_name, url
 

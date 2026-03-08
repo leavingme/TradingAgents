@@ -1019,7 +1019,8 @@ def run_analysis():
 
         # Stream the analysis
         trace = []
-        for chunk in graph.graph.stream(init_agent_state, **args):
+        try:
+          for chunk in graph.graph.stream(init_agent_state, **args):
             # Process messages if present (skip duplicates via message ID)
             if len(chunk["messages"]) > 0:
                 last_message = chunk["messages"][-1]
@@ -1121,6 +1122,28 @@ def run_analysis():
             update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
             trace.append(chunk)
+
+        except Exception as e:
+            import traceback
+            update_display(layout, stats_handler=stats_handler, start_time=start_time)
+            # 在 Live 区域底部展示错误
+            layout["footer"].update(
+                Panel(
+                    f"[bold red]❌ Error:[/bold red] {e}",
+                    border_style="red",
+                )
+            )
+            live.refresh()
+            # 同时写入日志
+            with open(log_file, "a") as f:
+                f.write(f"\n[ERROR] {e}\n{traceback.format_exc()}\n")
+            # 退出 Live 后打印完整 traceback
+            console.print(f"\n[bold red]Analysis failed![/bold red]")
+            console.print(f"[red]{e}[/red]")
+            console.print("[dim]Full traceback:[/dim]")
+            console.print(traceback.format_exc())
+            console.print(f"[dim]Log saved to: {log_file}[/dim]")
+            return
 
         # Get final state and decision
         final_state = trace[-1]

@@ -5,6 +5,9 @@
 import sys
 sys.path.insert(0, '/home/ubuntu/.openclaw/workspace/TradingAgents')
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from tradingagents.dataflows.interface import route_to_vendor, VENDOR_METHODS
 
 print("="*60)

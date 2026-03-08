@@ -1,5 +1,6 @@
 import time
 import json
+from tradingagents.agents.utils.agent_utils import CHINESE_OUTPUT
 
 
 def create_risk_manager(llm, memory):
@@ -41,7 +42,8 @@ Deliverables:
 
 ---
 
-Focus on actionable insights and continuous improvement. Build on past lessons, critically evaluate all perspectives, and ensure each decision advances better outcomes."""
+Focus on actionable insights and continuous improvement. Build on past lessons, critically evaluate all perspectives, and ensure each decision advances better outcomes.""" + CHINESE_OUTPUT
+
 
         response = llm.invoke(prompt)
 

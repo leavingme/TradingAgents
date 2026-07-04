@@ -12,7 +12,19 @@ from tradingagents.dataflows.config import get_config, set_config
 @pytest.mark.unit
 class DataflowsConfigIsolationTests(unittest.TestCase):
     def setUp(self):
-        set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
+        # The fork pins data_vendors to longbridge variants by default; these
+        # isolation tests pre-date that decision and assert hard-coded
+        # upstream defaults (yfinance). Force the legacy layout so the
+        # assertions reflect the upstream behavior under test, while leaving
+        # the cross-tool nested-merge logic unchanged.
+        cfg = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        cfg["data_vendors"] = {
+            "core_stock_apis": "yfinance",
+            "technical_indicators": "yfinance",
+            "fundamental_data": "yfinance",
+            "news_data": "yfinance",
+        }
+        set_config(cfg)
 
     def test_get_config_returns_deep_copy(self):
         cfg = get_config()

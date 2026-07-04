@@ -48,6 +48,20 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
 
 @pytest.mark.unit
 class TestRouteToVendorSentinel(unittest.TestCase):
+    def setUp(self):
+        # Pin data_vendors to the two vendors this test mocks; the global
+        # DEFAULT_CONFIG may point at other (e.g. longbridge) vendors whose
+        # absence would short-circuit the routing test before the mocked
+        # vendors ever run.
+        set_config({
+            "data_vendors": {
+                "core_stock_apis": "yfinance, alpha_vantage",
+                "technical_indicators": "yfinance, alpha_vantage",
+                "fundamental_data": "yfinance, alpha_vantage",
+                "news_data": "alpha_vantage",
+            }
+        })
+
     def test_no_data_from_all_vendors_returns_sentinel(self):
         def raises_no_data(symbol, *a, **k):
             raise NoMarketDataError(symbol, "GC=F", "no rows")

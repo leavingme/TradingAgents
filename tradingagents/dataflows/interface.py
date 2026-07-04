@@ -18,6 +18,35 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+# Longbridge data vendor plugin: ships on top of v0.3.0 (added 2026-07-04).
+# CLI variant is the fallback when MCP bearer is missing/expired.
+from .longbridge import (
+    get_stock_data as get_longbridge_stock,
+    get_indicators as get_longbridge_indicators,
+    get_fundamentals as get_longbridge_fundamentals,
+    get_balance_sheet as get_longbridge_balance_sheet,
+    get_cashflow as get_longbridge_cashflow,
+    get_income_statement as get_longbridge_income_statement,
+)
+try:
+    from .longbridge_mcp import (
+        get_stock_data as get_longbridge_mcp_stock,
+        get_indicators as get_longbridge_mcp_indicators,
+        get_fundamentals as get_longbridge_mcp_fundamentals,
+        get_balance_sheet as get_longbridge_mcp_balance_sheet,
+        get_cashflow as get_longbridge_mcp_cashflow,
+        get_income_statement as get_longbridge_mcp_income_statement,
+    )
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+    _LBMCP_NONE = None
+    get_longbridge_mcp_stock = _LBMCP_NONE
+    get_longbridge_mcp_indicators = _LBMCP_NONE
+    get_longbridge_mcp_fundamentals = _LBMCP_NONE
+    get_longbridge_mcp_balance_sheet = _LBMCP_NONE
+    get_longbridge_mcp_cashflow = _LBMCP_NONE
+    get_longbridge_mcp_income_statement = _LBMCP_NONE
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
@@ -82,6 +111,8 @@ VENDOR_LIST = [
     "fred",
     "polymarket",
     "alpha_vantage",
+    "longbridge",
+    "longbridge_mcp",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -97,28 +128,40 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "longbridge": get_longbridge_stock,
+        "longbridge_mcp": get_longbridge_mcp_stock,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "longbridge": get_longbridge_indicators,
+        "longbridge_mcp": get_longbridge_mcp_indicators,
     },
     # fundamental_data
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
+        "longbridge": get_longbridge_fundamentals,
+        "longbridge_mcp": get_longbridge_mcp_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
+        "longbridge": get_longbridge_balance_sheet,
+        "longbridge_mcp": get_longbridge_mcp_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
+        "longbridge": get_longbridge_cashflow,
+        "longbridge_mcp": get_longbridge_mcp_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
+        "longbridge": get_longbridge_income_statement,
+        "longbridge_mcp": get_longbridge_mcp_income_statement,
     },
     # news_data
     "get_news": {

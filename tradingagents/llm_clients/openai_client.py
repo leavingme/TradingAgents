@@ -132,17 +132,34 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
 class MinimaxChatOpenAI(NormalizedChatOpenAI):
     """MiniMax-specific overrides on top of the OpenAI-compatible client.
 
-    M2.x reasoning models embed ``<think>...</think>`` blocks directly in
-    ``message.content`` by default, which would pollute saved reports.
-    Per platform.minimax.io/docs/api-reference/text-openai-api,
-    ``reasoning_split=True`` redirects the thinking block into
-    ``reasoning_details`` so ``content`` stays clean. It is sent via
-    ``extra_body`` (not a top-level kwarg) because the openai SDK validates
-    top-level params and rejects unknown ones like reasoning_split (#826).
+    Two provider-specific overrides live here:
 
-    The flag is gated by ``ModelCapabilities.requires_reasoning_split`` so
-    only M2.x reasoning models receive it; non-reasoning MiniMax endpoints
-    (Coding Plan, MiniMax-Text-01) never see it.
+    1. **``reasoning_split`` on outgoing requests.** Per
+       platform.minimax.io/docs/api-reference/text-openai-api, M2.x and M3
+       reasoning models embed ``...`` blocks in ``message.content`` by
+       default. Setting ``reasoning_split=True`` redirects the thinking block
+       into a separate ``reasoning_details`` array, so ``content`` stays
+       clean for downstream reporting. The flag is sent as a top-level body
+       key (the openai SDK >=2.x flattens ``extra_body`` kwargs into top-level
+       body keys before transmitting, so nest-in-extra_body and top-level
+       produce the same wire but going through extra_body keeps the langchain
+       converter clean and avoids any future top-level-param validator from
+       SDK upgrades).
+
+       Gated by ``ModelCapabilities.requires_reasoning_split`` so only M2.x
+       and M3 reasoning models receive it. Non-reasoning MiniMax endpoints
+       (Coding Plan, MiniMax-Text-01) never see it.
+
+    2. **Reasoning round-trip.** Per
+       platform.minimax.io/docs/guides/text-m3-function-call, the complete
+       assistant message including ``reasoning_details`` must be sent back
+       on the next turn — otherwise the model's interleaved-thinking chain
+       breaks and quality degrades on multi-round tool use. langchain-openai
+       (intentionally, by design — see the docstring on
+       ``ChatOpenAI`` in ``langchain_openai/chat_models/base.py``) does NOT
+       carry non-standard response fields across the round-trip; we mirror
+       what ``DeepSeekChatOpenAI`` does for ``reasoning_content`` and what
+       ``langchain-deepseek`` does in its standalone package.
 
     Tool-choice handling for M2.x — those models accept only the string
     enum ``{"none", "auto"}`` and reject langchain's function-spec dict —
@@ -150,13 +167,64 @@ class MinimaxChatOpenAI(NormalizedChatOpenAI):
     ``NormalizedChatOpenAI.with_structured_output``, not here.
     """
 
+    def _create_chat_result(self, response, generation_info=None):
+        # Receive side: capture ``reasoning_details`` (and the simpler
+        # ``reasoning_content`` mirror) from the OpenAI response onto each
+        # generation's AIMessage.additional_kwargs. Without this the langchain
+        # white-listed converter silently drops the field and the next turn
+        # cannot echo it back.
+        chat_result = super()._create_chat_result(response, generation_info)
+        response_dict = (
+            response
+            if isinstance(response, dict)
+            else response.model_dump(
+                exclude={"choices": {"__all__": {"message": {"parsed"}}}}
+            )
+        )
+        for generation, choice in zip(
+            chat_result.generations, response_dict.get("choices", []), strict=False
+        ):
+            message = choice.get("message", {})
+            # Interleaved-Thinking format: structured array of reasoning blocks.
+            rd = message.get("reasoning_details")
+            if rd is not None:
+                generation.message.additional_kwargs["reasoning_details"] = rd
+            # The MiniMax API also exposes a flat string mirror (``reasoning_content``)
+            # that M3+ uses for quick access without indexing into the array.
+            rc = message.get("reasoning_content")
+            if rc is not None:
+                generation.message.additional_kwargs["reasoning_content"] = rc
+        return chat_result
+
     def _get_request_payload(self, input_, *, stop=None, **kwargs):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        outgoing = payload.get("messages", [])
+
+        # Send side (reasoning round-trip): for each AIMessage in the outgoing
+        # messages list, re-attach reasoning_details / reasoning_content from
+        # additional_kwargs into the outgoing message dict so the MiniMax API
+        # sees the prior turn's thinking block and can continue the interleaved
+        # chain. This mirrors DeepSeekChatOpenAI's reasoning_content round-trip
+        # and langchain-deepseek's standalone handling.
+        for message_dict, message in zip(outgoing, _input_to_messages(input_), strict=False):
+            if not isinstance(message, AIMessage):
+                continue
+            rd = message.additional_kwargs.get("reasoning_details")
+            if rd is not None:
+                message_dict["reasoning_details"] = rd
+            rc = message.additional_kwargs.get("reasoning_content")
+            if rc is not None:
+                message_dict["reasoning_content"] = rc
+
         if get_capabilities(self.model_name).requires_reasoning_split:
             # Pass via extra_body, not as a top-level kwarg: the openai SDK
-            # (>=1.56) validates top-level params against Completions.create
-            # and rejects unknown ones like reasoning_split (#826). extra_body
-            # is forwarded into the request body untouched.
+            # forwards extra_body into the request body untouched. The openai
+            # SDK >=2.x flattens ``extra_body={...}`` kwargs into top-level
+            # request body keys before transmitting, but going through
+            # extra_body keeps langchain's converter clean of any future
+            # top-level-param validator. See the verification in
+            # ``/data/workspace/reasoning-validate/`` (probe 006/007) for the
+            # wire-level evidence that this produces the correct body.
             extra_body = payload.setdefault("extra_body", {})
             extra_body.setdefault("reasoning_split", True)
         return payload
@@ -300,8 +368,15 @@ class OpenAIClient(BaseLLMClient):
 
             # API key: required unless key_optional; keyless local servers get a
             # placeholder. The env-var name is the single source in api_key_env.
+            # Fallback chain: provider-specific env -> OPENAI_API_KEY (covers the
+            # common case of "user only configured OPENAI_API_KEY and is pointing
+            # at an OpenAI-compatible endpoint under a vendor-prefixed provider name").
             api_key_env = get_api_key_env(self.provider)
-            api_key = os.environ.get(api_key_env) if api_key_env else None
+            api_key = None
+            if api_key_env:
+                api_key = os.environ.get(api_key_env)
+            if not api_key:
+                api_key = os.environ.get("OPENAI_API_KEY")
             if api_key:
                 llm_kwargs["api_key"] = api_key
             elif spec.key_optional:
@@ -310,7 +385,8 @@ class OpenAIClient(BaseLLMClient):
                 raise ValueError(
                     f"API key for provider '{self.provider}' is not set. "
                     f"Please set the {api_key_env} environment variable "
-                    f"(e.g. add {api_key_env}=your_key to your .env file)."
+                    f"(e.g. add {api_key_env}=your_key to .env) or the generic "
+                    f"OPENAI_API_KEY fallback."
                 )
 
             # The Responses API only exists on native OpenAI; if the user points

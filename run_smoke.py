@@ -18,7 +18,7 @@ from tradingagents.dataflows.config import set_config
 
 # Build config: LLM via direct minimax (no :8642 gateway), Alpha Vantage + DuckDuckGo for data
 config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "custom"
+config["llm_provider"] = os.getenv("CUSTOM_LLM_PROVIDER", "minimax-cn")
 config["backend_url"] = os.getenv("OPENAI_API_BASE", "https://api.minimaxi.com/v1")
 config["deep_think_llm"] = os.getenv("DEEP_MODEL", os.getenv("CUSTOM_DEEP_MODEL", "MiniMax-M3"))
 config["quick_think_llm"] = os.getenv("QUICK_MODEL", os.getenv("CUSTOM_QUICK_MODEL", "MiniMax-M3"))

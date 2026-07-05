@@ -227,3 +227,4 @@ reports/
 .longbridge_mcp_token.json
 .longbridge_mcp_token.*.json
 eval_results/
+results/

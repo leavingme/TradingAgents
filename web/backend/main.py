@@ -29,6 +29,9 @@ async def get_config_defaults():
         "backend_url": fields["backend_url"].default,
         "output_language": fields["output_language"].default,
         "research_depth": fields["research_depth"].default or 1,
+        "google_thinking_level": fields["google_thinking_level"].default,
+        "openai_reasoning_effort": fields["openai_reasoning_effort"].default,
+        "anthropic_effort": fields["anthropic_effort"].default,
     }
 
 

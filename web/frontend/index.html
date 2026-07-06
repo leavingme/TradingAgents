@@ -16,7 +16,7 @@
     <!-- marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css?v=20260706-report-tabs" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260706-custom-ticker" />
   </head>
   <body>
     <!-- Ambient background orbs -->
@@ -85,7 +85,17 @@
                 <option value="9988.HK">9988.HK · Alibaba HK</option>
                 <option value="BTC-USD">BTC-USD · Bitcoin</option>
                 <option value="ETH-USD">ETH-USD · Ethereum</option>
+                <option value="__custom" data-i18n="tickerCustom">Custom ticker...</option>
               </select>
+              <input
+                id="customTicker"
+                name="customTicker"
+                type="text"
+                placeholder="e.g. SPY, 0700.HK, BTC-USD"
+                data-i18n-placeholder="tickerPlaceholder"
+                autocomplete="off"
+                hidden
+              />
             </label>
 
             <label class="form-field field-date">
@@ -232,6 +242,37 @@
                   autocomplete="off"
                 />
               </label>
+
+              <label class="form-field provider-option provider-google" hidden>
+                <span class="field-label" data-i18n="googleThinking">Gemini Thinking</span>
+                <select id="googleThinkingLevel" name="googleThinkingLevel">
+                  <option value="" data-i18n="providerDefault">Provider default</option>
+                  <option value="minimal">Minimal</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+
+              <label class="form-field provider-option provider-openai" hidden>
+                <span class="field-label" data-i18n="openaiReasoning">OpenAI Reasoning</span>
+                <select id="openaiReasoningEffort" name="openaiReasoningEffort">
+                  <option value="" data-i18n="providerDefault">Provider default</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+
+              <label class="form-field provider-option provider-anthropic" hidden>
+                <span class="field-label" data-i18n="anthropicEffort">Claude Effort</span>
+                <select id="anthropicEffort" name="anthropicEffort">
+                  <option value="" data-i18n="providerDefault">Provider default</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
             </div>
           </form>
         </section>
@@ -319,6 +360,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260706-report-tabs" type="module"></script>
+    <script src="/static/app.js?v=20260706-custom-ticker" type="module"></script>
   </body>
 </html>

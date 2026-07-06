@@ -261,7 +261,42 @@ After this works, refactor the existing TUI to consume the same runtime stream.
   - `list()` returns up to 100 runs from DB.
   - Past-run SSE replay reads from events table.
 - Done: Premium dark-mode frontend (glassmorphism, Inter font, marked.js, animated agent status dots).
+- Done: WebUI run flow now mirrors the CLI startup sequence for run-critical
+  configuration: ticker/date/asset, report language, analyst selection,
+  research depth, provider, backend URL, quick/deep models, and provider-specific
+  reasoning/thinking knobs.
+- Done: WebUI has a separate Settings page (`#settings`), URL-addressable run
+  history (`#run=<run_id>`), UI language separate from report language, live SSE
+  heartbeat/reconnect behavior, CLI-style Team / Agent / Status progress table,
+  live report-section rendering, and report-section switching.
 - Next: re-introduce `StatsCallbackHandler` support in the runtime layer (optional), add a `/api/runs/{run_id}/events/replay` batch endpoint for offline consumers, add basic auth / API key protection for the Web API.
+
+## CLI / WebUI Coverage Matrix (2026-07-06)
+
+| CLI capability | WebUI/API coverage |
+|---|---|
+| Step 1 ticker input with suffix support | Covered by Run page ticker selector plus `Custom ticker...` input for arbitrary symbols. |
+| Asset type detection/selection | Covered by explicit `Asset Type` selector (`stock`/`crypto`). |
+| Step 2 analysis date | Covered by Run page date picker. |
+| Step 3 report output language | Covered by Settings `Report Language`; separate `UI Language` only affects WebUI chrome. |
+| Step 4 analyst selection | Covered by Run page analyst toggles. |
+| Step 5 research depth | Covered by Settings `Analysis Depth` using CLI-equivalent choices: Shallow=1, Medium=3, Deep=5. |
+| Step 6 LLM provider / backend URL | Covered by Settings `LLM Provider` and optional `Backend URL`. |
+| Step 7 quick/deep thinking agents | Covered by Settings `Quick Model` and `Deep Model`, with provider presets. |
+| Step 8 provider-specific thinking/reasoning config | Covered by Settings provider-specific controls for Google, OpenAI, and Anthropic. |
+| Live Team / Agent / Status progress | Covered by Web Agent panel using CLI team grouping and animated `in_progress`. |
+| Message/tool stream | Covered by SSE Live Stream panel. |
+| Incremental report sections | Covered by live report viewer; report sections are switchable from the report selector. |
+| Final complete report | Covered by `/api/runs/{run_id}/report` and final report load button. |
+| Run cancellation | Covered by Cancel button and `run_cancelled` events. |
+| Run history / replay | Covered by SQLite-backed run history and `#run=<run_id>` deep links. |
+
+Known differences:
+
+- Web does not prompt for or persist provider API keys; it assumes environment
+  configuration is already present on the server.
+- CLI/TUI token/cost stats remain limited because `StatsCallbackHandler` is not
+  yet injectable through `run_analysis_stream()`.
 
 ## Hardening Update (2026-07-06)
 

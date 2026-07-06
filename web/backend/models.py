@@ -23,6 +23,9 @@ class RunCreateRequest(BaseModel):
     checkpoint_enabled: bool | None = None
     results_dir: str | None = None
     report_dir: str | None = None
+    google_thinking_level: str | None = None
+    openai_reasoning_effort: str | None = None
+    anthropic_effort: str | None = None
     config_overrides: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -25,6 +25,9 @@ def to_analysis_request(run_id: str, request: RunCreateRequest) -> AnalysisReque
         checkpoint_enabled=request.checkpoint_enabled,
         results_dir=request.results_dir,
         report_dir=request.report_dir,
+        google_thinking_level=request.google_thinking_level,
+        openai_reasoning_effort=request.openai_reasoning_effort,
+        anthropic_effort=request.anthropic_effort,
         run_id=run_id,
         config_overrides=request.config_overrides,
     )

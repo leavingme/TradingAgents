@@ -81,6 +81,9 @@ def test_run_create_request_passes_webui_config():
         research_depth=3,
         backend_url="https://example.invalid/v1",
         output_language="English",
+        google_thinking_level="high",
+        openai_reasoning_effort="medium",
+        anthropic_effort="low",
     )
     analysis_request = to_analysis_request("run-config", request)
 
@@ -90,6 +93,9 @@ def test_run_create_request_passes_webui_config():
     assert analysis_request.research_depth == 3
     assert analysis_request.backend_url == "https://example.invalid/v1"
     assert analysis_request.output_language == "English"
+    assert analysis_request.google_thinking_level == "high"
+    assert analysis_request.openai_reasoning_effort == "medium"
+    assert analysis_request.anthropic_effort == "low"
 
 
 def test_stream_run_events_replays_stored_events(monkeypatch):

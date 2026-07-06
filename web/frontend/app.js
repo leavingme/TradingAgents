@@ -12,6 +12,8 @@
 
 // ── DOM references ──────────────────────────────────────────────────────────
 const form          = document.querySelector('#runForm');
+const tickerSelect  = document.querySelector('#ticker');
+const customTicker  = document.querySelector('#customTicker');
 const runControls   = document.querySelector('#runControls');
 const runView       = document.querySelector('#runView');
 const settingsView  = document.querySelector('#settingsView');
@@ -40,6 +42,9 @@ const backendUrl    = document.querySelector('#backendUrl');
 const outputLanguage= document.querySelector('#outputLanguage');
 const researchDepth = document.querySelector('#researchDepth');
 const uiLanguage    = document.querySelector('#uiLanguage');
+const googleThinkingLevel = document.querySelector('#googleThinkingLevel');
+const openaiReasoningEffort = document.querySelector('#openaiReasoningEffort');
+const anthropicEffort = document.querySelector('#anthropicEffort');
 
 // ── State ───────────────────────────────────────────────────────────────────
 let currentRunId = null;
@@ -62,6 +67,8 @@ const translations = {
     statusReady: 'Ready',
     noRun: 'No run',
     ticker: 'Ticker',
+    tickerCustom: 'Custom ticker...',
+    tickerPlaceholder: 'e.g. SPY, 0700.HK, BTC-USD',
     analysisDate: 'Analysis Date',
     assetType: 'Asset Type',
     assetStock: 'Stock',
@@ -88,6 +95,9 @@ const translations = {
     deepModel: 'Deep Model',
     backendUrl: 'Backend URL',
     providerDefault: 'Provider default',
+    googleThinking: 'Gemini Thinking',
+    openaiReasoning: 'OpenAI Reasoning',
+    anthropicEffort: 'Claude Effort',
     agentTimeline: 'Agent Timeline',
     teamColumn: 'Team',
     agentColumn: 'Agent',
@@ -141,6 +151,8 @@ const translations = {
     statusReady: '就绪',
     noRun: '无运行',
     ticker: '标的',
+    tickerCustom: '自定义标的...',
+    tickerPlaceholder: '例如 SPY, 0700.HK, BTC-USD',
     analysisDate: '分析日期',
     assetType: '资产类型',
     assetStock: '股票',
@@ -167,6 +179,9 @@ const translations = {
     deepModel: '深度模型',
     backendUrl: '后端地址',
     providerDefault: '使用提供商默认值',
+    googleThinking: 'Gemini 思考模式',
+    openaiReasoning: 'OpenAI 推理强度',
+    anthropicEffort: 'Claude 强度',
     agentTimeline: 'Agent 时间线',
     teamColumn: '团队',
     agentColumn: 'Agent',
@@ -314,6 +329,8 @@ handleHashRoute();
 settingsForm.addEventListener('input', saveSettings);
 settingsForm.addEventListener('change', saveSettings);
 
+tickerSelect.addEventListener('change', updateTickerMode);
+
 uiLanguage.addEventListener('change', () => {
   saveUiLanguage(uiLanguage.value);
   initializeLocale();
@@ -334,9 +351,11 @@ resetSettings.addEventListener('click', () => {
 
 llmProvider.addEventListener('change', () => {
   const preset = modelPresets[llmProvider.value];
-  if (!preset) return;
-  quickThinkLlm.value = preset.quick;
-  deepThinkLlm.value = preset.deep;
+  if (preset) {
+    quickThinkLlm.value = preset.quick;
+    deepThinkLlm.value = preset.deep;
+  }
+  updateProviderOptions();
   saveSettings();
 });
 
@@ -424,6 +443,10 @@ function applyConfigDefaults(defaults) {
   setFieldValue(backendUrl, defaults.backend_url);
   setFieldValue(outputLanguage, defaults.output_language);
   setFieldValue(researchDepth, defaults.research_depth);
+  setFieldValue(googleThinkingLevel, defaults.google_thinking_level);
+  setFieldValue(openaiReasoningEffort, defaults.openai_reasoning_effort);
+  setFieldValue(anthropicEffort, defaults.anthropic_effort);
+  updateProviderOptions();
 }
 
 function setFieldValue(field, value) {
@@ -445,6 +468,10 @@ function applySavedSettings() {
   setFieldValue(backendUrl, saved.backend_url);
   setFieldValue(outputLanguage, saved.output_language);
   setFieldValue(researchDepth, saved.research_depth);
+  setFieldValue(googleThinkingLevel, saved.google_thinking_level);
+  setFieldValue(openaiReasoningEffort, saved.openai_reasoning_effort);
+  setFieldValue(anthropicEffort, saved.anthropic_effort);
+  updateProviderOptions();
 }
 
 function initializeLocale() {
@@ -564,7 +591,26 @@ function currentSettings() {
     deep_think_llm: deepThinkLlm.value.trim() || null,
     backend_url: backendUrl.value.trim() || null,
     output_language: outputLanguage.value,
+    google_thinking_level: googleThinkingLevel.value || null,
+    openai_reasoning_effort: openaiReasoningEffort.value || null,
+    anthropic_effort: anthropicEffort.value || null,
   };
+}
+
+function updateProviderOptions() {
+  const provider = llmProvider.value;
+  document.querySelectorAll('.provider-option').forEach(element => {
+    element.hidden = true;
+  });
+  const activeClass = {
+    google: '.provider-google',
+    openai: '.provider-openai',
+    anthropic: '.provider-anthropic',
+  }[provider];
+  if (!activeClass) return;
+  document.querySelectorAll(activeClass).forEach(element => {
+    element.hidden = false;
+  });
 }
 
 function saveSettings() {
@@ -629,12 +675,27 @@ function buildPayload(data) {
   const selectedAnalysts = data.getAll('analysts');
   const settings = currentSettings();
   return {
-    ticker: String(data.get('ticker')).trim().toUpperCase(),
+    ticker: selectedTicker(data),
     analysis_date: data.get('analysisDate'),
     asset_type: data.get('assetType'),
     selected_analysts: selectedAnalysts.length ? selectedAnalysts : ['market'],
     ...settings,
   };
+}
+
+function selectedTicker(data) {
+  const selected = String(data.get('ticker') || '').trim();
+  const raw = selected === '__custom'
+    ? String(data.get('customTicker') || '').trim()
+    : selected;
+  return raw.toUpperCase();
+}
+
+function updateTickerMode() {
+  const custom = tickerSelect.value === '__custom';
+  customTicker.hidden = !custom;
+  customTicker.required = custom;
+  if (custom) customTicker.focus();
 }
 
 /** Return a short, displayable run ID (last 8 chars). */

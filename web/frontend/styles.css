@@ -311,17 +311,16 @@ h1 {
 .field-symbol   { grid-column: span 2; }
 .field-date     { grid-column: span 2; }
 .field-asset    { grid-column: span 2; }
-.field-language { grid-column: span 2; }
-.field-depth    { grid-column: span 1; }
-.field-provider { grid-column: span 3; }
-.field-model    { grid-column: span 3; }
-.field-backend  { grid-column: span 3; }
 
 /* Form fields */
 .form-field {
   display: grid;
   gap: 6px;
   min-width: 0;
+}
+
+.form-field input[hidden] {
+  display: none;
 }
 
 .field-label {
@@ -481,6 +480,10 @@ select option {
   gap: 14px;
 }
 
+.provider-option[hidden] {
+  display: none;
+}
+
 .btn-primary {
   display: inline-flex;
   align-items: center;
@@ -577,7 +580,7 @@ select option {
 /* ── Dashboard grid ──────────────────────────────────────────── */
 .dashboard {
   display: grid;
-  grid-template-columns: minmax(230px, 0.75fr) minmax(340px, 1.2fr) minmax(360px, 1.5fr);
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.05fr) minmax(520px, 1.8fr);
   gap: 16px;
   padding-top: 16px;
   align-items: start;
@@ -1086,20 +1089,20 @@ h2, .panel-title {
   }
   .field-symbol,
   .field-date,
-  .field-asset,
-  .field-language,
-  .field-depth,
-  .field-provider,
-  .field-model,
-  .field-backend { grid-column: span 1; }
+  .field-asset { grid-column: span 1; }
   .analysts-fieldset { grid-column: 1 / -1; }
   .form-actions { grid-column: 1 / -1; }
 
   .dashboard {
-    grid-template-columns: minmax(220px, 0.8fr) 1fr;
+    grid-template-columns: minmax(280px, 0.9fr) minmax(460px, 1.4fr);
+  }
+  .stream-panel {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
   .report-panel {
-    grid-column: 1 / -1;
+    grid-column: 2;
+    grid-row: 1;
   }
 }
 
@@ -1114,15 +1117,15 @@ h2, .panel-title {
   }
   .field-symbol,
   .field-date,
-  .field-asset,
-  .field-language,
-  .field-depth,
-  .field-provider,
-  .field-model,
-  .field-backend { grid-column: span 1; }
+  .field-asset { grid-column: span 1; }
 
   .dashboard {
     grid-template-columns: 1fr;
+  }
+  .stream-panel,
+  .report-panel {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .event-log,
@@ -1138,10 +1141,5 @@ h2, .panel-title {
   .settings-grid { grid-template-columns: 1fr; }
   .field-symbol,
   .field-date,
-  .field-asset,
-  .field-language,
-  .field-depth,
-  .field-provider,
-  .field-model,
-  .field-backend { grid-column: 1 / -1; }
+  .field-asset { grid-column: 1 / -1; }
 }

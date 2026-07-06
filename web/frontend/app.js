@@ -30,6 +30,7 @@ const startButton   = document.querySelector('#startButton');
 const cancelButton  = document.querySelector('#cancelButton');
 const clearLog      = document.querySelector('#clearLog');
 const loadReport    = document.querySelector('#loadReport');
+const reportSectionSelect = document.querySelector('#reportSectionSelect');
 const refreshHistory= document.querySelector('#refreshHistory');
 const historyList   = document.querySelector('#historyList');
 const llmProvider   = document.querySelector('#llmProvider');
@@ -46,6 +47,8 @@ let source       = null;
 let eventCount   = 0;
 let currentStatus = 'ready';
 const agents     = new Map();
+const reportSections = new Map();
+let selectedReportSection = 'all';
 let configDefaults = null;
 const settingsStorageKey = 'tradingagents.web.settings';
 const uiLanguageStorageKey = 'tradingagents.web.uiLanguage';
@@ -98,6 +101,8 @@ const translations = {
     runHistory: 'Run History',
     liveStream: 'Live Stream',
     analysisReport: 'Analysis Report',
+    reportSection: 'Report section',
+    reportAll: 'All',
     refreshHistory: 'Refresh history',
     clearLog: 'Clear log',
     loadReport: 'Load report',
@@ -126,6 +131,7 @@ const translations = {
     eventRunCancelled: 'run cancelled',
     eventError: 'error',
     reportUpdated: 'updated',
+    liveReportTitle: 'Live Analysis Report',
   },
   zh: {
     pageTitle: 'TradingAgents — AI 市场情报',
@@ -174,6 +180,8 @@ const translations = {
     runHistory: '运行历史',
     liveStream: '实时流',
     analysisReport: '分析报告',
+    reportSection: '报告章节',
+    reportAll: '全部',
     refreshHistory: '刷新历史',
     clearLog: '清空日志',
     loadReport: '加载报告',
@@ -202,6 +210,7 @@ const translations = {
     eventRunCancelled: '运行取消',
     eventError: '错误',
     reportUpdated: '已更新',
+    liveReportTitle: '实时分析报告',
   },
 };
 const modelPresets = {
@@ -260,6 +269,34 @@ const agentTeams = [
     agents: ['Portfolio Manager'],
   },
 ];
+const reportSectionOrder = [
+  'market_report',
+  'sentiment_report',
+  'news_report',
+  'fundamentals_report',
+  'bull_researcher',
+  'bear_researcher',
+  'investment_plan',
+  'trader_investment_plan',
+  'aggressive_analyst',
+  'conservative_analyst',
+  'neutral_analyst',
+  'final_trade_decision',
+];
+const reportSectionTitles = {
+  market_report: 'Market Analyst',
+  sentiment_report: 'Sentiment Analyst',
+  news_report: 'News Analyst',
+  fundamentals_report: 'Fundamentals Analyst',
+  bull_researcher: 'Bull Researcher',
+  bear_researcher: 'Bear Researcher',
+  investment_plan: 'Research Team Decision',
+  trader_investment_plan: 'Trader',
+  aggressive_analyst: 'Aggressive Analyst',
+  conservative_analyst: 'Conservative Analyst',
+  neutral_analyst: 'Neutral Analyst',
+  final_trade_decision: 'Portfolio Manager',
+};
 
 // ── Initialise date field ────────────────────────────────────────────────────
 document.querySelector('#analysisDate').value = new Date().toISOString().slice(0, 10);
@@ -355,6 +392,11 @@ refreshHistory.addEventListener('click', refreshRunHistory);
 loadReport.addEventListener('click', async () => {
   if (!currentRunId) return;
   await loadRunReport(currentRunId);
+});
+
+reportSectionSelect.addEventListener('change', () => {
+  selectedReportSection = reportSectionSelect.value;
+  renderLiveReport();
 });
 
 // Load run history on startup
@@ -460,6 +502,8 @@ function applyTranslations() {
 function renderDynamicLabels() {
   updateEventCount();
   updateAgentList();
+  updateReportSectionOptions();
+  if (reportSections.size) renderLiveReport();
   refreshRunHistory();
 }
 
@@ -605,8 +649,11 @@ function resetRun() {
   currentRunId = null;
   eventCount   = 0;
   agents.clear();
+  reportSections.clear();
+  selectedReportSection = 'all';
   eventLog.replaceChildren();
   agentList.replaceChildren();
+  updateReportSectionOptions();
   showReportPlaceholder();
   runIdEl.textContent       = t('noRun');
   updateEventCount();
@@ -650,6 +697,10 @@ function handleRuntimeEvent(type, event) {
 
   if (type === 'agent_status' && event.agent) {
     updateAgent(event.agent, event.content?.status ?? 'pending');
+  }
+
+  if (type === 'report_section') {
+    updateReportSection(event.content);
   }
 
   if (type === 'run_completed') {
@@ -802,6 +853,9 @@ async function selectHistoryRun(runId, options = {}) {
   setStatus(run.status, statusClass(run.status));
   eventCount     = 0;
   updateEventCount();
+  reportSections.clear();
+  selectedReportSection = 'all';
+  updateReportSectionOptions();
   loadReport.disabled      = !run.report_path;
   cancelButton.disabled    = !['pending', 'running'].includes(run.status);
   eventLog.replaceChildren();
@@ -852,6 +906,67 @@ function eventText(type, content) {
 }
 
 // ── Report viewer ─────────────────────────────────────────────────────────────
+function updateReportSection(content) {
+  if (!content || typeof content !== 'object') return;
+  const section = content.section;
+  const text = content.text;
+  if (!section || !text) return;
+  reportSections.set(section, text);
+  selectedReportSection = section;
+  updateReportSectionOptions();
+  renderLiveReport();
+}
+
+function renderLiveReport() {
+  const sections = orderedReportSections();
+  if (!sections.length) {
+    showReportPlaceholder();
+    return;
+  }
+
+  const selectedSections = selectedReportSection === 'all'
+    ? sections
+    : sections.filter(([section]) => section === selectedReportSection);
+  const markdown = selectedReportSection === 'all'
+    ? [
+        `# ${t('liveReportTitle')}`,
+        ...selectedSections.map(([section, text]) => `\n\n## ${reportSectionTitle(section)}\n\n${text}`),
+      ].join('')
+    : selectedSections.map(([section, text]) => `# ${reportSectionTitle(section)}\n\n${text}`).join('');
+  renderMarkdown(markdown);
+}
+
+function updateReportSectionOptions() {
+  const current = selectedReportSection;
+  const options = [
+    optionElement('all', t('reportAll')),
+    ...orderedReportSections().map(([section]) => optionElement(section, reportSectionTitle(section))),
+  ];
+  reportSectionSelect.replaceChildren(...options);
+  reportSectionSelect.disabled = reportSections.size === 0;
+  reportSectionSelect.value = reportSections.has(current) || current === 'all' ? current : 'all';
+}
+
+function optionElement(value, label) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+function orderedReportSections() {
+  const ordered = reportSectionOrder
+    .filter(section => reportSections.has(section))
+    .map(section => [section, reportSections.get(section)]);
+  const known = new Set(reportSectionOrder);
+  const extra = Array.from(reportSections.entries()).filter(([section]) => !known.has(section));
+  return ordered.concat(extra);
+}
+
+function reportSectionTitle(section) {
+  return reportSectionTitles[section] || formatAgentName(section);
+}
+
 async function loadRunReport(runId) {
   if (!runId) return;
   const response = await fetch(`/api/runs/${runId}/report`);
@@ -861,7 +976,10 @@ async function loadRunReport(runId) {
     return;
   }
   const text = await response.text();
+  renderMarkdown(text);
+}
 
+function renderMarkdown(text) {
   // Render Markdown if marked.js is available, otherwise fall back to pre-text
   if (typeof marked !== 'undefined') {
     reportViewer.innerHTML = marked.parse(text);

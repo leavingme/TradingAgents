@@ -921,6 +921,21 @@ h2, .panel-title {
 }
 
 /* ── Report viewer ───────────────────────────────────────────── */
+.report-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.report-section-select {
+  width: min(220px, 36vw);
+  min-height: 32px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  font-size: 12px;
+}
+
 .report-viewer {
   flex: 1;
   padding: 18px 20px;

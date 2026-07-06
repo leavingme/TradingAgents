@@ -1,5 +1,9 @@
 import datetime
+import json
 import os
+import subprocess
+import sys
+import threading
 import time
 from collections import deque
 from functools import wraps
@@ -10,13 +14,19 @@ from rich import box
 from rich.align import Align
 from rich.console import Console
 from rich.layout import Layout
-from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
+
+try:
+    import termios
+    import tty
+except ImportError:  # pragma: no cover - Windows fallback
+    termios = None
+    tty = None
 
 from cli.announcements import display_announcements, fetch_announcements
 from cli.stats_handler import StatsCallbackHandler
@@ -272,6 +282,203 @@ def format_tokens(n):
     return str(n)
 
 
+class NodeDashboardRenderer:
+    """Runs the analysis dashboard in a Node subprocess over NDJSON."""
+
+    def __init__(self, stats_handler=None, start_time=None, capture_output=True):
+        self.stats_handler = stats_handler
+        self.start_time = start_time
+        self.capture_output = capture_output
+        self.process = None
+        self._enabled = sys.stdout.isatty()
+        self.spinner_text = None
+        self._stdin_fd = None
+        self._stdin_attrs = None
+        self._capture_fds = {}
+        self._capture_threads = []
+        self._capture_lock = threading.Lock()
+
+    def __enter__(self):
+        script = Path(__file__).parent / "tui" / "node-dashboard" / "dashboard.mjs"
+        if self._enabled and script.exists():
+            try:
+                self._enter_tty_mode()
+                self.process = subprocess.Popen(
+                    ["node", str(script)],
+                    stdin=subprocess.PIPE,
+                    stdout=None,
+                    stderr=None,
+                    text=True,
+                    bufsize=1,
+                )
+                if self.capture_output:
+                    self._begin_output_capture()
+            except OSError:
+                self.process = None
+        self.refresh()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._send({"type": "exit"})
+        if self.process and self.process.stdin:
+            self.process.stdin.close()
+        if self.process:
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=2)
+        self._end_output_capture()
+        self._exit_tty_mode()
+
+    def _begin_output_capture(self):
+        """Capture parent stdout/stderr so logs don't corrupt the TUI frame."""
+        if self._capture_fds:
+            return
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+            except OSError:
+                pass
+        for fd, label in ((1, "stdout"), (2, "stderr")):
+            read_fd, write_fd = os.pipe()
+            saved_fd = os.dup(fd)
+            os.dup2(write_fd, fd)
+            os.close(write_fd)
+            self._capture_fds[fd] = (saved_fd, read_fd)
+            thread = threading.Thread(
+                target=self._read_captured_output,
+                args=(read_fd, label),
+                daemon=True,
+            )
+            thread.start()
+            self._capture_threads.append(thread)
+
+    def _end_output_capture(self):
+        if not self._capture_fds:
+            return
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+            except OSError:
+                pass
+        for fd, (saved_fd, _read_fd) in list(self._capture_fds.items()):
+            os.dup2(saved_fd, fd)
+            os.close(saved_fd)
+        for thread in self._capture_threads:
+            thread.join(timeout=0.2)
+        self._capture_fds.clear()
+        self._capture_threads.clear()
+
+    def _read_captured_output(self, read_fd, label):
+        try:
+            with os.fdopen(read_fd, "r", encoding="utf-8", errors="replace") as pipe:
+                for line in pipe:
+                    text = line.strip()
+                    if not text:
+                        continue
+                    with self._capture_lock:
+                        message_buffer.add_message("Log", text)
+                        self.refresh()
+        except OSError:
+            return
+
+    def _enter_tty_mode(self):
+        if termios is None or tty is None or not sys.stdin.isatty():
+            return
+        self._stdin_fd = sys.stdin.fileno()
+        self._stdin_attrs = termios.tcgetattr(self._stdin_fd)
+        tty.setcbreak(self._stdin_fd)
+        attrs = termios.tcgetattr(self._stdin_fd)
+        attrs[3] = attrs[3] & ~termios.ECHO
+        termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, attrs)
+
+    def _exit_tty_mode(self):
+        if termios is None or self._stdin_fd is None or self._stdin_attrs is None:
+            return
+        try:
+            termios.tcflush(self._stdin_fd, termios.TCIFLUSH)
+        finally:
+            termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._stdin_attrs)
+            self._stdin_fd = None
+            self._stdin_attrs = None
+
+    def set_spinner_text(self, text):
+        self.spinner_text = text
+        self.refresh()
+
+    def refresh(self):
+        self._send({"type": "state", "state": self._snapshot()})
+
+    def _send(self, event):
+        if not self.process or not self.process.stdin or self.process.poll() is not None:
+            return
+        try:
+            self.process.stdin.write(json.dumps(event, ensure_ascii=False) + "\n")
+            self.process.stdin.flush()
+        except (BrokenPipeError, OSError):
+            self.process = None
+
+    def _snapshot(self):
+        stats = self.stats_handler.get_stats() if self.stats_handler else None
+        all_messages = []
+        for timestamp, tool_name, args in message_buffer.tool_calls:
+            all_messages.append(
+                {"time": timestamp, "type": "Tool", "content": f"{tool_name}: {format_tool_args(args)}"}
+            )
+        for timestamp, msg_type, content in message_buffer.messages:
+            all_messages.append(
+                {
+                    "time": timestamp,
+                    "type": msg_type,
+                    "content": str(content).replace("\n", " ") if content else "",
+                }
+            )
+        all_messages.sort(key=lambda item: item["time"], reverse=True)
+
+        return {
+            "spinnerText": self.spinner_text,
+            "startTime": self.start_time,
+            "agentStatus": message_buffer.agent_status,
+            "messages": all_messages[:24],
+            "currentReport": message_buffer.current_report,
+            "stats": stats,
+            "reportsCompleted": message_buffer.get_completed_reports_count(),
+            "reportsTotal": len(message_buffer.report_sections),
+        }
+
+
+def display_report_with_node_tui(report_file: Path) -> bool:
+    """Display a saved markdown report in the Node TUI viewer."""
+    if not sys.stdout.isatty():
+        return False
+    report_file = Path(report_file)
+    script = Path(__file__).parent / "tui" / "node-dashboard" / "dashboard.mjs"
+    if not script.exists() or not report_file.exists():
+        return False
+
+    with NodeDashboardRenderer(capture_output=False) as renderer:
+        if not renderer.process:
+            return False
+        try:
+            renderer._send(
+                {
+                    "type": "viewer",
+                    "title": f"Complete Report - {report_file.parent.name}",
+                    "content": report_file.read_text(encoding="utf-8"),
+                }
+            )
+            if renderer.process:
+                renderer.process.wait()
+            return True
+        finally:
+            renderer.process = None
+
+
 def update_display(layout, spinner_text=None, stats_handler=None, start_time=None):
     # Header with welcome message
     layout["header"].update(
@@ -325,10 +532,9 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         first_agent = agents[0]
         status = message_buffer.agent_status.get(first_agent, "pending")
         if status == "in_progress":
-            spinner = Spinner(
+            status_cell = Spinner(
                 "dots", text="[blue]in_progress[/blue]", style="bold cyan"
             )
-            status_cell = spinner
         else:
             status_color = {
                 "pending": "yellow",
@@ -342,10 +548,9 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         for agent in agents[1:]:
             status = message_buffer.agent_status.get(agent, "pending")
             if status == "in_progress":
-                spinner = Spinner(
+                status_cell = Spinner(
                     "dots", text="[blue]in_progress[/blue]", style="bold cyan"
                 )
-                status_cell = spinner
             else:
                 status_color = {
                     "pending": "yellow",
@@ -1065,12 +1270,20 @@ def run_analysis(checkpoint: bool | None = None):
     message_buffer.add_tool_call = save_tool_call_decorator(message_buffer, "add_tool_call")
     message_buffer.update_report_section = save_report_section_decorator(message_buffer, "update_report_section")
 
-    # Now start the display layout
-    layout = create_layout()
+    # Now start the analysis display in a Node subprocess. Python sends NDJSON
+    # state updates; Node owns animation and terminal diff rendering.
+    with NodeDashboardRenderer(
+        stats_handler=stats_handler,
+        start_time=start_time,
+    ) as renderer:
+        def refresh_display(spinner_text=None):
+            if spinner_text is not None:
+                renderer.set_spinner_text(spinner_text)
+            else:
+                renderer.refresh()
 
-    with Live(layout, refresh_per_second=4):
         # Initial display
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        refresh_display()
 
         # Add initial messages
         message_buffer.add_message("System", f"Selected ticker: {selections['ticker']}")
@@ -1083,19 +1296,19 @@ def run_analysis(checkpoint: bool | None = None):
             "System",
             f"Selected analysts: {', '.join(analyst.value for analyst in selections['analysts'])}",
         )
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        refresh_display()
 
         # Update agent status to in_progress for the first analyst
         first_analyst = get_initial_analyst_node(analyst_execution_plan)
         message_buffer.update_agent_status(first_analyst, "in_progress")
         analyst_wall_time_tracker.mark_started(selected_analyst_keys[0])
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        refresh_display()
 
         # Create spinner text
         spinner_text = (
             f"Analyzing {selections['ticker']} on {selections['analysis_date']}..."
         )
-        update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
+        refresh_display(spinner_text)
 
         # Initialize state and get graph args with callbacks.
         # Resolve the instrument identity once here so all agents anchor to
@@ -1214,7 +1427,7 @@ def run_analysis(checkpoint: bool | None = None):
                     message_buffer.update_agent_status("Portfolio Manager", "completed")
 
             # Update the display
-            update_display(layout, stats_handler=stats_handler, start_time=start_time)
+            refresh_display()
 
             trace.append(chunk)
 
@@ -1238,33 +1451,29 @@ def run_analysis(checkpoint: bool | None = None):
             if section in final_state:
                 message_buffer.update_report_section(section, final_state[section])
 
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        refresh_display()
 
     # Post-analysis prompts (outside Live context for clean interaction)
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
     console.print(f"[dim]{analyst_wall_time_tracker.format_summary()}[/dim]")
 
-    # Prompt to save report
-    save_choice = typer.prompt("Save report?", default="Y").strip().upper()
-    if save_choice in ("Y", "YES", ""):
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_path = Path.cwd() / "reports" / f"{selections['ticker']}_{timestamp}"
-        save_path_str = typer.prompt(
-            "Save path (press Enter for default)",
-            default=str(default_path)
-        ).strip()
-        save_path = Path(save_path_str)
-        try:
-            report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
-            console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
-            console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
-        except Exception as e:
-            console.print(f"[red]Error saving report: {e}[/red]")
+    # Save the complete report tree automatically using the original report path format.
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_path = Path.cwd() / "reports" / f"{selections['ticker']}_{timestamp}"
+    try:
+        report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
+        console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
+        console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
+    except Exception as e:
+        console.print(f"[red]Error saving report: {e}[/red]")
 
     # Prompt to display full report
     display_choice = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper()
     if display_choice in ("Y", "YES", ""):
-        display_complete_report(final_state)
+        if "report_file" in locals() and report_file and display_report_with_node_tui(report_file):
+            console.print(f"\n[dim]Report viewer closed. Saved report: {report_file}[/dim]")
+        else:
+            display_complete_report(final_state)
 
 
 @app.command()

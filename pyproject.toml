@@ -52,7 +52,7 @@ tradingagents = "tradingagents._cli_entry:app"
 include = ["tradingagents*", "cli*"]
 
 [tool.setuptools.package-data]
-cli = ["static/*"]
+cli = ["static/*", "tui/node-dashboard/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

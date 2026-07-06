@@ -1,93 +1,89 @@
-# AGENTS.md — TradingAgents Fork (TauricResearch/TradingAgents v0.3.0)
+# AGENTS.md — TradingAgents Fork（TauricResearch/TradingAgents v0.3.0）
 
-This file documents the day-to-day operational conventions for working with
-this fork. It's the project-scoped equivalent of the Hermes workspace
-AGENTS.md — read it before doing anything non-trivial.
+本文档记录这个 fork 的日常操作约定。它相当于 Hermes 工作区
+AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 
-## Repository
+## 仓库
 
-- **Upstream**: `https://github.com/TauricResearch/TradingAgents` (`tauric` remote)
-- **Fork**: `https://github.com/leavingme/TradingAgents` (`myfork` remote, push target)
-- **Mirror**: `https://github.com/leavingme/TradingAgents` (`origin` remote, fetch only)
-- **Workspace root**: `/data/workspace/TradingAgents`
-- **Branch**: `main`
-- **Version**: v0.3.0 (`85946c2 chore: release v0.3.0`) + 8 fork-local commits
+- **上游**：`https://github.com/TauricResearch/TradingAgents`（`tauric` remote）
+- **Fork**：`https://github.com/leavingme/TradingAgents`（`myfork` remote，推送目标）
+- **镜像**：`https://github.com/leavingme/TradingAgents`（`origin` remote，仅 fetch）
+- **工作区根目录**：`/data/workspace/TradingAgents`
+- **分支**：`main`
+- **版本**：v0.3.0（`85946c2 chore: release v0.3.0`）+ 8 个 fork 本地提交
 
-## Environment
+## 环境
 
-### Python & venv
+### Python 和 venv
 
-- **Python**: 3.12.3 (system binary at `/usr/bin/python3.12`)
-- **venv path**: `/data/workspace/TradingAgents/venv`
-- **Do NOT use `pip install -e .`** — the workspace has special handling.
-  See the **venv pitfalls** section below before running any pip command.
+- **Python**：3.12.3（系统二进制位于 `/usr/bin/python3.12`）
+- **venv 路径**：`/data/workspace/TradingAgents/venv`
+- **不要使用 `pip install -e .`** — 这个工作区有特殊处理。
+  运行任何 pip 命令前，先阅读下面的 **venv 陷阱**。
 
-### Console entry points
+### 控制台入口
 
-- `venv/bin/tradingagents` — Typer CLI (interactive questionary menu)
-- `python -m cli.main` — alternative
-- `run_smoke.py` — non-interactive smoke runner (preferred for batch/automation)
-- `venv/bin/uvicorn web.backend.main:app --host 127.0.0.1 --port 8765` — minimal FastAPI Web API dev server
-- After `pip install -e .`, the entry point is auto-regenerated from
-  `pyproject.toml`'s `[project.scripts]` → currently points at
-  `tradingagents._cli_entry:app` (not `cli.main:app` directly — see the
-  PYTHONPATH section).
+- `venv/bin/tradingagents` — Typer CLI（交互式 questionary 菜单）
+- `python -m cli.main` — 替代入口
+- `run_smoke.py` — 非交互 smoke runner（批处理/自动化优先使用）
+- `venv/bin/uvicorn web.backend.main:app --host 127.0.0.1 --port 8765` — 最小 FastAPI Web API 开发服务
+- 执行 `pip install -e .` 后，入口脚本会根据 `pyproject.toml` 的
+  `[project.scripts]` 自动重新生成；当前指向
+  `tradingagents._cli_entry:app`（不是直接指向 `cli.main:app` —
+  详见 PYTHONPATH 部分）。
 
-### WebUI conventions
+### WebUI 约定
 
-- The WebUI should mirror the CLI startup flow without overcrowding the main
-  run screen. Keep the Run page focused on ticker/date/asset/analyst selection
-  and start/cancel controls.
-- Runtime configuration lives on the Settings page (`#settings`): UI language,
-  report output language, research depth, LLM provider, quick/deep models, and
-  optional backend URL.
-- UI language and report language are separate. UI language only localizes the
-  WebUI; report language is sent to the analysis runtime as `output_language`.
-- Research depth must use the same three user-facing choices as the CLI:
-  `Shallow` → `1`, `Medium` → `3`, `Deep` → `5`.
-- Agent progress should follow the CLI Team / Agent / Status table grouping:
-  Analyst Team, Research Team, Trading Team, Risk Management, and Portfolio
-  Management. `in_progress` needs a visible animated state.
-- Historical run selection owns the URL hash. Use `#run=<run_id>` for a selected
-  run and `#settings` for the Settings page so refresh/deep-linking restores the
-  same view.
-- Static frontend asset URLs are versioned with query strings after UI changes
-  to avoid stale browser cache during local development.
-- SSE streams should push queued events immediately and keep long-running
-  analyses alive with heartbeat comments. The browser should allow EventSource
-  to reconnect instead of closing the stream on the first `onerror`.
+- WebUI 应该镜像 CLI 的启动分析流程，但不要把主运行页塞满。Run 页面只保留
+  ticker/date/asset/analyst 选择和 start/cancel 控件。
+- 运行配置放在 Settings 页面（`#settings`）：UI language、report output
+  language、research depth、LLM provider、quick/deep models，以及可选
+  backend URL。
+- UI language 和 report language 是两件事。UI language 只本地化 WebUI；
+  report language 会作为 `output_language` 传给分析运行时。
+- Research depth 必须使用和 CLI 一致的三档用户可见选项：
+  `Shallow` → `1`，`Medium` → `3`，`Deep` → `5`。
+- Agent 进度应遵循 CLI 的 Team / Agent / Status 表格分组：
+  Analyst Team、Research Team、Trading Team、Risk Management 和
+  Portfolio Management。`in_progress` 必须有明显的动画状态。
+- 历史 run 选择由 URL hash 表达。选中的 run 使用 `#run=<run_id>`，
+  Settings 页面使用 `#settings`，这样刷新或深链接能恢复同一个视图。
+- 前端静态资源 URL 在 UI 改动后要带 query string 版本号，避免本地开发时
+  浏览器缓存旧 CSS/JS。
+- SSE stream 应该立即推送队列事件，并用 heartbeat comment 保持长时间运行
+  的分析连接。浏览器端应允许 EventSource 自动重连，不要在第一次 `onerror`
+  时关闭 stream。
 
-### Critical env vars
+### 关键环境变量
 
 | Variable | Purpose | Where set |
 |---|---|---|
-| `OPENAI_API_KEY` | LLM (also serves as fallback for all vendors including `minimax-cn`) | `~/.zshrc` export |
+| `OPENAI_API_KEY` | LLM（也作为所有 vendor 的 fallback，包括 `minimax-cn`） | `~/.zshrc` export |
 | `OPENAI_BASE_URL` | LLM endpoint | `~/.zshrc` export |
-| `MINIMAX_CN_API_KEY` | minimax (China region) | `~/.zshrc` export |
-| `MINIMAX_API_KEY` | minimax (Global) | `~/.zshrc` export |
-| `.longbridge_mcp_token.json` | Longbridge API token (data vendor) | `tradingagents/.longbridge_mcp_token.json` (gitignored) |
-| `data_vendors.core_stock_apis` | Default `"longbridge_mcp, longbridge"` (Yahoo Finance fallback only) | `default_config.py` |
-| `llm_provider` | Default `"minimax-cn"` | `default_config.py` |
-| `quick_think_llm` / `deep_think_llm` | Default both `"MiniMax-M3"` | `default_config.py` |
+| `MINIMAX_CN_API_KEY` | minimax（中国区） | `~/.zshrc` export |
+| `MINIMAX_API_KEY` | minimax（Global） | `~/.zshrc` export |
+| `.longbridge_mcp_token.json` | Longbridge API token（数据 vendor） | `tradingagents/.longbridge_mcp_token.json`（gitignored） |
+| `data_vendors.core_stock_apis` | 默认 `"longbridge_mcp, longbridge"`（Yahoo Finance 仅作 fallback） | `default_config.py` |
+| `llm_provider` | 默认 `"minimax-cn"` | `default_config.py` |
+| `quick_think_llm` / `deep_think_llm` | 默认都是 `"MiniMax-M3"` | `default_config.py` |
 
-## venv pitfalls (read before touching pip)
+## venv 陷阱（碰 pip 前先读）
 
-### Shebang drift (FIXED 2026-07-05)
+### Shebang 漂移（2026-07-05 已修复）
 
-The venv was relocated from `/home/ubuntu/.openclaw/workspace/TradingAgents/`
-during the 2026-04-01 workspace migration. After relocation, all
-`venv/bin/pip*` shebangs hard-coded the old `.openclaw` path, breaking
-direct invocation of `pip`. **Fix applied 2026-07-05**: venv was rebuilt
-from scratch with `/usr/bin/python3.12 -m venv`. All wrappers now have
-correct shebangs and invoke without `python -m` indirection.
+venv 在 2026-04-01 工作区迁移时，从
+`/home/ubuntu/.openclaw/workspace/TradingAgents/` 被搬到当前路径。迁移后，
+所有 `venv/bin/pip*` 的 shebang 都硬编码了旧 `.openclaw` 路径，导致直接
+调用 `pip` 失败。**2026-07-05 已修复**：用
+`/usr/bin/python3.12 -m venv` 从头重建了 venv。所有 wrapper 现在都有正确的
+shebang，不需要通过 `python -m` 间接调用。
 
-If the venv ever drifts again (e.g. moved to a new host), recreate it
-rather than try to repair shebangs.
+如果 venv 以后再次漂移（例如搬到新主机），重建 venv，不要尝试手工修复
+shebang。
 
 ### Vendor fallback chain
 
-`data_vendors` is a **router-level fallback chain**, not a single vendor.
-The order is significant:
+`data_vendors` 是**路由层 fallback 链**，不是单个 vendor。顺序很重要：
 
 ```
 core_stock_apis    : "longbridge_mcp, longbridge"        # then yfinance fallback
@@ -96,15 +92,14 @@ fundamental_data   : "longbridge_mcp, longbridge"
 news_data          : "web_search, duckduckgo, alpha_vantage, yfinance"
 ```
 
-`route_to_vendor()` MUST catch vendor-specific exceptions
-(`MCPAuthError`, `LongbridgeCLIError`, `AlphaVantageRateLimitError`) and
-silently fall through to the next entry. Vendor impls that fail to load
-(return `None`) must also be skipped — never raise. Hard rule.
+`route_to_vendor()` 必须捕获 vendor-specific 异常
+（`MCPAuthError`、`LongbridgeCLIError`、`AlphaVantageRateLimitError`），
+并静默进入链上的下一个 vendor。加载失败并返回 `None` 的 vendor impl 也必须
+跳过，绝不能 raise。这是硬规则。
 
-### Vendor method signatures (graph calls these)
+### Vendor 方法签名（graph 会按这些调用）
 
-When adding a new vendor, it MUST match these signatures exactly or the
-graph will throw `TypeError`:
+新增 vendor 时，必须严格匹配以下签名，否则 graph 会抛 `TypeError`：
 
 ```
 get_stock_data(symbol, start_date, end_date)
@@ -115,115 +110,107 @@ get_balance_sheet(symbol, freq=None, curr_date=None)
 get_cashflow(symbol, freq=None, curr_date=None)
 ```
 
-**Retired vendors**: keep `<name>_legacy.py.bak` files. Never delete a
-vendor fully from `VENDOR_METHODS` — when a vendor-specific bug appears,
-you'll need the old impl to compare against.
+**已退休 vendor**：保留 `<name>_legacy.py.bak` 文件。不要把某个 vendor 从
+`VENDOR_METHODS` 里彻底删除；当 vendor-specific bug 出现时，需要旧实现作对比。
 
-## The `_cli_entry.py` shim (read this before debugging CLI failures)
+## `_cli_entry.py` shim（调试 CLI 失败前先读）
 
-`venv/bin/tradingagents` (the console script) imports from
-`tradingagents._cli_entry`, which **modifies `sys.path` before any
-`from cli.main import app`**. This is NOT optional decoration — without
-it, the CLI silently fails.
+`venv/bin/tradingagents`（console script）从 `tradingagents._cli_entry`
+导入；它会在执行任何 `from cli.main import app` 之前修改 `sys.path`。这不是
+可有可无的装饰 — 没有它，CLI 会静默失败。
 
-### Why
+### 原因
 
-The Hermes sandbox sets `PYTHONPATH=/tmp/hermes_sandbox_xxx:/data/hermes/hermes-agent`
-when launching subprocesses. `/data/hermes/hermes-agent/` contains a
-`cli.py` single-file module (a Hermes internal CLI), which makes Python
-resolve `cli` as a *module* (not a *package*) — `from cli.main import app`
-then fails with `ModuleNotFoundError: No module named 'cli.main'; 'cli' is not a package`.
+Hermes sandbox 启动子进程时会设置
+`PYTHONPATH=/tmp/hermes_sandbox_xxx:/data/hermes/hermes-agent`。
+`/data/hermes/hermes-agent/` 中有一个 Hermes 内部的单文件 `cli.py` 模块，
+这会让 Python 把 `cli` 解析成一个*模块*（不是*包*）。随后
+`from cli.main import app` 会失败：
+`ModuleNotFoundError: No module named 'cli.main'; 'cli' is not a package`。
 
-### What the shim does
+### shim 做了什么
 
-1. Removes `/data/hermes/hermes-agent` from `sys.path` (just the path
-   entry string, NOT the directory or its files)
-2. Then `from cli.main import app` resolves to TradingAgents' `cli/`
-   package via the editable finder
+1. 从 `sys.path` 中移除 `/data/hermes/hermes-agent`（只移除路径字符串，
+   不动目录或目录里的文件）
+2. 之后 `from cli.main import app` 会通过 editable finder 解析到
+   TradingAgents 自己的 `cli/` 包
 
-### What the shim does NOT do
+### shim 不做什么
 
-- It does not modify any files on disk
-- It does not affect other Python processes
-- It does not affect the system Python or any other venv
+- 不修改磁盘上的任何文件
+- 不影响其他 Python 进程
+- 不影响系统 Python 或其他 venv
 
-### Diagnosis order when CLI breaks
+### CLI 出问题时的诊断顺序
 
-If `tradingagents --help` fails, check in this order:
+如果 `tradingagents --help` 失败，按下面顺序检查：
 
-1. `echo $PYTHONPATH` — should NOT contain `/data/hermes/hermes-agent`
-   when running from a clean shell
-2. `head -1 venv/bin/tradingagents` — should be
+1. `echo $PYTHONPATH` — 从干净 shell 运行时，不应包含 `/data/hermes/hermes-agent`
+2. `head -1 venv/bin/tradingagents` — 应该是
    `#!/data/workspace/TradingAgents/venv/bin/python3.12`
-3. `cat venv/bin/tradingagents` — should import from `tradingagents._cli_entry`,
-   not `cli.main`
-4. `git status` — make sure `tradingagents/_cli_entry.py` and the
-   `pyproject.toml` entry-point change are committed and present
+3. `cat venv/bin/tradingagents` — 应该从 `tradingagents._cli_entry` 导入，
+   而不是从 `cli.main` 导入
+4. `git status` — 确认 `tradingagents/_cli_entry.py` 和 `pyproject.toml`
+   的 entry-point 改动已经提交并存在
 5. `venv/bin/python3.12 -c "import tradingagents; print(tradingagents.__file__)"`
-   — should print `/data/workspace/TradingAgents/tradingagents/__init__.py`
+   — 应该输出 `/data/workspace/TradingAgents/tradingagents/__init__.py`
 
-**The shim is THE fix for the PYTHONPATH conflict.** Do not try to fix
-this by editing pip config, upgrading pip again, or removing the `.pth`
-files — those were all red herrings during the original diagnosis.
+**shim 是 PYTHONPATH 冲突的真正修复。** 不要通过编辑 pip config、再次升级
+pip 或删除 `.pth` 文件来解决；这些都是当初诊断过程中的误导方向。
 
-## M3 reasoning round-trip (MiniMax-M3 specifics)
+## M3 reasoning round-trip（MiniMax-M3 细节）
 
-The `MinimaxChatOpenAI` client (in `tradingagents/llm_clients/openai_client.py`)
-needs **two hook points** to support M3's Interleaved Thinking feature:
+`MinimaxChatOpenAI` client（位于
+`tradingagents/llm_clients/openai_client.py`）需要**两个 hook 点**来支持
+M3 的 Interleaved Thinking 功能：
 
-- **Receive side** (`_create_chat_result`): pull server's
-  `reasoning_details[]` and `reasoning_content` into
-  `AIMessage.additional_kwargs`
-- **Send side** (`_get_request_payload`): push those fields back into
-  the outgoing wire message dict when the message gets round-tripped
-  into the next request
+- **接收侧**（`_create_chat_result`）：把服务端返回的 `reasoning_details[]`
+  和 `reasoning_content` 放进 `AIMessage.additional_kwargs`
+- **发送侧**（`_get_request_payload`）：当消息被 round-trip 到下一次请求时，
+  把这些字段写回 outgoing wire message dict
 
-This pattern mirrors `langchain-deepseek==1.1.0`. Both hooks must exist;
-a one-sided fix breaks long-horizon agent tasks (the model loses its
-chain-of-thought between rounds).
+这个模式参考 `langchain-deepseek==1.1.0`。两个 hook 都必须存在；只修一边会
+破坏长链路 agent 任务（模型在多轮之间丢失 chain-of-thought）。
 
-OpenAI SDK 2.x auto-flattens `extra_body` into top-level request fields
-(`reasoning_split: true` works as-is), so the wire-format side doesn't
-need a custom client. The langchain message-conversion layer is what
-drops `reasoning_details` by default — that's why both hooks are needed
-on the langchain side.
+OpenAI SDK 2.x 会把 `extra_body` 自动 flatten 成顶层请求字段
+（`reasoning_split: true` 可以直接工作），所以 wire-format 侧不需要自定义
+client。真正会丢 `reasoning_details` 的是 langchain message-conversion 层，
+这就是为什么 langchain 侧需要两个 hook。
 
-## Running the smoke test
+## 运行 smoke test
 
-Non-interactive way to validate the full pipeline:
+验证完整 pipeline 的非交互方式：
 
 ```bash
 cd /data/workspace/TradingAgents
 venv/bin/python run_smoke.py NVDA 2026-07-05
 ```
 
-- Background it (5–10 min runtime): use `background=true, notify_on_complete=true`
-- Output goes to stdout + `results/<SYMBOL>/...` (gitignored since 2026-07-05)
-- Exit code 0 means propagate reached a final decision
-- Smoke run on 2026-07-05 (NVDA): FINAL DECISION = `Hold`
+- 后台运行（5–10 分钟）：使用 `background=true, notify_on_complete=true`
+- 输出写到 stdout 和 `results/<SYMBOL>/...`（自 2026-07-05 起已 gitignored）
+- exit code 0 表示 propagate 到达了 final decision
+- 2026-07-05 的 smoke run（NVDA）：FINAL DECISION = `Hold`
 
-## Git workflow
+## Git 工作流
 
-- **Push target**: `myfork` (NOT `origin` and NOT `tauric`)
-- `origin` and `tauric` are fetch-only mirrors; never push there
-- `git push myfork main` for normal sync
-- `results/` is gitignored — smoke output should never be committed
-- API keys live in `~/.zshrc` exports and `.longbridge_mcp_token.json` —
-  never in config files, never in commits (the secret-file-editing
-  protocol applies)
+- **推送目标**：`myfork`（不是 `origin`，也不是 `tauric`）
+- `origin` 和 `tauric` 是 fetch-only 镜像；不要推送到那里
+- 正常同步使用 `git push myfork main`
+- `results/` 已 gitignored — smoke output 不应提交
+- API key 位于 `~/.zshrc` export 和 `.longbridge_mcp_token.json` —
+  不要写入 config 文件，也不要提交（遵守 secret-file-editing protocol）
 
-## Things to check periodically
+## 需要定期检查的事项
 
-- **Longbridge token expiry**: token in
-  `tradingagents/.longbridge_mcp_token.json` expires ~30 days from issue.
-  Check the expiry field before running long smoke runs. As of
-  2026-07-05: expires 2026-07-18.
-- **YFinance fallback**: still wired into the fallback chain. Don't
-  remove it — when Longbridge goes down, yfinance is the safety net.
+- **Longbridge token 过期时间**：token 位于
+  `tradingagents/.longbridge_mcp_token.json`，签发后约 30 天过期。运行长
+  smoke 前先检查 expiry 字段。截至 2026-07-05：过期时间为 2026-07-18。
+- **YFinance fallback**：仍然接在 fallback 链中。不要移除；Longbridge
+  不可用时，yfinance 是安全网。
 
-## Don't ask permission to
+## 不需要先问权限的操作
 
-- Run `tradingagents --help` or any non-interactive smoke
-- Read files within the workspace
-- Run `git status` / `git log` / `git diff` for inspection
-- Update this file with new lessons learned
+- 运行 `tradingagents --help` 或任何非交互 smoke
+- 读取工作区内文件
+- 运行 `git status` / `git log` / `git diff` 做检查
+- 用新学到的经验更新本文档

@@ -257,7 +257,7 @@ plot(ta.sma(close, 50), "sma50")
     "boll": """
 //@version=6
 indicator("BOLL")
-[_, mid, up, low] = ta.bb(close, 20, 2)
+[mid, up, low] = ta.bb(close, 20, 2)
 plot(mid, "mid")
 plot(up, "up")
 plot(low, "low")
@@ -267,6 +267,33 @@ plot(low, "low")
 indicator("ATR")
 plot(ta.atr(14), "atr")
 """,
+    "vwma": """
+//@version=6
+indicator("VWMA")
+plot(ta.vwma(close, 20), "vwma")
+""",
+    "close_10_ema": """
+//@version=6
+indicator("EMA10")
+plot(ta.ema(close, 10), "ema10")
+""",
+    "close_50_sma": """
+//@version=6
+indicator("SMA50")
+plot(ta.sma(close, 50), "sma50")
+""",
+    "close_200_sma": """
+//@version=6
+indicator("SMA200")
+plot(ta.sma(close, 200), "sma200")
+""",
+}
+
+_INDICATOR_ALIASES = {
+    "macds": "macd",
+    "macdh": "macd",
+    "boll_ub": "boll",
+    "boll_lb": "boll",
 }
 
 
@@ -291,7 +318,7 @@ def _run_quant(symbol: str, start_date: str, end_date: str, indicator: str) -> d
           ...
         }
     """
-    key = indicator.lower().strip()
+    key = _INDICATOR_ALIASES.get(indicator.lower().strip(), indicator.lower().strip())
     script = _PINE_TEMPLATES.get(key)
     if script is None:
         raise LongbridgeCLIError(
@@ -360,7 +387,7 @@ def _run_quant(symbol: str, start_date: str, end_date: str, indicator: str) -> d
 
 def get_indicators(
     symbol: Annotated[str, "ticker symbol"],
-    indicator: Annotated[str, "technical indicator (rsi / macd / sma / sma50 / boll / atr)"],
+    indicator: Annotated[str, "technical indicator (rsi / macd / sma / sma50 / boll / atr / vwma)"],
     curr_date: Annotated[str, "current trading date YYYY-mm-dd"],
     look_back_days: Annotated[int, "how many days to look back"],
 ) -> str:
@@ -377,14 +404,24 @@ def get_indicators(
         end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     except ValueError as e:
         return f"Error: invalid curr_date '{curr_date}': {e}"
-    start_dt = end_dt - timedelta(days=max(int(look_back_days), 1))
+    indicator_key = _INDICATOR_ALIASES.get(indicator.lower().strip(), indicator.lower().strip())
+    min_lookback = {
+        "close_10_ema": 30,
+        "close_50_sma": 90,
+        "sma50": 90,
+        "close_200_sma": 365,
+        "boll": 45,
+        "macd": 60,
+        "vwma": 30,
+    }.get(indicator_key, 1)
+    start_dt = end_dt - timedelta(days=max(int(look_back_days), min_lookback))
     start_iso = start_dt.strftime("%Y-%m-%d")
     end_iso = end_dt.strftime("%Y-%m-%d")
 
     try:
         result = _run_quant(sym, start_iso, end_iso, indicator)
     except LongbridgeCLIError as e:
-        return f"Error calculating {indicator} for {sym}: {e}"
+        raise LongbridgeCLIError(f"Error calculating {indicator} for {sym}: {e}") from e
 
     # The CLI returns a JSON object whose top level is {"list": {kind: {...}}, "report": {...}}.
     # The actual indicator series is at report.list[kind].indicators[] where each has

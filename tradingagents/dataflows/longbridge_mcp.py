@@ -417,14 +417,25 @@ _PINE_TEMPLATES = {
     "macd":  "//@version=6\nindicator('MACD')\n[macd_line, signal, hist] = ta.macd(close, 12, 26, 9)\nplot(macd_line)\nplot(signal)\nplot(hist)\n",
     "sma":   "//@version=6\nindicator('SMA20')\nplot(ta.sma(close, 20))\n",
     "sma50": "//@version=6\nindicator('SMA50')\nplot(ta.sma(close, 50))\n",
-    "boll":  "//@version=6\nindicator('BOLL')\n[_, mid, upper, lower] = ta.bb(close, 20, 2)\nplot(mid)\nplot(upper)\nplot(lower)\n",
+    "boll":  "//@version=6\nindicator('BOLL')\n[mid, upper, lower] = ta.bb(close, 20, 2)\nplot(mid)\nplot(upper)\nplot(lower)\n",
     "atr":   "//@version=6\nindicator('ATR')\nplot(ta.atr(14))\n",
+    "vwma":  "//@version=6\nindicator('VWMA')\nplot(ta.vwma(close, 20))\n",
+    "close_10_ema":  "//@version=6\nindicator('EMA10')\nplot(ta.ema(close, 10))\n",
+    "close_50_sma":  "//@version=6\nindicator('SMA50')\nplot(ta.sma(close, 50))\n",
+    "close_200_sma": "//@version=6\nindicator('SMA200')\nplot(ta.sma(close, 200))\n",
+}
+
+_INDICATOR_ALIASES = {
+    "macds": "macd",
+    "macdh": "macd",
+    "boll_ub": "boll",
+    "boll_lb": "boll",
 }
 
 
 def get_indicators(
     symbol: Annotated[str, "ticker symbol"],
-    indicator: Annotated[str, "rsi/macd/sma/sma50/boll/atr"],
+    indicator: Annotated[str, "rsi/macd/sma/sma50/boll/atr/vwma"],
     curr_date: Annotated[str, "current trading date YYYY-mm-dd"],
     look_back_days: Annotated[int, "how many days to look back"],
 ) -> str:
@@ -441,11 +452,22 @@ def get_indicators(
     except ValueError as e:
         return f"Error: invalid curr_date '{curr_date}': {e}"
 
-    script = _PINE_TEMPLATES.get(indicator.lower().strip())
+    indicator_key = _INDICATOR_ALIASES.get(indicator.lower().strip(), indicator.lower().strip())
+    script = _PINE_TEMPLATES.get(indicator_key)
     if script is None:
-        return f"Error: unsupported indicator '{indicator}'. Supported: {sorted(_PINE_TEMPLATES)}"
+        supported = sorted(set(_PINE_TEMPLATES) | set(_INDICATOR_ALIASES))
+        raise MCPTransportError(f"unsupported indicator '{indicator}'. Supported: {supported}")
 
-    start = (end - timedelta(days=max(int(look_back_days), 1))).strftime("%Y-%m-%d")
+    min_lookback = {
+        "close_10_ema": 30,
+        "close_50_sma": 90,
+        "sma50": 90,
+        "close_200_sma": 365,
+        "boll": 45,
+        "macd": 60,
+        "vwma": 30,
+    }.get(indicator_key, 1)
+    start = (end - timedelta(days=max(int(look_back_days), min_lookback))).strftime("%Y-%m-%d")
     end_s = end.strftime("%Y-%m-%d")
 
     try:
@@ -458,7 +480,7 @@ def get_indicators(
     except MCPAuthError:
         raise
     except MCPTransportError as e:
-        return f"Error calculating {indicator} for {sym}: {e}"
+        raise MCPTransportError(f"Error calculating {indicator} for {sym}: {e}") from e
 
     # MCP `quant_run` returns {report_json: "...", chart_json: "...", events_json: "..."}
     # where report_json is a STRINGIFIED JSON of {data: {series_name: [{time,value}, ...]}}.

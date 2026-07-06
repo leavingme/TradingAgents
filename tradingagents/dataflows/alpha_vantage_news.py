@@ -1,4 +1,7 @@
+import json
+
 from .alpha_vantage_common import _make_api_request, format_datetime_for_api
+from .errors import NoMarketDataError
 
 
 def get_news(ticker, start_date, end_date) -> dict[str, str] | str:
@@ -21,7 +24,16 @@ def get_news(ticker, start_date, end_date) -> dict[str, str] | str:
         "time_to": format_datetime_for_api(end_date),
     }
 
-    return _make_api_request("NEWS_SENTIMENT", params)
+    result = _make_api_request("NEWS_SENTIMENT", params)
+    if isinstance(result, str):
+        try:
+            payload = json.loads(result)
+        except json.JSONDecodeError:
+            return result
+        msg = payload.get("Error Message")
+        if msg:
+            raise NoMarketDataError(ticker, detail=msg)
+    return result
 
 def get_global_news(curr_date, look_back_days: int = 7, limit: int = 50) -> dict[str, str] | str:
     """Returns global market news & sentiment data without ticker-specific filtering.

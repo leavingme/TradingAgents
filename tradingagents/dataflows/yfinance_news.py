@@ -5,8 +5,10 @@ from datetime import datetime
 
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
+from yfinance.exceptions import YFRateLimitError
 
 from .config import get_config
+from .errors import VendorRateLimitError
 from .stockstats_utils import yf_retry
 from .symbol_utils import normalize_symbol
 
@@ -127,6 +129,8 @@ def get_news_yfinance(
 
         return f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n{news_str}"
 
+    except YFRateLimitError as e:
+        raise VendorRateLimitError(f"Yahoo Finance rate limited for {ticker}") from e
     except Exception as e:
         return f"Error fetching news for {ticker}: {str(e)}"
 

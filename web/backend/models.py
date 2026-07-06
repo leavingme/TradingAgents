@@ -42,3 +42,4 @@ class RunRecordResponse(BaseModel):
     report_path: str | None = None
     error: str | None = None
     event_count: int = 0
+

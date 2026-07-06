@@ -35,6 +35,12 @@ def build_runtime_config(request: AnalysisRequest) -> dict[str, Any]:
         config["checkpoint_enabled"] = request.checkpoint_enabled
     if request.results_dir is not None:
         config["results_dir"] = str(Path(request.results_dir))
+    if request.google_thinking_level is not None:
+        config["google_thinking_level"] = request.google_thinking_level
+    if request.openai_reasoning_effort is not None:
+        config["openai_reasoning_effort"] = request.openai_reasoning_effort
+    if request.anthropic_effort is not None:
+        config["anthropic_effort"] = request.anthropic_effort
 
     config.update(request.config_overrides)
     return config

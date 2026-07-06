@@ -60,6 +60,10 @@ class AnalysisRequest:
     checkpoint_enabled: bool | None = None
     results_dir: str | Path | None = None
     report_dir: str | Path | None = None
+    # Provider-specific reasoning/thinking configuration
+    google_thinking_level: str | None = None
+    openai_reasoning_effort: str | None = None
+    anthropic_effort: str | None = None
     run_id: str = field(default_factory=lambda: uuid4().hex)
     debug: bool = False
     config_overrides: dict[str, Any] = field(default_factory=dict)

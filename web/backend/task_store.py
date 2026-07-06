@@ -27,12 +27,34 @@ from .models import RunCreateRequest, RunStatus
 # DB path resolution
 # ---------------------------------------------------------------------------
 
-DB_PATH = Path(
-    os.environ.get(
-        "TRADINGAGENTS_WEBUI_DB",
-        Path.home() / ".tradingagents" / "webui_runs.db",
-    )
-)
+def _default_db_path() -> Path:
+    """Return a writable default DB path.
+
+    The normal user-facing location is ``~/.tradingagents/webui_runs.db``.
+    Some managed/sandboxed environments can read ``$HOME`` but cannot create
+    SQLite files there, so fall back to a workspace-local hidden directory.
+    An explicit ``TRADINGAGENTS_WEBUI_DB`` always wins and is not redirected.
+    """
+
+    configured = os.environ.get("TRADINGAGENTS_WEBUI_DB")
+    if configured:
+        return Path(configured)
+
+    home_path = Path.home() / ".tradingagents" / "webui_runs.db"
+    fallback_path = Path.cwd() / ".tradingagents" / "webui_runs.db"
+
+    try:
+        home_path.parent.mkdir(parents=True, exist_ok=True)
+        probe_path = home_path.parent / ".write_test"
+        with probe_path.open("w", encoding="utf-8") as probe:
+            probe.write("")
+        probe_path.unlink(missing_ok=True)
+        return home_path
+    except OSError:
+        return fallback_path
+
+
+DB_PATH = _default_db_path()
 
 
 def _now() -> str:
@@ -179,6 +201,7 @@ class TaskStore:
             events.append(
                 AnalysisEvent(
                     type=ev_row["event_type"],
+                    run_id=row["run_id"],
                     agent=ev_row["agent"],
                     content=content,
                     timestamp=ev_row["timestamp"],
@@ -289,12 +312,13 @@ class TaskStore:
     def add_event(self, run_id: str, event: AnalysisEvent) -> None:
         with self._lock:
             record = self._runs[run_id]
+            event = _web_safe_event(event)
             record.events.append(event)
 
             # Update in-memory state derived from event type
             if event.type == "run_completed" and isinstance(event.content, dict):
                 record.report_path = event.content.get("report_path")
-            if event.type == "error":
+            if event.type == "error" and record.status != "cancelled":
                 record.status = "failed"
                 if isinstance(event.content, dict):
                     record.error = event.content.get("error")
@@ -302,7 +326,7 @@ class TaskStore:
             # Persist event to DB
             timestamp = getattr(event, "timestamp", None) or _now()
             content_json = (
-                json.dumps(event.content) if event.content is not None else None
+                json.dumps(event.content, default=str) if event.content is not None else None
             )
 
             with self._conn() as conn:
@@ -369,3 +393,28 @@ class TaskStore:
 # ---------------------------------------------------------------------------
 
 store = TaskStore()
+
+
+def _web_safe_event(event: AnalysisEvent) -> AnalysisEvent:
+    """Trim runtime-only payloads before persisting/streaming through WebUI.
+
+    ``run_completed`` from the headless runtime carries the full graph state so
+    ``run_analysis_once()`` callers can inspect it. That state may contain
+    LangChain messages or other non-JSON objects and is far too large/noisy for
+    the Web API event log, which only needs the decision and report path.
+    """
+
+    if event.type != "run_completed" or not isinstance(event.content, dict):
+        return event
+    if "final_state" not in event.content:
+        return event
+
+    content = dict(event.content)
+    content.pop("final_state", None)
+    return AnalysisEvent(
+        type=event.type,
+        run_id=event.run_id,
+        timestamp=event.timestamp,
+        agent=event.agent,
+        content=content,
+    )

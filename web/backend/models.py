@@ -14,12 +14,12 @@ class RunCreateRequest(BaseModel):
     selected_analysts: list[str] = Field(
         default_factory=lambda: ["market", "social", "news", "fundamentals"]
     )
-    llm_provider: str | None = None
-    quick_think_llm: str | None = None
-    deep_think_llm: str | None = None
+    llm_provider: str | None = "minimax-cn"
+    quick_think_llm: str | None = "MiniMax-M3"
+    deep_think_llm: str | None = "MiniMax-M3"
     research_depth: int | None = None
     backend_url: str | None = None
-    output_language: str | None = None
+    output_language: str | None = "Chinese"
     checkpoint_enabled: bool | None = None
     results_dir: str | None = None
     report_dir: str | None = None
@@ -42,4 +42,3 @@ class RunRecordResponse(BaseModel):
     report_path: str | None = None
     error: str | None = None
     event_count: int = 0
-

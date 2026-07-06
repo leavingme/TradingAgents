@@ -15,6 +15,7 @@ EventType = Literal[
     "agent_status",
     "report_section",
     "run_completed",
+    "run_cancelled",
     "error",
 ]
 

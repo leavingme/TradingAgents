@@ -11,7 +11,7 @@ AGENTS.md — read it before doing anything non-trivial.
 - **Mirror**: `https://github.com/leavingme/TradingAgents` (`origin` remote, fetch only)
 - **Workspace root**: `/data/workspace/TradingAgents`
 - **Branch**: `main`
-- **Version**: v0.3.0 (`85946c2 chore: release v0.3.0`) + 7 fork-local commits
+- **Version**: v0.3.0 (`85946c2 chore: release v0.3.0`) + 8 fork-local commits
 
 ## Environment
 
@@ -32,6 +32,30 @@ AGENTS.md — read it before doing anything non-trivial.
   `pyproject.toml`'s `[project.scripts]` → currently points at
   `tradingagents._cli_entry:app` (not `cli.main:app` directly — see the
   PYTHONPATH section).
+
+### WebUI conventions
+
+- The WebUI should mirror the CLI startup flow without overcrowding the main
+  run screen. Keep the Run page focused on ticker/date/asset/analyst selection
+  and start/cancel controls.
+- Runtime configuration lives on the Settings page (`#settings`): UI language,
+  report output language, research depth, LLM provider, quick/deep models, and
+  optional backend URL.
+- UI language and report language are separate. UI language only localizes the
+  WebUI; report language is sent to the analysis runtime as `output_language`.
+- Research depth must use the same three user-facing choices as the CLI:
+  `Shallow` → `1`, `Medium` → `3`, `Deep` → `5`.
+- Agent progress should follow the CLI Team / Agent / Status table grouping:
+  Analyst Team, Research Team, Trading Team, Risk Management, and Portfolio
+  Management. `in_progress` needs a visible animated state.
+- Historical run selection owns the URL hash. Use `#run=<run_id>` for a selected
+  run and `#settings` for the Settings page so refresh/deep-linking restores the
+  same view.
+- Static frontend asset URLs are versioned with query strings after UI changes
+  to avoid stale browser cache during local development.
+- SSE streams should push queued events immediately and keep long-running
+  analyses alive with heartbeat comments. The browser should allow EventSource
+  to reconnect instead of closing the stream on the first `onerror`.
 
 ### Critical env vars
 

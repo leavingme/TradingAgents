@@ -205,6 +205,36 @@ h1 {
   flex-wrap: wrap;
 }
 
+.view-nav {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.view-tab {
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.view-tab:hover,
+.view-tab.active {
+  background: rgba(59, 130, 246, 0.16);
+  color: var(--text-primary);
+}
+
 /* Status pill */
 .status-pill {
   display: flex;
@@ -267,18 +297,25 @@ h1 {
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.hidden {
+  display: none !important;
+}
+
 .run-form {
   display: grid;
-  grid-template-columns:
-    minmax(110px, 0.8fr)
-    minmax(150px, 1fr)
-    minmax(110px, 0.7fr)
-    minmax(80px, 0.5fr)
-    minmax(280px, 1.6fr)
-    auto;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   align-items: end;
   gap: 12px;
 }
+
+.field-symbol   { grid-column: span 2; }
+.field-date     { grid-column: span 2; }
+.field-asset    { grid-column: span 2; }
+.field-language { grid-column: span 2; }
+.field-depth    { grid-column: span 1; }
+.field-provider { grid-column: span 3; }
+.field-model    { grid-column: span 3; }
+.field-backend  { grid-column: span 3; }
 
 /* Form fields */
 .form-field {
@@ -339,6 +376,7 @@ select option {
 
 /* Analyst pill toggles */
 .analysts-fieldset {
+  grid-column: span 6;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -400,9 +438,47 @@ select option {
 
 /* Form action buttons */
 .form-actions {
+  grid-column: span 3;
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+/* ── Settings page ───────────────────────────────────────────── */
+.settings-view {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-form {
+  display: grid;
+  gap: 18px;
+  max-width: 980px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.settings-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.settings-header p {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .btn-primary {
@@ -577,18 +653,52 @@ h2, .panel-title {
 }
 
 #agentList li {
+  position: relative;
   display: grid;
-  grid-template-columns: 10px 1fr auto;
+  grid-template-columns: minmax(82px, 0.8fr) minmax(128px, 1.2fr) minmax(78px, auto);
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
   border-radius: var(--radius-md);
   font-size: 12.5px;
-  transition: background var(--t-fast);
+  overflow: hidden;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+
+#agentList .agent-row-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(17, 24, 39, 0.92);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 #agentList li:hover {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.agent-team {
+  color: var(--accent-blue);
+  font-weight: 600;
+  min-width: 0;
+}
+
+.agent-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-name span:last-child,
+.agent-team {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Status dots */
@@ -607,6 +717,25 @@ h2, .panel-title {
 .status-failed .dot,
 .status-error .dot        { background: var(--accent-red); }
 
+#agentList li.status-in_progress {
+  background:
+    linear-gradient(90deg, rgba(245,158,11,0.14), rgba(245,158,11,0.04), rgba(245,158,11,0.14));
+  background-size: 220% 100%;
+  animation: in-progress-sweep 1.8s ease-in-out infinite;
+}
+
+#agentList li.status-in_progress::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent-amber);
+  box-shadow: 0 0 10px rgba(245,158,11,0.75);
+}
+
 @keyframes pulse-amber {
   0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.6); }
   50%       { box-shadow: 0 0 0 5px rgba(245,158,11,0); }
@@ -622,11 +751,17 @@ h2, .panel-title {
   50%       { opacity: 0.5; }
 }
 
+@keyframes in-progress-sweep {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 220% 50%; }
+}
+
 .agent-status {
   font-size: 10.5px;
   font-weight: 500;
   color: var(--text-muted);
   white-space: nowrap;
+  text-align: right;
 }
 
 .status-in_progress .agent-status { color: var(--accent-amber); }
@@ -932,8 +1067,16 @@ h2, .panel-title {
 /* ── Responsive ──────────────────────────────────────────────── */
 @media (max-width: 1200px) {
   .run-form {
-    grid-template-columns: 1fr 1fr 1fr 1fr;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+  .field-symbol,
+  .field-date,
+  .field-asset,
+  .field-language,
+  .field-depth,
+  .field-provider,
+  .field-model,
+  .field-backend { grid-column: span 1; }
   .analysts-fieldset { grid-column: 1 / -1; }
   .form-actions { grid-column: 1 / -1; }
 
@@ -951,6 +1094,17 @@ h2, .panel-title {
   .run-form  {
     grid-template-columns: 1fr 1fr;
   }
+  .settings-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .field-symbol,
+  .field-date,
+  .field-asset,
+  .field-language,
+  .field-depth,
+  .field-provider,
+  .field-model,
+  .field-backend { grid-column: span 1; }
 
   .dashboard {
     grid-template-columns: 1fr;
@@ -966,4 +1120,13 @@ h2, .panel-title {
 @media (max-width: 480px) {
   .topbar { flex-direction: column; align-items: flex-start; }
   .run-form { grid-template-columns: 1fr; }
+  .settings-grid { grid-template-columns: 1fr; }
+  .field-symbol,
+  .field-date,
+  .field-asset,
+  .field-language,
+  .field-depth,
+  .field-provider,
+  .field-model,
+  .field-backend { grid-column: 1 / -1; }
 }

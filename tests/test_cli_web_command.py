@@ -22,6 +22,11 @@ def test_web_command_starts_uvicorn(monkeypatch):
     assert calls == [
         (
             "web.backend.main:app",
-            {"host": "0.0.0.0", "port": 9999, "reload": True},
+            {
+                "host": "0.0.0.0",
+                "port": 9999,
+                "reload": True,
+                "app_dir": str(m.Path(m.__file__).resolve().parents[1]),
+            },
         )
     ]

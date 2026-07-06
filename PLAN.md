@@ -262,3 +262,20 @@ After this works, refactor the existing TUI to consume the same runtime stream.
   - Past-run SSE replay reads from events table.
 - Done: Premium dark-mode frontend (glassmorphism, Inter font, marked.js, animated agent status dots).
 - Next: re-introduce `StatsCallbackHandler` support in the runtime layer (optional), add a `/api/runs/{run_id}/events/replay` batch endpoint for offline consumers, add basic auth / API key protection for the Web API.
+
+## Hardening Update (2026-07-06)
+
+- Added workspace-local DB fallback: if `~/.tradingagents/webui_runs.db` is not writable in a managed/sandboxed environment, the WebUI uses `.tradingagents/webui_runs.db` under the current workspace. `.tradingagents/` is gitignored.
+- Added `run_cancelled` runtime/Web event so cancellation is not represented as a failure event.
+- Trimmed runtime-only `final_state` from Web API `run_completed` events before persistence/SSE so LangChain objects do not break JSON serialization and clients do not receive oversized graph state.
+- Added a regression test covering Web-safe persistence of `run_completed` events that contain non-JSON graph state.
+- Updated the static WebUI run payload to send this fork's MiniMax defaults (`minimax-cn` / `MiniMax-M3`) so browser-started runs do not fall back to unsupported placeholder OpenAI model names.
+- Set WebUI/API run defaults to `minimax-cn` / `MiniMax-M3`, default report language to Chinese, and changed the frontend ticker field from free text to a dropdown of common symbols.
+
+Next recommended work:
+
+1. Re-introduce `StatsCallbackHandler` support in the runtime layer (optional), so the TUI stats panel can be populated when using `run_analysis_stream()`.
+2. Add a `/api/runs/{run_id}/events/replay` batch endpoint for offline consumers.
+3. Add basic auth / API key protection for the Web API before exposing it beyond localhost.
+4. Add integration tests with a mocked long-running runner to verify cancellation streams a `run_cancelled` event and closes SSE cleanly.
+5. Consider replacing CDN-loaded Markdown rendering with a vendored/bundled asset for offline/local deployments.

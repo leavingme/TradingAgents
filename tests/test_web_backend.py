@@ -43,6 +43,55 @@ def test_create_run_and_get_status(monkeypatch):
     assert status["event_count"] == 2
 
 
+def test_run_create_request_uses_webui_defaults():
+    from web.backend.models import RunCreateRequest
+    from web.backend.runner_worker import to_analysis_request
+
+    request = RunCreateRequest(ticker="NVDA", analysis_date="2026-07-05")
+    analysis_request = to_analysis_request("run-defaults", request)
+
+    assert analysis_request.llm_provider == "minimax-cn"
+    assert analysis_request.quick_think_llm == "MiniMax-M3"
+    assert analysis_request.deep_think_llm == "MiniMax-M3"
+    assert analysis_request.output_language == "Chinese"
+
+
+def test_get_config_defaults_matches_webui_defaults():
+    from web.backend import main
+
+    defaults = asyncio.run(main.get_config_defaults())
+
+    assert defaults["llm_provider"] == "minimax-cn"
+    assert defaults["quick_think_llm"] == "MiniMax-M3"
+    assert defaults["deep_think_llm"] == "MiniMax-M3"
+    assert defaults["output_language"] == "Chinese"
+    assert defaults["research_depth"] == 1
+
+
+def test_run_create_request_passes_webui_config():
+    from web.backend.models import RunCreateRequest
+    from web.backend.runner_worker import to_analysis_request
+
+    request = RunCreateRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-05",
+        llm_provider="openai",
+        quick_think_llm="gpt-5.4-mini",
+        deep_think_llm="gpt-5.5",
+        research_depth=3,
+        backend_url="https://example.invalid/v1",
+        output_language="English",
+    )
+    analysis_request = to_analysis_request("run-config", request)
+
+    assert analysis_request.llm_provider == "openai"
+    assert analysis_request.quick_think_llm == "gpt-5.4-mini"
+    assert analysis_request.deep_think_llm == "gpt-5.5"
+    assert analysis_request.research_depth == 3
+    assert analysis_request.backend_url == "https://example.invalid/v1"
+    assert analysis_request.output_language == "English"
+
+
 def test_stream_run_events_replays_stored_events(monkeypatch):
     from web.backend import main
 
@@ -185,3 +234,34 @@ def test_list_runs_returns_created_records(monkeypatch):
     assert second["run_id"] in ids
     assert first["run_id"] in ids
     assert ids.index(second["run_id"]) < ids.index(first["run_id"])
+
+
+def test_store_trims_full_final_state_before_persisting(tmp_path):
+    from web.backend.models import RunCreateRequest
+    from web.backend.task_store import TaskStore
+
+    store = TaskStore(tmp_path / "runs.db")
+    store.create("run-json-safe", RunCreateRequest(ticker="NVDA", analysis_date="2026-07-05"))
+    store.mark_started("run-json-safe")
+    store.add_event(
+        "run-json-safe",
+        AnalysisEvent(
+            type="run_completed",
+            run_id="run-json-safe",
+            content={
+                "decision": "Hold",
+                "report_path": str(tmp_path / "report.md"),
+                "final_state": {"non_json": object()},
+            },
+        ),
+    )
+    store.mark_finished("run-json-safe", "completed")
+
+    record = store.get("run-json-safe")
+    assert record is not None
+    assert record.status == "completed"
+    assert isinstance(record.events[-1].content, dict)
+    assert record.events[-1].content == {
+        "decision": "Hold",
+        "report_path": str(tmp_path / "report.md"),
+    }

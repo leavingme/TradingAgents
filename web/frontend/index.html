@@ -16,7 +16,7 @@
     <!-- marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260706-run-hash" />
   </head>
   <body>
     <!-- Ambient background orbs -->
@@ -38,18 +38,22 @@
             </div>
             <div>
               <h1>TradingAgents</h1>
-              <p class="brand-tagline">AI-powered market intelligence</p>
+              <p class="brand-tagline" data-i18n="brandTagline">AI-powered market intelligence</p>
             </div>
           </div>
           <div class="topbar-right">
+            <nav class="view-nav" aria-label="Primary">
+              <button id="runViewButton" type="button" class="view-tab active" data-i18n="navRun">Run</button>
+              <button id="settingsViewButton" type="button" class="view-tab" data-i18n="navSettings">Settings</button>
+            </nav>
             <div class="status-pill">
               <span class="status-dot" id="statusDot"></span>
-              <span id="runStatus">Ready</span>
+              <span id="runStatus" data-i18n="statusReady">Ready</span>
             </div>
             <div class="run-meta">
               <span class="meta-chip">
                 <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1a6 6 0 1 1 0 12A6 6 0 0 1 8 2zm-.5 3v3.22l2.64 1.57.5-.86-2.14-1.27V5H7.5z"/></svg>
-                <span id="runId">No run</span>
+                <span id="runId" data-i18n="noRun">No run</span>
               </span>
               <span class="meta-chip">
                 <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 1a1 1 0 0 0 0 2h4a1 1 0 0 0 0-2H6zM3 4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H3zm0 1h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>
@@ -60,23 +64,32 @@
         </header>
 
         <!-- Control band (run form) -->
-        <section class="control-band" aria-label="Run controls">
+        <section id="runControls" class="control-band" aria-label="Run controls">
           <form id="runForm" class="run-form">
 
-            <label class="form-field">
-              <span class="field-label">Ticker</span>
-              <input
-                id="ticker"
-                name="ticker"
-                value="NVDA"
-                autocomplete="off"
-                required
-                placeholder="e.g. NVDA"
-              />
+            <label class="form-field field-symbol">
+              <span class="field-label" data-i18n="ticker">Ticker</span>
+              <select id="ticker" name="ticker" required>
+                <option value="NVDA" selected>NVDA · NVIDIA</option>
+                <option value="AAPL">AAPL · Apple</option>
+                <option value="MSFT">MSFT · Microsoft</option>
+                <option value="GOOGL">GOOGL · Alphabet</option>
+                <option value="AMZN">AMZN · Amazon</option>
+                <option value="META">META · Meta</option>
+                <option value="TSLA">TSLA · Tesla</option>
+                <option value="AMD">AMD · Advanced Micro Devices</option>
+                <option value="AVGO">AVGO · Broadcom</option>
+                <option value="SPY">SPY · S&P 500 ETF</option>
+                <option value="QQQ">QQQ · Nasdaq 100 ETF</option>
+                <option value="0700.HK">0700.HK · Tencent</option>
+                <option value="9988.HK">9988.HK · Alibaba HK</option>
+                <option value="BTC-USD">BTC-USD · Bitcoin</option>
+                <option value="ETH-USD">ETH-USD · Ethereum</option>
+              </select>
             </label>
 
-            <label class="form-field">
-              <span class="field-label">Analysis Date</span>
+            <label class="form-field field-date">
+              <span class="field-label" data-i18n="analysisDate">Analysis Date</span>
               <input
                 id="analysisDate"
                 name="analysisDate"
@@ -85,62 +98,146 @@
               />
             </label>
 
-            <label class="form-field">
-              <span class="field-label">Asset Type</span>
+            <label class="form-field field-asset">
+              <span class="field-label" data-i18n="assetType">Asset Type</span>
               <select id="assetType" name="assetType">
-                <option value="stock">Stock</option>
-                <option value="crypto">Crypto</option>
+                <option value="stock" data-i18n="assetStock">Stock</option>
+                <option value="crypto" data-i18n="assetCrypto">Crypto</option>
               </select>
             </label>
 
-            <label class="form-field">
-              <span class="field-label">Depth</span>
-              <input
-                id="researchDepth"
-                name="researchDepth"
-                type="number"
-                min="1"
-                max="5"
-                value="1"
-              />
-            </label>
-
             <fieldset class="analysts-fieldset">
-              <legend class="field-label">Analysts</legend>
+              <legend class="field-label" data-i18n="analysts">Analysts</legend>
               <label class="analyst-chip">
                 <input type="checkbox" name="analysts" value="market" checked />
-                <span>Market</span>
+                <span data-i18n="analystMarket">Market</span>
               </label>
               <label class="analyst-chip">
                 <input type="checkbox" name="analysts" value="social" checked />
-                <span>Social</span>
+                <span data-i18n="analystSocial">Social</span>
               </label>
               <label class="analyst-chip">
                 <input type="checkbox" name="analysts" value="news" checked />
-                <span>News</span>
+                <span data-i18n="analystNews">News</span>
               </label>
               <label class="analyst-chip">
                 <input type="checkbox" name="analysts" value="fundamentals" checked />
-                <span>Fundamentals</span>
+                <span data-i18n="analystFundamentals">Fundamentals</span>
               </label>
             </fieldset>
 
             <div class="form-actions">
               <button id="startButton" type="submit" class="btn-primary">
                 <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 3.5a.5.5 0 0 1 .763-.424l8 4.5a.5.5 0 0 1 0 .848l-8 4.5A.5.5 0 0 1 4 12.5v-9z"/></svg>
-                Start Analysis
+                <span data-i18n="startAnalysis">Start Analysis</span>
               </button>
               <button id="cancelButton" type="button" class="btn-secondary" disabled>
                 <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
-                Cancel
+                <span data-i18n="cancel">Cancel</span>
               </button>
             </div>
 
           </form>
         </section>
 
+        <section id="settingsView" class="settings-view hidden" aria-label="Run settings" hidden>
+          <form id="settingsForm" class="settings-form">
+            <div class="settings-header">
+              <div>
+                <h2 data-i18n="settingsTitle">Run Settings</h2>
+                <p data-i18n="settingsSubtitle">Defaults used when starting a new analysis run.</p>
+              </div>
+              <button id="resetSettings" type="button" class="btn-secondary" data-i18n="resetDefaults">Reset Defaults</button>
+            </div>
+
+            <div class="settings-grid">
+              <label class="form-field">
+                <span class="field-label" data-i18n="uiLanguage">UI Language</span>
+                <select id="uiLanguage" name="uiLanguage">
+                  <option value="auto" data-i18n="uiLanguageAuto">Auto</option>
+                  <option value="en">English</option>
+                  <option value="zh">中文</option>
+                </select>
+              </label>
+
+              <label class="form-field">
+                <span class="field-label" data-i18n="reportLanguage">Report Language</span>
+                <select id="outputLanguage" name="outputLanguage">
+                  <option value="Chinese" selected>Chinese · 中文</option>
+                  <option value="English">English</option>
+                  <option value="Japanese">Japanese · 日本語</option>
+                  <option value="Korean">Korean · 한국어</option>
+                  <option value="Spanish">Spanish · Español</option>
+                  <option value="French">French · Français</option>
+                  <option value="German">German · Deutsch</option>
+                </select>
+              </label>
+
+              <label class="form-field">
+                <span class="field-label" data-i18n="analysisDepth">Analysis Depth</span>
+                <select
+                  id="researchDepth"
+                  name="researchDepth"
+                >
+                  <option value="1" selected data-i18n="depthShallow">Shallow · quick research</option>
+                  <option value="3" data-i18n="depthMedium">Medium · moderate debate</option>
+                  <option value="5" data-i18n="depthDeep">Deep · comprehensive research</option>
+                </select>
+              </label>
+
+              <label class="form-field">
+                <span class="field-label" data-i18n="llmProvider">LLM Provider</span>
+                <select id="llmProvider" name="llmProvider">
+                  <option value="minimax-cn" selected>MiniMax · China</option>
+                  <option value="minimax">MiniMax · Global</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="google">Google</option>
+                  <option value="qwen-cn">Qwen · China</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="openai_compatible">OpenAI-compatible</option>
+                </select>
+              </label>
+
+              <label class="form-field">
+                <span class="field-label" data-i18n="quickModel">Quick Model</span>
+                <input
+                  id="quickThinkLlm"
+                  name="quickThinkLlm"
+                  type="text"
+                  value="MiniMax-M3"
+                  autocomplete="off"
+                />
+              </label>
+
+              <label class="form-field">
+                <span class="field-label" data-i18n="deepModel">Deep Model</span>
+                <input
+                  id="deepThinkLlm"
+                  name="deepThinkLlm"
+                  type="text"
+                  value="MiniMax-M3"
+                  autocomplete="off"
+                />
+              </label>
+
+              <label class="form-field">
+                <span class="field-label" data-i18n="backendUrl">Backend URL</span>
+                <input
+                  id="backendUrl"
+                  name="backendUrl"
+                  type="url"
+                  placeholder="Provider default"
+                  data-i18n-placeholder="providerDefault"
+                  autocomplete="off"
+                />
+              </label>
+            </div>
+          </form>
+        </section>
+
         <!-- Main dashboard -->
-        <section class="dashboard">
+        <section id="runView" class="dashboard">
 
           <!-- Left panel: Agents + History -->
           <section class="panel agents-panel" aria-label="Agent timeline">
@@ -150,7 +247,7 @@
                   <path d="M11 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM8 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm.256 7a4.474 4.474 0 0 1-.229-1.004H3c.001-.246.154-.986.832-1.664C4.484 10.68 5.711 10 8 10c.26 0 .507.009.74.025.226-.341.496-.65.804-.918C9.077 9.038 8.564 9 8 9c-5 0-6 3-6 4s1 1 1 1h5.256z"/>
                   <path d="M12.5 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zm.5-5v1h1a.5.5 0 0 1 0 1h-1v1a.5.5 0 0 1-1 0v-1h-1a.5.5 0 0 1 0-1h1v-1a.5.5 0 0 1 1 0z"/>
                 </svg>
-                Agent Timeline
+                <span data-i18n="agentTimeline">Agent Timeline</span>
               </div>
             </div>
             <ol id="agentList" class="agent-list"></ol>
@@ -164,9 +261,9 @@
                   <path d="M8 1a7 7 0 1 0 4.95 11.95l.707.707A8.001 8.001 0 1 1 8 0v1z"/>
                   <path d="M7.5 3a.5.5 0 0 1 .5.5v5.21l3.248 1.856a.5.5 0 0 1-.496.868l-3.5-2A.5.5 0 0 1 7 9V3.5a.5.5 0 0 1 .5-.5z"/>
                 </svg>
-                Run History
+                <span data-i18n="runHistory">Run History</span>
               </div>
-              <button id="refreshHistory" type="button" class="btn-icon" title="Refresh history">
+              <button id="refreshHistory" type="button" class="btn-icon" title="Refresh history" data-i18n-title="refreshHistory">
                 <svg viewBox="0 0 16 16" fill="currentColor">
                   <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
                   <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
@@ -183,9 +280,9 @@
                 <svg class="panel-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                   <path d="M0 4s0-2 2-2 2 2 2 2v6s0 2-2 2-2-2-2-2V4zm6 0s0-2 2-2 2 2 2 2v6s0 2-2 2-2-2-2-2V4zm6 0s0-2 2-2 2 2 2 2v6s0 2-2 2-2-2-2-2V4z"/>
                 </svg>
-                Live Stream
+                <span data-i18n="liveStream">Live Stream</span>
               </div>
-              <button id="clearLog" type="button" class="btn-icon" title="Clear log">
+              <button id="clearLog" type="button" class="btn-icon" title="Clear log" data-i18n-title="clearLog">
                 <svg viewBox="0 0 16 16" fill="currentColor">
                   <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5zm-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5zM4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06zm6.53-.528a.5.5 0 0 0-.528.47l-.5 8.5a.5.5 0 0 0 .998.058l.5-8.5a.5.5 0 0 0-.47-.528zM8 4.5a.5.5 0 0 0-.5.5v8.5a.5.5 0 0 0 1 0V5a.5.5 0 0 0-.5-.5z"/>
                 </svg>
@@ -201,9 +298,9 @@
                 <svg class="panel-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                   <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
                 </svg>
-                Analysis Report
+                <span data-i18n="analysisReport">Analysis Report</span>
               </div>
-              <button id="loadReport" type="button" class="btn-icon" disabled title="Load report">
+              <button id="loadReport" type="button" class="btn-icon" disabled title="Load report" data-i18n-title="loadReport">
                 <svg viewBox="0 0 16 16" fill="currentColor">
                   <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
                   <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
@@ -217,6 +314,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js" type="module"></script>
+    <script src="/static/app.js?v=20260706-run-hash" type="module"></script>
   </body>
 </html>

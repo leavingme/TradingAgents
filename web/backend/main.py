@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import queue
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -16,6 +17,19 @@ from .task_store import store
 
 app = FastAPI(title="TradingAgents Web API")
 FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
+
+
+@app.get("/api/config/defaults")
+async def get_config_defaults():
+    fields = RunCreateRequest.model_fields
+    return {
+        "llm_provider": fields["llm_provider"].default,
+        "quick_think_llm": fields["quick_think_llm"].default,
+        "deep_think_llm": fields["deep_think_llm"].default,
+        "backend_url": fields["backend_url"].default,
+        "output_language": fields["output_language"].default,
+        "research_depth": fields["research_depth"].default or 1,
+    }
 
 
 @app.post("/api/runs", response_model=RunRecordResponse)
@@ -61,10 +75,15 @@ async def stream_run_events(run_id: str):
             if current.status in ("completed", "failed", "cancelled"):
                 break
 
-            event = await asyncio.to_thread(current.event_queue.get)
-            if event is None:
+            try:
+                event = await asyncio.to_thread(current.event_queue.get, True, 15)
+            except queue.Empty:
+                yield ": heartbeat\n\n"
                 continue
-            # The event is already in current.events; replay loop will emit it.
+            if event is None:
+                break
+            replay_index += 1
+            yield _sse(event.type, event.to_dict())
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -92,7 +111,7 @@ async def cancel_run(run_id: str):
 
 
 def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
 if FRONTEND_DIR.exists():

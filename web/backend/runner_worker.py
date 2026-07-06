@@ -51,9 +51,9 @@ def _run(run_id: str, request: RunCreateRequest, task_store: TaskStore) -> None:
                 task_store.add_event(
                     run_id,
                     AnalysisEvent(
-                        type="error",
+                        type="run_cancelled",
                         run_id=run_id,
-                        content={"error": "run cancelled", "error_type": "Cancelled"},
+                        content={"message": "run cancelled"},
                     ),
                 )
                 break

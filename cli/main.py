@@ -1183,7 +1183,7 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     config["google_thinking_level"] = selections.get("google_thinking_level")
     config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
     config["anthropic_effort"] = selections.get("anthropic_effort")
-    config["output_language"] = selections.get("output_language", "English")
+    config["output_language"] = selections.get("output_language", DEFAULT_CONFIG["output_language"])
     # --checkpoint/--no-checkpoint overrides only when explicitly given; omitting
     # the flag preserves TRADINGAGENTS_CHECKPOINT_ENABLED / the default (#976).
     if checkpoint is not None:
@@ -1470,6 +1470,12 @@ def web(
     ),
 ):
     """Start the TradingAgents WebUI backend."""
+    # The console-script shim makes importing ``cli.main`` robust even when the
+    # agent sandbox injects a conflicting PYTHONPATH entry. Uvicorn imports the
+    # ASGI app from a string separately, so give it the repository root
+    # explicitly; otherwise ``web.backend.main:app`` can fail with
+    # ``ModuleNotFoundError: No module named 'web'`` in managed workspaces.
+    repo_root = Path(__file__).resolve().parents[1]
     try:
         import uvicorn
     except ImportError as exc:  # pragma: no cover - packaging guard
@@ -1478,7 +1484,13 @@ def web(
         ) from exc
 
     console.print(f"[green]Starting TradingAgents WebUI:[/green] http://{host}:{port}")
-    uvicorn.run("web.backend.main:app", host=host, port=port, reload=reload)
+    uvicorn.run(
+        "web.backend.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+        app_dir=str(repo_root),
+    )
 
 
 if __name__ == "__main__":

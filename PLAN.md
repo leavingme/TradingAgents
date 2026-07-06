@@ -250,4 +250,15 @@ After this works, refactor the existing TUI to consume the same runtime stream.
 - Done: minimal static WebUI served by FastAPI; it starts one analysis, consumes SSE events, shows agent status, logs, run history, and loads the final report.
 - Done: package metadata includes the `web` package, frontend static assets, and FastAPI/Uvicorn runtime dependencies.
 - Done: `tradingagents web` starts the WebUI backend.
-- Next: refactor CLI/TUI to consume runtime events, then add persisted run storage/history.
+- Done (Phase 2): CLI/TUI `run_analysis()` refactored to consume `run_analysis_stream()` events.
+  - `AnalysisRequest` extended with `google_thinking_level`, `openai_reasoning_effort`, `anthropic_effort`.
+  - `config_builder.py` wires the new fields into the graph config.
+  - Wall-time tracker driven by `agent_status` events instead of raw chunks.
+  - Known limitation: `StatsCallbackHandler` not injectable through runtime; TUI stats panel shows zeros.
+- Done: `TaskStore` upgraded from in-memory to SQLite persistence (`~/.tradingagents/webui_runs.db`).
+  - Runs and events persisted across server restarts.
+  - Interrupted runs auto-recovered to `failed` on startup.
+  - `list()` returns up to 100 runs from DB.
+  - Past-run SSE replay reads from events table.
+- Done: Premium dark-mode frontend (glassmorphism, Inter font, marked.js, animated agent status dots).
+- Next: re-introduce `StatsCallbackHandler` support in the runtime layer (optional), add a `/api/runs/{run_id}/events/replay` batch endpoint for offline consumers, add basic auth / API key protection for the Web API.

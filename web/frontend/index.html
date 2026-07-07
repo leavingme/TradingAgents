@@ -16,7 +16,7 @@
     <!-- marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css?v=20260707-mobile-layout" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260707-cli-parity" />
   </head>
   <body>
     <!-- Ambient background orbs -->
@@ -58,6 +58,18 @@
               <span class="meta-chip">
                 <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 1a1 1 0 0 0 0 2h4a1 1 0 0 0 0-2H6zM3 4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H3zm0 1h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>
                 <span id="eventCount">0 events</span>
+              </span>
+              <span class="meta-chip">
+                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3a3 3 0 1 1 6 0v1h1.5A1.5 1.5 0 0 1 14 5.5v4A1.5 1.5 0 0 1 12.5 11h-9A1.5 1.5 0 0 1 2 9.5v-4A1.5 1.5 0 0 1 3.5 4H5V3zm1 1h4V3a2 2 0 1 0-4 0v1zm-2.5 1A.5.5 0 0 0 3 5.5v4a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 0-.5-.5h-9zM4 13.5a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5z"/></svg>
+                <span id="llmCount">0 LLM</span>
+              </span>
+              <span class="meta-chip">
+                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5v-3z"/></svg>
+                <span id="toolCount">0 tools</span>
+              </span>
+              <span class="meta-chip">
+                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5A6.5 6.5 0 1 0 8 14.5 6.5 6.5 0 0 0 8 1.5zM.5 8a7.5 7.5 0 1 1 15 0A7.5 7.5 0 0 1 .5 8zm4.75-2.75a.5.5 0 0 1 .5-.5h4.5a.5.5 0 0 1 .4.8L8.9 8l1.75 2.45a.5.5 0 0 1-.4.8h-4.5a.5.5 0 0 1 0-1h3.529L7.879 8.3a.5.5 0 0 1 0-.6l1.4-1.95H5.75a.5.5 0 0 1-.5-.5z"/></svg>
+                <span id="tokenCount">Tokens: --</span>
               </span>
             </div>
           </div>
@@ -177,10 +189,24 @@
                   <option value="English">English</option>
                   <option value="Japanese">Japanese · 日本語</option>
                   <option value="Korean">Korean · 한국어</option>
+                  <option value="Hindi">Hindi · हिन्दी</option>
                   <option value="Spanish">Spanish · Español</option>
+                  <option value="Portuguese">Portuguese · Português</option>
                   <option value="French">French · Français</option>
                   <option value="German">German · Deutsch</option>
+                  <option value="Arabic">Arabic · العربية</option>
+                  <option value="Russian">Russian · Русский</option>
+                  <option value="__custom" data-i18n="customLanguage">Custom language...</option>
                 </select>
+                <input
+                  id="customOutputLanguage"
+                  name="customOutputLanguage"
+                  type="text"
+                  placeholder="e.g. Turkish, Vietnamese, Thai, Indonesian"
+                  data-i18n-placeholder="customLanguagePlaceholder"
+                  autocomplete="off"
+                  hidden
+                />
               </label>
 
               <label class="form-field">
@@ -274,6 +300,11 @@
                 </select>
               </label>
             </div>
+
+            <section class="env-status-panel" aria-label="API key status">
+              <div class="panel-title" data-i18n="apiKeyStatus">API Key Status</div>
+              <div id="apiKeyStatusList" class="env-status-list"></div>
+            </section>
           </form>
         </section>
 
@@ -360,6 +391,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260707-mobile-layout" type="module"></script>
+    <script src="/static/app.js?v=20260707-cli-parity" type="module"></script>
   </body>
 </html>

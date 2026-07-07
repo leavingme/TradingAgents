@@ -14,6 +14,7 @@ EventType = Literal[
     "tool_call",
     "agent_status",
     "report_section",
+    "stats",
     "run_completed",
     "run_cancelled",
     "error",
@@ -68,6 +69,7 @@ class AnalysisRequest:
     run_id: str = field(default_factory=lambda: uuid4().hex)
     debug: bool = False
     config_overrides: dict[str, Any] = field(default_factory=dict)
+    callbacks: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True)

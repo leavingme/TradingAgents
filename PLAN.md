@@ -254,7 +254,7 @@ After this works, refactor the existing TUI to consume the same runtime stream.
   - `AnalysisRequest` extended with `google_thinking_level`, `openai_reasoning_effort`, `anthropic_effort`.
   - `config_builder.py` wires the new fields into the graph config.
   - Wall-time tracker driven by `agent_status` events instead of raw chunks.
-  - Known limitation: `StatsCallbackHandler` not injectable through runtime; TUI stats panel shows zeros.
+  - `StatsCallbackHandler` is injectable through runtime callbacks; CLI/TUI and WebUI consume live `stats` events.
 - Done: `TaskStore` upgraded from in-memory to SQLite persistence (`~/.tradingagents/webui_runs.db`).
   - Runs and events persisted across server restarts.
   - Interrupted runs auto-recovered to `failed` on startup.
@@ -269,7 +269,10 @@ After this works, refactor the existing TUI to consume the same runtime stream.
   history (`#run=<run_id>`), UI language separate from report language, live SSE
   heartbeat/reconnect behavior, CLI-style Team / Agent / Status progress table,
   live report-section rendering, and report-section switching.
-- Next: re-introduce `StatsCallbackHandler` support in the runtime layer (optional), add a `/api/runs/{run_id}/events/replay` batch endpoint for offline consumers, add basic auth / API key protection for the Web API.
+- Done: Settings page shows server-side provider API key status without exposing
+  secret values, and report language supports the same built-in/custom language
+  choices as the CLI.
+- Next: add a `/api/runs/{run_id}/events/replay` batch endpoint for offline consumers, add basic auth / API key protection for the Web API.
 
 ## CLI / WebUI Coverage Matrix (2026-07-06)
 
@@ -278,7 +281,7 @@ After this works, refactor the existing TUI to consume the same runtime stream.
 | Step 1 ticker input with suffix support | Covered by Run page ticker selector plus `Custom ticker...` input for arbitrary symbols. |
 | Asset type detection/selection | Covered by explicit `Asset Type` selector (`stock`/`crypto`). |
 | Step 2 analysis date | Covered by Run page date picker. |
-| Step 3 report output language | Covered by Settings `Report Language`; separate `UI Language` only affects WebUI chrome. |
+| Step 3 report output language | Covered by Settings `Report Language`, including CLI's custom language input; separate `UI Language` only affects WebUI chrome. |
 | Step 4 analyst selection | Covered by Run page analyst toggles. |
 | Step 5 research depth | Covered by Settings `Analysis Depth` using CLI-equivalent choices: Shallow=1, Medium=3, Deep=5. |
 | Step 6 LLM provider / backend URL | Covered by Settings `LLM Provider` and optional `Backend URL`. |
@@ -286,6 +289,7 @@ After this works, refactor the existing TUI to consume the same runtime stream.
 | Step 8 provider-specific thinking/reasoning config | Covered by Settings provider-specific controls for Google, OpenAI, and Anthropic. |
 | Live Team / Agent / Status progress | Covered by Web Agent panel using CLI team grouping and animated `in_progress`. |
 | Message/tool stream | Covered by SSE Live Stream panel. |
+| LLM/tool/token stats | Covered by runtime `stats` events and Web header counters. |
 | Incremental report sections | Covered by live report viewer; report sections are switchable from the report selector. |
 | Final complete report | Covered by `/api/runs/{run_id}/report` and final report load button. |
 | Run cancellation | Covered by Cancel button and `run_cancelled` events. |
@@ -293,10 +297,9 @@ After this works, refactor the existing TUI to consume the same runtime stream.
 
 Known differences:
 
-- Web does not prompt for or persist provider API keys; it assumes environment
-  configuration is already present on the server.
-- CLI/TUI token/cost stats remain limited because `StatsCallbackHandler` is not
-  yet injectable through `run_analysis_stream()`.
+- Web does not prompt for or persist provider API keys in the browser. Instead,
+  `/api/config/env-status` reports whether the server-side environment variables
+  required by each provider are configured.
 
 ## Hardening Update (2026-07-06)
 
@@ -309,8 +312,7 @@ Known differences:
 
 Next recommended work:
 
-1. Re-introduce `StatsCallbackHandler` support in the runtime layer (optional), so the TUI stats panel can be populated when using `run_analysis_stream()`.
-2. Add a `/api/runs/{run_id}/events/replay` batch endpoint for offline consumers.
-3. Add basic auth / API key protection for the Web API before exposing it beyond localhost.
-4. Add integration tests with a mocked long-running runner to verify cancellation streams a `run_cancelled` event and closes SSE cleanly.
-5. Consider replacing CDN-loaded Markdown rendering with a vendored/bundled asset for offline/local deployments.
+1. Add a `/api/runs/{run_id}/events/replay` batch endpoint for offline consumers.
+2. Add basic auth / API key protection for the Web API before exposing it beyond localhost.
+3. Add integration tests with a mocked long-running runner to verify cancellation streams a `run_cancelled` event and closes SSE cleanly.
+4. Consider replacing CDN-loaded Markdown rendering with a vendored/bundled asset for offline/local deployments.

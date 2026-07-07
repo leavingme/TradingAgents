@@ -14,7 +14,7 @@ class FakePropagator:
             **kwargs,
         }
 
-    def get_graph_args(self):
+    def get_graph_args(self, callbacks=None):
         return {}
 
 
@@ -66,10 +66,11 @@ class FakeMemoryLog:
 
 
 class FakeTradingAgentsGraph:
-    def __init__(self, selected_analysts, config, debug=False):
+    def __init__(self, selected_analysts, config, debug=False, callbacks=None):
         self.selected_analysts = selected_analysts
         self.config = config
         self.debug = debug
+        self.callbacks = callbacks or []
         self.propagator = FakePropagator()
         self.graph = FakeCompiledGraph()
         self.workflow = None
@@ -139,6 +140,46 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert isinstance(completed.content, dict)
     assert completed.content["decision"] == "Hold"
     assert Path(completed.content["report_path"]).exists()
+
+
+class FakeStatsHandler:
+    def __init__(self):
+        self.calls = 0
+
+    def get_stats(self):
+        self.calls += 1
+        return {
+            "llm_calls": self.calls,
+            "tool_calls": self.calls + 1,
+            "tokens_in": self.calls * 10,
+            "tokens_out": self.calls * 20,
+        }
+
+
+def test_run_analysis_stream_emits_callback_stats(monkeypatch, tmp_path):
+    from tradingagents.runtime import analysis_runner
+
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", FakeTradingAgentsGraph)
+
+    stats_handler = FakeStatsHandler()
+    events = list(
+        run_analysis_stream(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date="2026-07-05",
+                selected_analysts=("market",),
+                report_dir=tmp_path / "reports",
+                run_id="run-stats",
+                callbacks=(stats_handler,),
+            )
+        )
+    )
+
+    stats_events = [event for event in events if event.type == "stats"]
+    assert stats_events
+    assert isinstance(stats_events[-1].content, dict)
+    assert stats_events[-1].content["llm_calls"] >= 1
+    assert stats_events[-1].content["tokens_out"] >= 20
 
 
 def test_run_analysis_once_returns_final_result(monkeypatch, tmp_path):

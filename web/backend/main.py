@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import queue
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from tradingagents.llm_clients.api_key_env import PROVIDER_API_KEY_ENV
+from tradingagents.llm_clients.openai_client import OPENAI_COMPATIBLE_PROVIDERS
 
 from .models import RunCreateRequest, RunRecordResponse
 from .runner_worker import start_background_run
@@ -33,6 +36,20 @@ async def get_config_defaults():
         "openai_reasoning_effort": fields["openai_reasoning_effort"].default,
         "anthropic_effort": fields["anthropic_effort"].default,
     }
+
+
+@app.get("/api/config/env-status")
+async def get_env_status():
+    providers = {}
+    for provider, env_var in sorted(PROVIDER_API_KEY_ENV.items()):
+        spec = OPENAI_COMPATIBLE_PROVIDERS.get(provider)
+        required = env_var is not None and not (spec is not None and spec.key_optional)
+        providers[provider] = {
+            "env_var": env_var,
+            "configured": bool(env_var and os.environ.get(env_var)),
+            "required": required,
+        }
+    return {"providers": providers}
 
 
 @app.post("/api/runs", response_model=RunRecordResponse)

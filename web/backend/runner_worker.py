@@ -5,12 +5,17 @@ from __future__ import annotations
 import threading
 
 from tradingagents.runtime import AnalysisEvent, AnalysisRequest, run_analysis_stream
+from tradingagents.runtime.stats_handler import StatsCallbackHandler
 
 from .models import RunCreateRequest
 from .task_store import TaskStore
 
 
-def to_analysis_request(run_id: str, request: RunCreateRequest) -> AnalysisRequest:
+def to_analysis_request(
+    run_id: str,
+    request: RunCreateRequest,
+    callbacks: tuple[object, ...] = (),
+) -> AnalysisRequest:
     return AnalysisRequest(
         ticker=request.ticker,
         analysis_date=request.analysis_date,
@@ -30,6 +35,7 @@ def to_analysis_request(run_id: str, request: RunCreateRequest) -> AnalysisReque
         anthropic_effort=request.anthropic_effort,
         run_id=run_id,
         config_overrides=request.config_overrides,
+        callbacks=callbacks,
     )
 
 
@@ -46,8 +52,10 @@ def start_background_run(run_id: str, request: RunCreateRequest, task_store: Tas
 def _run(run_id: str, request: RunCreateRequest, task_store: TaskStore) -> None:
     task_store.mark_started(run_id)
     final_status = "completed"
+    stats_handler = StatsCallbackHandler()
     try:
-        for event in run_analysis_stream(to_analysis_request(run_id, request)):
+        analysis_request = to_analysis_request(run_id, request, callbacks=(stats_handler,))
+        for event in run_analysis_stream(analysis_request):
             record = task_store.get(run_id)
             if record is not None and record.cancel_requested:
                 final_status = "cancelled"

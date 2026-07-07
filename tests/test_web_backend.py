@@ -68,6 +68,18 @@ def test_get_config_defaults_matches_webui_defaults():
     assert defaults["research_depth"] == 1
 
 
+def test_get_env_status_reports_provider_key_presence(monkeypatch):
+    from web.backend import main
+
+    monkeypatch.setenv("MINIMAX_CN_API_KEY", "test-key")
+    status = asyncio.run(main.get_env_status())
+
+    assert status["providers"]["minimax-cn"]["env_var"] == "MINIMAX_CN_API_KEY"
+    assert status["providers"]["minimax-cn"]["configured"] is True
+    assert status["providers"]["ollama"]["required"] is False
+    assert status["providers"]["openai_compatible"]["required"] is False
+
+
 def test_run_create_request_passes_webui_config():
     from web.backend.models import RunCreateRequest
     from web.backend.runner_worker import to_analysis_request
@@ -96,6 +108,17 @@ def test_run_create_request_passes_webui_config():
     assert analysis_request.google_thinking_level == "high"
     assert analysis_request.openai_reasoning_effort == "medium"
     assert analysis_request.anthropic_effort == "low"
+
+
+def test_run_create_request_preserves_runtime_callbacks():
+    from web.backend.models import RunCreateRequest
+    from web.backend.runner_worker import to_analysis_request
+
+    callback = object()
+    request = RunCreateRequest(ticker="NVDA", analysis_date="2026-07-05")
+    analysis_request = to_analysis_request("run-callbacks", request, callbacks=(callback,))
+
+    assert analysis_request.callbacks == (callback,)
 
 
 def test_stream_run_events_replays_stored_events(monkeypatch):

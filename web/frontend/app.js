@@ -25,6 +25,9 @@ const statusEl      = document.querySelector('#runStatus');
 const statusDot     = document.querySelector('#statusDot');
 const runIdEl       = document.querySelector('#runId');
 const eventCountEl  = document.querySelector('#eventCount');
+const llmCountEl    = document.querySelector('#llmCount');
+const toolCountEl   = document.querySelector('#toolCount');
+const tokenCountEl  = document.querySelector('#tokenCount');
 const agentList     = document.querySelector('#agentList');
 const eventLog      = document.querySelector('#eventLog');
 const reportViewer  = document.querySelector('#reportViewer');
@@ -35,11 +38,13 @@ const loadReport    = document.querySelector('#loadReport');
 const reportSectionSelect = document.querySelector('#reportSectionSelect');
 const refreshHistory= document.querySelector('#refreshHistory');
 const historyList   = document.querySelector('#historyList');
+const apiKeyStatusList = document.querySelector('#apiKeyStatusList');
 const llmProvider   = document.querySelector('#llmProvider');
 const quickThinkLlm = document.querySelector('#quickThinkLlm');
 const deepThinkLlm  = document.querySelector('#deepThinkLlm');
 const backendUrl    = document.querySelector('#backendUrl');
 const outputLanguage= document.querySelector('#outputLanguage');
+const customOutputLanguage = document.querySelector('#customOutputLanguage');
 const researchDepth = document.querySelector('#researchDepth');
 const uiLanguage    = document.querySelector('#uiLanguage');
 const googleThinkingLevel = document.querySelector('#googleThinkingLevel');
@@ -51,10 +56,12 @@ let currentRunId = null;
 let source       = null;
 let eventCount   = 0;
 let currentStatus = 'ready';
+let currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
 const agents     = new Map();
 const reportSections = new Map();
 let selectedReportSection = 'all';
 let configDefaults = null;
+let envStatus = null;
 const settingsStorageKey = 'tradingagents.web.settings';
 const uiLanguageStorageKey = 'tradingagents.web.uiLanguage';
 let activeLocale = 'en';
@@ -83,9 +90,15 @@ const translations = {
     settingsTitle: 'Run Settings',
     settingsSubtitle: 'Defaults used when starting a new analysis run.',
     resetDefaults: 'Reset Defaults',
+    apiKeyStatus: 'API Key Status',
+    apiKeyConfigured: 'configured',
+    apiKeyMissing: 'missing',
+    apiKeyNotRequired: 'not required',
     uiLanguage: 'UI Language',
     uiLanguageAuto: 'Auto',
     reportLanguage: 'Report Language',
+    customLanguage: 'Custom language...',
+    customLanguagePlaceholder: 'e.g. Turkish, Vietnamese, Thai, Indonesian',
     analysisDepth: 'Analysis Depth',
     depthShallow: 'Shallow · quick research',
     depthMedium: 'Medium · moderate debate',
@@ -137,11 +150,15 @@ const translations = {
     eventToolCall: 'tool call',
     eventAgentStatus: 'agent status',
     eventReportSection: 'report section',
+    eventStats: 'stats',
     eventRunCompleted: 'run completed',
     eventRunCancelled: 'run cancelled',
     eventError: 'error',
     reportUpdated: 'updated',
     liveReportTitle: 'Live Analysis Report',
+    llmCalls: 'LLM',
+    toolCalls: 'tools',
+    tokens: 'Tokens',
   },
   zh: {
     pageTitle: 'TradingAgents — AI 市场情报',
@@ -167,9 +184,15 @@ const translations = {
     settingsTitle: '运行配置',
     settingsSubtitle: '启动新分析时使用的默认配置。',
     resetDefaults: '恢复默认',
+    apiKeyStatus: 'API Key 状态',
+    apiKeyConfigured: '已配置',
+    apiKeyMissing: '未配置',
+    apiKeyNotRequired: '无需配置',
     uiLanguage: '界面语言',
     uiLanguageAuto: '自动',
     reportLanguage: '报告语言',
+    customLanguage: '自定义语言...',
+    customLanguagePlaceholder: '例如 Turkish, Vietnamese, Thai, Indonesian',
     analysisDepth: '分析深度',
     depthShallow: '浅层 · 快速研究',
     depthMedium: '中等 · 适度辩论',
@@ -221,11 +244,15 @@ const translations = {
     eventToolCall: '工具调用',
     eventAgentStatus: 'Agent 状态',
     eventReportSection: '报告章节',
+    eventStats: '统计',
     eventRunCompleted: '运行完成',
     eventRunCancelled: '运行取消',
     eventError: '错误',
     reportUpdated: '已更新',
     liveReportTitle: '实时分析报告',
+    llmCalls: 'LLM',
+    toolCalls: '工具',
+    tokens: 'Tokens',
   },
 };
 const modelPresets = {
@@ -320,6 +347,7 @@ document.querySelector('#analysisDate').value = new Date().toISOString().slice(0
 initializeLocale();
 showReportPlaceholder();
 loadConfigDefaults();
+loadEnvStatus();
 
 runViewButton.addEventListener('click', () => showView('run'));
 settingsViewButton.addEventListener('click', () => showView('settings'));
@@ -330,6 +358,7 @@ settingsForm.addEventListener('input', saveSettings);
 settingsForm.addEventListener('change', saveSettings);
 
 tickerSelect.addEventListener('change', updateTickerMode);
+outputLanguage.addEventListener('change', updateOutputLanguageMode);
 
 uiLanguage.addEventListener('change', () => {
   saveUiLanguage(uiLanguage.value);
@@ -356,6 +385,7 @@ llmProvider.addEventListener('change', () => {
     deepThinkLlm.value = preset.deep;
   }
   updateProviderOptions();
+  renderApiKeyStatus();
   saveSettings();
 });
 
@@ -436,16 +466,27 @@ async function loadConfigDefaults() {
   }
 }
 
+async function loadEnvStatus() {
+  try {
+    const response = await fetch('/api/config/env-status');
+    if (!response.ok) return;
+    envStatus = await response.json();
+    renderApiKeyStatus();
+  } catch {
+    // API key status is informational; runs still use server-side env config.
+  }
+}
+
 function applyConfigDefaults(defaults) {
   setFieldValue(llmProvider, defaults.llm_provider);
   setFieldValue(quickThinkLlm, defaults.quick_think_llm);
   setFieldValue(deepThinkLlm, defaults.deep_think_llm);
   setFieldValue(backendUrl, defaults.backend_url);
-  setFieldValue(outputLanguage, defaults.output_language);
   setFieldValue(researchDepth, defaults.research_depth);
   setFieldValue(googleThinkingLevel, defaults.google_thinking_level);
   setFieldValue(openaiReasoningEffort, defaults.openai_reasoning_effort);
   setFieldValue(anthropicEffort, defaults.anthropic_effort);
+  setOutputLanguageValue(defaults.output_language);
   updateProviderOptions();
 }
 
@@ -466,7 +507,7 @@ function applySavedSettings() {
   setFieldValue(quickThinkLlm, saved.quick_think_llm);
   setFieldValue(deepThinkLlm, saved.deep_think_llm);
   setFieldValue(backendUrl, saved.backend_url);
-  setFieldValue(outputLanguage, saved.output_language);
+  setOutputLanguageValue(saved.output_language);
   setFieldValue(researchDepth, saved.research_depth);
   setFieldValue(googleThinkingLevel, saved.google_thinking_level);
   setFieldValue(openaiReasoningEffort, saved.openai_reasoning_effort);
@@ -523,6 +564,8 @@ function applyTranslations() {
   if (!currentRunId) runIdEl.textContent = t('noRun');
   statusEl.textContent = formatStatus(currentStatus);
   updateEventCount();
+  updateStats(currentStats);
+  renderApiKeyStatus();
   if (reportViewer.querySelector('.report-empty')) showReportPlaceholder();
 }
 
@@ -566,6 +609,7 @@ function formatEventType(type) {
     tool_call: 'eventToolCall',
     agent_status: 'eventAgentStatus',
     report_section: 'eventReportSection',
+    stats: 'eventStats',
     run_completed: 'eventRunCompleted',
     run_cancelled: 'eventRunCancelled',
     error: 'eventError',
@@ -590,7 +634,7 @@ function currentSettings() {
     quick_think_llm: quickThinkLlm.value.trim() || null,
     deep_think_llm: deepThinkLlm.value.trim() || null,
     backend_url: backendUrl.value.trim() || null,
-    output_language: outputLanguage.value,
+    output_language: selectedOutputLanguage(),
     google_thinking_level: googleThinkingLevel.value || null,
     openai_reasoning_effort: openaiReasoningEffort.value || null,
     anthropic_effort: anthropicEffort.value || null,
@@ -611,6 +655,43 @@ function updateProviderOptions() {
   document.querySelectorAll(activeClass).forEach(element => {
     element.hidden = false;
   });
+}
+
+function renderApiKeyStatus() {
+  if (!apiKeyStatusList || !envStatus?.providers) return;
+  const providers = envStatus.providers;
+  const active = llmProvider.value;
+  const rows = [active, 'openai_compatible']
+    .concat(Object.keys(providers).filter(provider => provider !== active && provider !== 'openai_compatible'))
+    .filter((provider, index, all) => providers[provider] && all.indexOf(provider) === index)
+    .slice(0, 8)
+    .map(provider => renderApiKeyStatusItem(provider, providers[provider], provider === active));
+  apiKeyStatusList.replaceChildren(...rows);
+}
+
+function renderApiKeyStatusItem(provider, status, active) {
+  const item = document.createElement('div');
+  item.className = `env-status-item${active ? ' active' : ''}`;
+
+  const name = document.createElement('span');
+  name.className = 'env-status-provider';
+  name.textContent = provider;
+
+  const detail = document.createElement('span');
+  detail.className = 'env-status-detail';
+  detail.textContent = status.env_var || t('apiKeyNotRequired');
+
+  const badge = document.createElement('span');
+  const state = status.required
+    ? (status.configured ? 'configured' : 'missing')
+    : 'optional';
+  badge.className = `env-status-badge ${state}`;
+  badge.textContent = status.required
+    ? (status.configured ? t('apiKeyConfigured') : t('apiKeyMissing'))
+    : t('apiKeyNotRequired');
+
+  item.append(name, detail, badge);
+  return item;
 }
 
 function saveSettings() {
@@ -698,6 +779,32 @@ function updateTickerMode() {
   if (custom) customTicker.focus();
 }
 
+function selectedOutputLanguage() {
+  const selected = outputLanguage.value;
+  if (selected !== '__custom') return selected;
+  return customOutputLanguage.value.trim() || 'Chinese';
+}
+
+function setOutputLanguageValue(value) {
+  if (!value) return;
+  const known = Array.from(outputLanguage.options).some(option => option.value === value);
+  if (known) {
+    outputLanguage.value = value;
+    customOutputLanguage.value = '';
+  } else {
+    outputLanguage.value = '__custom';
+    customOutputLanguage.value = value;
+  }
+  updateOutputLanguageMode();
+}
+
+function updateOutputLanguageMode() {
+  const custom = outputLanguage.value === '__custom';
+  customOutputLanguage.hidden = !custom;
+  customOutputLanguage.required = custom;
+  if (custom) customOutputLanguage.focus();
+}
+
 /** Return a short, displayable run ID (last 8 chars). */
 function shortId(id) {
   if (!id || id === t('noRun')) return id;
@@ -709,6 +816,7 @@ function resetRun() {
   source       = null;
   currentRunId = null;
   eventCount   = 0;
+  currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
   agents.clear();
   reportSections.clear();
   selectedReportSection = 'all';
@@ -718,6 +826,7 @@ function resetRun() {
   showReportPlaceholder();
   runIdEl.textContent       = t('noRun');
   updateEventCount();
+  updateStats(currentStats);
   loadReport.disabled       = true;
 }
 
@@ -733,6 +842,7 @@ function connectEvents(runId) {
     'tool_call',
     'agent_status',
     'report_section',
+    'stats',
     'run_completed',
     'run_cancelled',
     'error',
@@ -762,6 +872,11 @@ function handleRuntimeEvent(type, event) {
 
   if (type === 'report_section') {
     updateReportSection(event.content);
+  }
+
+  if (type === 'stats') {
+    updateStats(event.content);
+    return;
   }
 
   if (type === 'run_completed') {
@@ -913,7 +1028,9 @@ async function selectHistoryRun(runId, options = {}) {
   runIdEl.textContent      = shortId(run.run_id);
   setStatus(run.status, statusClass(run.status));
   eventCount     = 0;
+  currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
   updateEventCount();
+  updateStats(currentStats);
   reportSections.clear();
   selectedReportSection = 'all';
   updateReportSectionOptions();
@@ -963,7 +1080,37 @@ function eventText(type, content) {
   if (type === 'report_section') return `${content.section || 'report'} ${t('reportUpdated')}`;
   if (type === 'agent_status')   return formatStatus(content.status || '');
   if (type === 'run_started')    return `${content.ticker} · ${content.analysis_date}`;
+  if (type === 'stats')          return formatStats(content);
   return JSON.stringify(content);
+}
+
+function updateStats(stats = {}) {
+  currentStats = {
+    llm_calls: Number(stats.llm_calls) || 0,
+    tool_calls: Number(stats.tool_calls) || 0,
+    tokens_in: Number(stats.tokens_in) || 0,
+    tokens_out: Number(stats.tokens_out) || 0,
+  };
+  llmCountEl.textContent = `${currentStats.llm_calls} ${t('llmCalls')}`;
+  toolCountEl.textContent = `${currentStats.tool_calls} ${t('toolCalls')}`;
+  const hasTokens = currentStats.tokens_in > 0 || currentStats.tokens_out > 0;
+  tokenCountEl.textContent = hasTokens
+    ? `${t('tokens')}: ${formatCompactNumber(currentStats.tokens_in)}↑ ${formatCompactNumber(currentStats.tokens_out)}↓`
+    : `${t('tokens')}: --`;
+}
+
+function formatStats(stats = {}) {
+  const llmCalls = Number(stats.llm_calls) || 0;
+  const toolCalls = Number(stats.tool_calls) || 0;
+  const tokensIn = Number(stats.tokens_in) || 0;
+  const tokensOut = Number(stats.tokens_out) || 0;
+  return `${llmCalls} ${t('llmCalls')} · ${toolCalls} ${t('toolCalls')} · ${t('tokens')}: ${formatCompactNumber(tokensIn)}↑ ${formatCompactNumber(tokensOut)}↓`;
+}
+
+function formatCompactNumber(value) {
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
+  return String(value);
 }
 
 // ── Report viewer ─────────────────────────────────────────────────────────────

@@ -488,6 +488,79 @@ select option {
   display: none;
 }
 
+.env-status-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.env-status-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.env-status-item {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.85fr) minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.env-status-item.active {
+  border-color: var(--border-medium);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.env-status-provider,
+.env-status-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-status-provider {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.env-status-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.env-status-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.env-status-badge.configured {
+  color: var(--accent-green);
+  background: rgba(16,185,129,0.12);
+}
+
+.env-status-badge.missing {
+  color: var(--accent-red);
+  background: rgba(239,68,68,0.12);
+}
+
+.env-status-badge.optional {
+  color: var(--text-muted);
+  background: rgba(75,94,122,0.15);
+}
+
 .btn-primary {
   display: inline-flex;
   align-items: center;
@@ -1119,6 +1192,9 @@ h2, .panel-title {
   .settings-grid {
     grid-template-columns: 1fr 1fr;
   }
+  .env-status-list {
+    grid-template-columns: 1fr;
+  }
   .field-symbol,
   .field-date,
   .field-asset { grid-column: span 1; }
@@ -1169,6 +1245,19 @@ h2, .panel-title {
     grid-template-columns: 1fr;
   }
 
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-header {
+    align-items: stretch;
+  }
+
+  .settings-header .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+
   .field-symbol,
   .field-date,
   .field-asset,
@@ -1185,6 +1274,15 @@ h2, .panel-title {
   .form-actions .btn-primary,
   .form-actions .btn-secondary {
     width: 100%;
+  }
+
+  .env-status-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .env-status-detail {
+    grid-column: 1 / -1;
+    order: 3;
   }
 }
 

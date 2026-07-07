@@ -40,6 +40,8 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
     """Run a TradingAgents analysis and yield structured events."""
     config = build_runtime_config(request)
     selected_analysts = _ordered_analysts(request.selected_analysts)
+    callbacks = list(request.callbacks)
+    last_stats: dict[str, Any] | None = None
 
     yield AnalysisEvent(
         type="run_started",
@@ -64,6 +66,7 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
             selected_analysts,
             config=config,
             debug=request.debug,
+            callbacks=callbacks,
         )
         graph.ticker = request.ticker
         graph._resolve_pending_entries(request.ticker)
@@ -80,7 +83,7 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
             asset_type=request.asset_type,
             instrument_context=instrument_context,
         )
-        args = graph.propagator.get_graph_args()
+        args = graph.propagator.get_graph_args(callbacks=callbacks)
         if config.get("checkpoint_enabled"):
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = thread_id(
                 request.ticker,
@@ -117,6 +120,9 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
                 chunk,
                 agent_status,
             )
+            stats_event, last_stats = _stats_event(request.run_id, callbacks, last_stats)
+            if stats_event is not None:
+                yield stats_event
 
         final_state: dict[str, Any] = {}
         for chunk in trace:
@@ -142,6 +148,9 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
                 )
 
         report_path = write_report_tree(final_state, request.ticker, _report_dir(request, config))
+        stats_event, last_stats = _stats_event(request.run_id, callbacks, last_stats, force=True)
+        if stats_event is not None:
+            yield stats_event
         yield AnalysisEvent(
             type="run_completed",
             run_id=request.run_id,
@@ -181,6 +190,26 @@ def run_analysis_once(request: AnalysisRequest) -> AnalysisResult:
         report_path=Path(content["report_path"]) if content.get("report_path") else None,
         events=events,
     )
+
+
+def _stats_event(
+    run_id: str,
+    callbacks: list[Any],
+    last_stats: dict[str, Any] | None,
+    force: bool = False,
+) -> tuple[AnalysisEvent | None, dict[str, Any] | None]:
+    for callback in callbacks:
+        get_stats = getattr(callback, "get_stats", None)
+        if not callable(get_stats):
+            continue
+        stats = get_stats()
+        if force or stats != last_stats:
+            return (
+                AnalysisEvent(type="stats", run_id=run_id, content=stats),
+                dict(stats),
+            )
+        return None, last_stats
+    return None, last_stats
 
 
 def _ordered_analysts(selected_analysts: tuple[str, ...]) -> list[str]:

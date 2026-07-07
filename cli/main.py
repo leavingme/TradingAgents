@@ -1197,10 +1197,7 @@ def run_analysis(checkpoint: bool | None = None):
 
     config = _build_run_config(selections, checkpoint)
 
-    # NOTE: StatsCallbackHandler cannot be injected into the runtime layer
-    # (which constructs TradingAgentsGraph internally). The stats panel in the
-    # TUI will show zeros for this run. This is a known limitation of routing
-    # through run_analysis_stream().
+    stats_handler = StatsCallbackHandler()
 
     # Normalize analyst selection to predefined order (selection is a 'set', order is fixed)
     selected_set = {analyst.value for analyst in selections["analysts"]}
@@ -1282,6 +1279,7 @@ def run_analysis(checkpoint: bool | None = None):
         openai_reasoning_effort=selections.get("openai_reasoning_effort"),
         anthropic_effort=selections.get("anthropic_effort"),
         debug=True,
+        callbacks=(stats_handler,),
     )
 
     # Now start the analysis display in a Node subprocess. Python sends NDJSON
@@ -1289,7 +1287,7 @@ def run_analysis(checkpoint: bool | None = None):
     final_state: dict = {}
     report_path: Path | None = None
     with NodeDashboardRenderer(
-        stats_handler=None,
+        stats_handler=stats_handler,
         start_time=start_time,
     ) as renderer:
         def refresh_display(spinner_text=None):
@@ -1370,6 +1368,9 @@ def run_analysis(checkpoint: bool | None = None):
                     }
                     buffer_section = section_key_map.get(section, section)
                     message_buffer.update_report_section(buffer_section, text)
+                refresh_display()
+
+            elif event.type == "stats":
                 refresh_display()
 
             elif event.type == "run_completed":

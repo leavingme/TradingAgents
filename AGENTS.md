@@ -10,7 +10,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 - **镜像**：`https://github.com/leavingme/TradingAgents`（`origin` remote，仅 fetch）
 - **工作区根目录**：`/data/workspace/TradingAgents`
 - **分支**：`main`
-- **版本**：v0.3.0（`85946c2 chore: release v0.3.0`）+ 8 个 fork 本地提交
+- **版本**：v0.3.0（`85946c2 chore: release v0.3.0`）+ 15 个 fork 本地提交
 
 ## 环境
 
@@ -53,6 +53,41 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 - SSE stream 应该立即推送队列事件，并用 heartbeat comment 保持长时间运行
   的分析连接。浏览器端应允许 EventSource 自动重连，不要在第一次 `onerror`
   时关闭 stream。
+- CLI 的启动分析流程是 Web parity 的权威清单。变更 Web 启动配置时，要逐项
+  对照 `cli.main.get_user_selections()` 的 Step 1–8：ticker、date、
+  output language、analysts、research depth、provider/backend、
+  quick/deep models、provider-specific thinking/reasoning knobs。
+- Report language 必须支持 CLI 的内置语言和 custom language。不要只做 UI
+  language；UI language 只影响页面文案，`output_language` 才影响报告输出。
+- API key 不要收集或保存到浏览器 localStorage。Web 只应显示服务端环境变量
+  状态（`/api/config/env-status`），密钥仍由 server-side env / `.env` 管理。
+- LLM/tool/token stats 属于 runtime 能力，不要让 Web 后端直接依赖 CLI 实现。
+  `StatsCallbackHandler` 的 canonical 位置是 `tradingagents.runtime`；
+  `cli.stats_handler` 只是兼容 re-export。
+- 历史 run 和刷新语义必须从 SQLite + persisted events 恢复。刷新页面后，已完成
+  agent 仍应显示完成状态；运行中的任务应通过 SSE replay + live queue 继续呈现。
+- 分段报告应在每个 `report_section` 事件到达时立即可见，并能通过 report
+  selector 切换，不要等最终 `run_completed` 才渲染全部报告。
+
+### Web 服务和布局验证
+
+- 托管沙箱内可能无法 bind 本地端口，或 8765 被外部命名空间占用。`curl`
+  失败不一定表示代码坏了；先看 uvicorn 日志是否是 `could not bind`。
+- 如果 8765 不可用，不要杀未知进程。优先用临时端口（如 8766/8877/8878）
+  做验证；需要本地 bind/浏览器截图时，用受批准的沙箱外命令。
+- 长时间运行的 uvicorn tool session 可能在工具轮次结束时被清理。做截图验证时，
+  更可靠的方式是在同一个 shell 里：启动临时 uvicorn、等待健康检查、执行
+  headless Chrome 截图、再 kill 临时 server。
+- `chromium-browser` 在该环境可能只是 snap wrapper，无法使用；优先检查并使用
+  `/usr/bin/google-chrome` 做 headless 截图。
+- 移动端截图不能只靠肉眼。还要用浏览器读取
+  `document.documentElement.scrollWidth/clientWidth`；只有业务 UI 无横向 overflow
+  才算布局通过。固定背景光斑超出视口可以接受，因为不参与布局。
+- 小屏 CSS 要特别注意 `fieldset` 的默认 `min-inline-size`，它会把 grid 撑出
+  视口。对 form/grid/fieldset/action 区域显式设置 `min-width: 0` /
+  `min-inline-size: 0`。
+- 修改前端 CSS/JS 后必须 bump `index.html` 中静态资源 query string，否则容易
+  被浏览器缓存误导，以为改动没有生效或旧问题仍存在。
 
 ### 关键环境变量
 
@@ -191,11 +226,33 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - exit code 0 表示 propagate 到达了 final decision
 - 2026-07-05 的 smoke run（NVDA）：FINAL DECISION = `Hold`
 
+## 测试和验证注意事项
+
+- 针对 Web/CLI parity 的快速验证优先跑：
+  `node --check web/frontend/app.js` 和
+  `venv/bin/python3.12 -m pytest tests/test_runtime_analysis_runner.py tests/test_web_backend.py tests/test_api_key_env.py tests/test_cli_env_skip.py -q`。
+- 全量 `pytest -q` 当前会受到环境和既有测试问题影响。常见非本次改动失败：
+  DeepSeek live 测试因沙箱 DNS/网络失败；`test_market_data_validator.py` 仍引用
+  旧的 `load_ohlcv` 属性；`test_openai_compatible_provider.py` 会被当前 shell 中
+  的 OpenAI/OpenAI-compatible key 环境变量污染。
+- 报告全量测试结果时要区分“本次相关测试失败”和“既有/环境失败”。不要为了让
+  全量测试变绿而改无关测试或清理用户环境变量，除非用户明确要求。
+- Web 运行态接口可用性至少验证：
+  `/api/config/defaults`、`/api/config/env-status`、`/api/runs`、SSE events、
+  `/api/runs/{run_id}/report`。
+- 完成目标前做证据审计：检查当前工作区、最新提交、PLAN 覆盖矩阵、测试输出、
+  运行态接口、桌面/移动端截图或 scroll 审计。不要只凭记忆宣布完成。
+
 ## Git 工作流
 
 - **推送目标**：`myfork`（不是 `origin`，也不是 `tauric`）
 - `origin` 和 `tauric` 是 fetch-only 镜像；不要推送到那里
 - 正常同步使用 `git push myfork main`
+- GitHub SSH 22 端口可能超时。若 `git push myfork main` 报
+  `ssh: connect to host github.com port 22: Connection timed out`，使用：
+  `env GIT_SSH_COMMAND='ssh -o HostName=ssh.github.com -o Port=443 -o StrictHostKeyChecking=accept-new' git push myfork main`
+- 如果已经 push 后又 `commit --amend`，用 `--force-with-lease`，不要普通
+  force push：`git push --force-with-lease myfork main`。
 - `results/` 已 gitignored — smoke output 不应提交
 - API key 位于 `~/.zshrc` export 和 `.longbridge_mcp_token.json` —
   不要写入 config 文件，也不要提交（遵守 secret-file-editing protocol）

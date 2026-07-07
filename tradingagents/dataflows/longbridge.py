@@ -157,34 +157,33 @@ def get_stock_data(
     """
     Fetch daily OHLCV data via `longbridge kline`, then filter to [start_date, end_date].
 
-    Results are cached to ~/.tradingagents/cache/{SYMBOL}-{start}-{end}.csv so
-    that repeated calls for the same date range skip the subprocess round-trip.
+    Results are cached to ~/.tradingagents/cache/{SYMBOL}.csv (one file per
+    symbol, accumulated over time).  Repeated calls for overlapping windows
+    skip the subprocess round-trip; the cache is refreshed only when the latest
+    row is more than MAX_STALE_DAYS before end_date.
 
     Returns a CSV string with the same shape TradingAgents expects (Date, Open,
     High, Low, Close, Volume), prefixed with a # comment header for LLM context.
     """
     from .config import get_config
-    from .utils import safe_ticker_component
+    from .ohlcv_cache import symbol_to_cache_key, read_cached_ohlcv, merge_and_write_ohlcv
 
     sym = normalize_symbol(symbol)
-    safe_sym = safe_ticker_component(sym.replace(".", "_"))
+    cache_key = symbol_to_cache_key(sym)
 
     config = get_config()
     cache_dir = config["data_cache_dir"]
-    os.makedirs(cache_dir, exist_ok=True)
-    cache_file = os.path.join(cache_dir, f"{safe_sym}-{start_date}-{end_date}.csv")
 
     # --- cache read ---
-    if os.path.exists(cache_file):
-        cached = pd.read_csv(cache_file, on_bad_lines="skip", encoding="utf-8")
-        if not cached.empty and "Close" in cached.columns:
-            cached.set_index("Date", inplace=True)
-            return (
-                f"# Stock data for {sym} from {start_date} to {end_date}\n"
-                f"# Total records: {len(cached)}\n"
-                f"# Data retrieved from local cache on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                + cached.to_csv()
-            )
+    cached = read_cached_ohlcv(cache_dir, cache_key, start_date, end_date)
+    if cached is not None:
+        cached = cached.set_index("Date")
+        return (
+            f"# Stock data for {sym} from {start_date} to {end_date}\n"
+            f"# Total records: {len(cached)}\n"
+            f"# Data retrieved from local cache on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            + cached.to_csv()
+        )
 
     # --- fetch from CLI ---
     try:
@@ -231,9 +230,9 @@ def get_stock_data(
         return f"No data found for symbol '{sym}' between {start_date} and {end_date}"
 
     # --- cache write ---
-    df.to_csv(cache_file, index=False, encoding="utf-8")
+    merge_and_write_ohlcv(cache_dir, cache_key, df)
 
-    df.set_index("Date", inplace=True)
+    df = df.set_index("Date")
     header = (
         f"# Stock data for {sym} from {start_date} to {end_date}\n"
         f"# Total records: {len(df)}\n"

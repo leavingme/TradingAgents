@@ -125,70 +125,61 @@ def _assert_ohlcv_not_stale(
 def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
-    Downloads 5 years of data up to today and caches per symbol. On
-    subsequent calls the cache is reused. Rows after curr_date are
-    filtered out so backtests never see future prices.
+    Downloads 5 years of data up to today and merges into a per-symbol cache
+    file (~/.tradingagents/cache/{SYMBOL}.csv).  On subsequent calls the
+    cached rows are reused; only when the latest cached row is more than
+    MAX_OHLCV_STALE_DAYS behind curr_date is a fresh download triggered and
+    merged back into the file.
     """
+    from .ohlcv_cache import symbol_to_cache_key, read_cached_ohlcv, merge_and_write_ohlcv
+
     # Resolve broker/forex symbols (XAUUSD+ -> GC=F) to Yahoo's convention,
     # then reject values that would escape the cache directory when
     # interpolated into the cache filename (e.g. ``../../tmp/x``).
     canonical = normalize_symbol(symbol)
     safe_symbol = safe_ticker_component(canonical)
+    cache_key = symbol_to_cache_key(safe_symbol)
 
     config = get_config()
-    curr_date_dt = pd.to_datetime(curr_date)
+    cache_dir = config["data_cache_dir"]
 
-    # Cache uses a fixed window (5y to today) so one file per symbol.
     today_date = pd.Timestamp.today()
     start_date = today_date - pd.DateOffset(years=5)
     start_str = start_date.strftime("%Y-%m-%d")
     # yfinance ``end`` is EXCLUSIVE; request tomorrow so today's row is included
-    # when curr_date is the current day (#986). Look-ahead is still prevented by
-    # the curr_date filter below.
+    # when curr_date is the current day (#986).
     end_str = (today_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    curr_date_dt = pd.to_datetime(curr_date)
 
-    os.makedirs(config["data_cache_dir"], exist_ok=True)
-    data_file = os.path.join(
-        config["data_cache_dir"],
-        f"{safe_symbol}-{start_str}-{end_str}.csv",
-    )
+    # --- cache read ---
+    cached = read_cached_ohlcv(cache_dir, cache_key, start_str, curr_date)
+    if cached is not None:
+        data = _clean_dataframe(cached)
+        data = data[data["Date"] <= curr_date_dt]
+        _assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
+        return data
 
-    # A cached file may be empty if a prior fetch failed (unknown symbol,
-    # transient rate limit). Treat an empty/columnless cache as a miss and
-    # re-fetch rather than serving the poisoned file forever.
-    data = None
-    if os.path.exists(data_file):
-        cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
-        if not cached.empty and "Close" in cached.columns:
-            data = cached
+    # --- fetch from yfinance ---
+    downloaded = yf_retry(lambda: yf.download(
+        canonical,
+        start=start_str,
+        end=end_str,
+        multi_level_index=False,
+        progress=False,
+        auto_adjust=True,
+    ))
+    downloaded = _ensure_date_column(downloaded.reset_index())
+    if downloaded.empty or "Close" not in downloaded.columns:
+        raise NoMarketDataError(
+            symbol, canonical, "Yahoo Finance returned no rows"
+        )
 
-    if data is None:
-        downloaded = yf_retry(lambda: yf.download(
-            canonical,
-            start=start_str,
-            end=end_str,
-            multi_level_index=False,
-            progress=False,
-            auto_adjust=True,
-        ))
-        downloaded = _ensure_date_column(downloaded.reset_index())
-        # Only cache real data — never persist an empty frame.
-        if downloaded.empty or "Close" not in downloaded.columns:
-            raise NoMarketDataError(
-                symbol, canonical, "Yahoo Finance returned no rows"
-            )
-        downloaded.to_csv(data_file, index=False, encoding="utf-8")
-        data = downloaded
+    # --- cache write ---
+    merge_and_write_ohlcv(cache_dir, cache_key, downloaded)
 
-    data = _clean_dataframe(data)
-
-    # Filter to curr_date to prevent look-ahead bias in backtesting
+    data = _clean_dataframe(downloaded)
     data = data[data["Date"] <= curr_date_dt]
-
-    # Reject a stale frame (latest row far older than curr_date) rather than
-    # feeding year-old prices into indicators (#1021).
     _assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
-
     return data
 
 

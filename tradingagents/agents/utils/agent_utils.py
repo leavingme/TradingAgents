@@ -108,20 +108,44 @@ def resolve_instrument_identity(ticker: str) -> dict:
     through every downstream agent.
 
     Best-effort by design: if yfinance is unavailable, rate-limited, or doesn't
-    recognise the ticker, we return ``{}`` and the caller falls back to
-    ticker-only context rather than failing before analysis starts. Cached so
-    the lookup happens at most once per ticker per process.
-
-    The symbol is normalized first (e.g. ``XAUUSD`` -> ``GC=F``) so identity
-    resolves for the same instrument the price path actually fetches (#983).
+    recognise the ticker, we try to fall back to Longbridge MCP/CLI static_info.
     """
     from tradingagents.dataflows.symbol_utils import normalize_symbol
 
+    info = {}
     try:
         info = yf.Ticker(normalize_symbol(ticker)).info or {}
     except Exception as exc:  # noqa: BLE001 — fail open, never block the run
-        logger.debug("Could not resolve instrument identity for %s: %s", ticker, exc)
-        return {}
+        logger.warning("yfinance identity lookup failed for %s: %s; trying Longbridge fallback", ticker, exc)
+        # Try Longbridge MCP
+        try:
+            from tradingagents.dataflows.longbridge_mcp import normalize_symbol as mcp_normalize, _client, _first_item
+            mcp_sym = mcp_normalize(ticker)
+            client = _client()
+            s = client.call_tool("static_info", {"symbols": [mcp_sym]})
+            s_item = _first_item(s)
+            if s_item and isinstance(s_item, dict):
+                info = {
+                    "longName": s_item.get("name"),
+                    "exchange": s_item.get("exchange"),
+                    "quoteType": "EQUITY",
+                }
+        except Exception as mcp_exc:
+            logger.debug("Longbridge MCP identity fallback failed: %s; trying CLI", mcp_exc)
+            # Try Longbridge CLI
+            try:
+                from tradingagents.dataflows.longbridge import normalize_symbol as cli_normalize, _run_cli_json_list
+                cli_sym = cli_normalize(ticker)
+                static_raw = _run_cli_json_list(["static", cli_sym])
+                if static_raw and isinstance(static_raw, list) and isinstance(static_raw[0], dict):
+                    s_item = static_raw[0]
+                    info = {
+                        "longName": s_item.get("name"),
+                        "exchange": s_item.get("exchange"),
+                        "quoteType": "EQUITY",
+                    }
+            except Exception as cli_exc:
+                logger.debug("Longbridge CLI identity fallback failed: %s", cli_exc)
 
     identity: dict[str, str] = {}
     company_name = _clean_identity_value(info.get("longName")) or _clean_identity_value(

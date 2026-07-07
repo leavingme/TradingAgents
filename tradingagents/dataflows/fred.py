@@ -134,27 +134,20 @@ def _request(path: str, params: dict) -> dict:
 
 
 def _search_macro_fallback(indicator: str, curr_date: str) -> str:
-    """Fallback to searching Yahoo Finance news for the macro indicator when FRED is missing."""
-    import yfinance as yf
-    from .stockstats_utils import yf_retry
-    from .yfinance_news import _extract_article_data
+    """Fallback to searching DuckDuckGo for the macro indicator when FRED is missing."""
+    from .duckduckgo_search import ddg_search
 
     # Map friendly alias to readable name for query
     readable = indicator.replace("_", " ").strip()
     query = f"US {readable} macro economy data value {curr_date[:4]}"
-    logger.info("FRED API Key missing; falling back to yf.Search for macro query %r", query)
+    logger.info("FRED API Key missing; falling back to DuckDuckGo search for macro query %r", query)
 
     try:
-        search = yf_retry(lambda: yf.Search(
-            query=query,
-            news_count=5,
-            enable_fuzzy_query=True,
-        ))
-        news = search.news
+        results = ddg_search(query, limit=5)
     except Exception as e:
         return f"FRED: API Key not configured and web search fallback failed: {e}"
 
-    if not news:
+    if not results:
         return f"FRED: API Key not configured and no search results found for query '{query}'"
 
     lines = [
@@ -164,13 +157,12 @@ def _search_macro_fallback(indicator: str, curr_date: str) -> str:
         "### Recent relevant news/data observations",
         ""
     ]
-    for article in news[:5]:
-        data = _extract_article_data(article)
-        lines.append(f"#### {data['title']} (source: {data['publisher']})")
-        if data["summary"]:
-            lines.append(data["summary"])
-        if data["link"]:
-            lines.append(f"Link: {data['link']}")
+    for r in results:
+        lines.append(f"#### {r['title']} (source: {r['publisher']})")
+        if r["summary"]:
+            lines.append(r["summary"])
+        if r["link"]:
+            lines.append(f"Link: {r['link']}")
         lines.append("")
 
     return "\n".join(lines)

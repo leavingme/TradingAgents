@@ -89,21 +89,55 @@ def get_news_yfinance(
     Returns:
         Formatted string containing news articles
     """
+def _ddg_news_fallback(query: str, start_date: str, end_date: str, limit: int) -> str:
+    """Helper to fetch and format news from DuckDuckGo search as a fallback."""
+    from .duckduckgo_search import ddg_search
+    logger.info("Yahoo Finance news blocked/failed; falling back to DuckDuckGo search for query %r", query)
+    results = ddg_search(query, limit=limit)
+    if not results:
+        return f"No news found for query '{query}' via fallback search between {start_date} and {end_date}"
+
+    news_str = ""
+    for r in results:
+        news_str += f"### {r['title']} (source: {r['publisher']})\n"
+        if r["summary"]:
+            news_str += f"{r['summary']}\n"
+        if r["link"]:
+            news_str += f"Link: {r['link']}\n"
+        news_str += "\n"
+
+    return f"## News Fallback for query '{query}', from {start_date} to {end_date}:\n\n{news_str}"
+
+
+def get_news_yfinance(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+) -> str:
+    """
+    Retrieve news for a specific stock ticker using yfinance. Falls back to DuckDuckGo search on error.
+
+    Args:
+        ticker: Stock ticker symbol (e.g., "AAPL")
+        start_date: Start date in yyyy-mm-dd format
+        end_date: End date in yyyy-mm-dd format
+
+    Returns:
+        Formatted string containing news articles
+    """
     article_limit = get_config()["news_article_limit"]
-    # Query Yahoo with the canonical symbol, like every other yfinance path —
-    # a raw broker/forex/crypto alias (XAUUSD, BTCUSD) otherwise silently
-    # returns no news. Keep the user's ticker in the report header.
     canonical = normalize_symbol(ticker)
     resolved = "" if canonical == ticker else f" (resolved to {canonical})"
+
+    from .symbol_utils import resolve_social_query
+    sq = resolve_social_query(ticker)
+    query = sq["news_query"]
+
     try:
         stock = yf.Ticker(canonical)
         news = yf_retry(lambda: stock.get_news(count=article_limit))
 
         if not news:
-            # Fallback to search query for company news (essential for foreign tickers like 0700.HK)
-            from .symbol_utils import resolve_social_query
-            sq = resolve_social_query(ticker)
-            query = sq["news_query"]
             logger.info("yfinance news empty for %r; falling back to yf.Search for query %r", ticker, query)
             try:
                 search = yf_retry(lambda: yf.Search(
@@ -113,10 +147,10 @@ def get_news_yfinance(
                 ))
                 news = search.news
             except Exception as exc:
-                logger.warning("yf.Search fallback failed for %s: %s", ticker, exc)
+                logger.warning("yf.Search fallback failed for %s: %s; trying DuckDuckGo", ticker, exc)
 
         if not news:
-            return f"No news found for {ticker}{resolved}"
+            return _ddg_news_fallback(query, start_date, end_date, article_limit)
 
         # Parse date range for filtering
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
@@ -141,14 +175,14 @@ def get_news_yfinance(
             filtered_count += 1
 
         if filtered_count == 0:
-            return f"No news found for {ticker}{resolved} between {start_date} and {end_date}"
+            # Try DDG search if yfinance had news but none in the historical window
+            return _ddg_news_fallback(query, start_date, end_date, article_limit)
 
         return f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n{news_str}"
 
-    except YFRateLimitError as e:
-        raise VendorRateLimitError(f"Yahoo Finance rate limited for {ticker}") from e
     except Exception as e:
-        return f"Error fetching news for {ticker}: {str(e)}"
+        logger.warning("Yahoo Finance news fetch failed for %s: %s; falling back to DuckDuckGo", ticker, e)
+        return _ddg_news_fallback(query, start_date, end_date, article_limit)
 
 
 def get_global_news_yfinance(
@@ -157,7 +191,7 @@ def get_global_news_yfinance(
     limit: int | None = None,
 ) -> str:
     """
-    Retrieve global/macro economic news using yfinance Search.
+    Retrieve global/macro economic news using yfinance Search. Falls back to DuckDuckGo on error.
 
     Args:
         curr_date: Current date in yyyy-mm-dd format
@@ -179,6 +213,7 @@ def get_global_news_yfinance(
     all_news = []
     seen_titles = set()
 
+    # Try Yahoo search first
     try:
         for query in search_queries:
             search = yf_retry(lambda q=query: yf.Search(
@@ -189,25 +224,48 @@ def get_global_news_yfinance(
 
             if search.news:
                 for article in search.news:
-                    # Handle both flat and nested structures
                     if "content" in article:
                         data = _extract_article_data(article)
                         title = data["title"]
                     else:
                         title = article.get("title", "")
 
-                    # Deduplicate by title
                     if title and title not in seen_titles:
                         seen_titles.add(title)
                         all_news.append(article)
 
             if len(all_news) >= limit:
                 break
+    except Exception as e:
+        logger.warning("Yahoo Finance global news search failed: %s; falling back to DuckDuckGo", e)
 
-        if not all_news:
-            return f"No global news found for {curr_date}"
+    # If Yahoo failed or returned nothing, do a DuckDuckGo macro search fallback
+    if not all_news:
+        from .duckduckgo_search import ddg_search
+        # Use a unified query of the global news topics
+        ddg_query = "US inflation Fed rate cut GDP economy market news"
+        results = ddg_search(ddg_query, limit=limit)
+        if not results:
+            return f"No global news found for {curr_date} via Yahoo or DuckDuckGo fallback."
 
-        # Calculate date range
+        # Format date range
+        curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+        start_dt = curr_dt - relativedelta(days=look_back_days)
+        start_date = start_dt.strftime("%Y-%m-%d")
+
+        news_str = ""
+        for r in results:
+            news_str += f"### {r['title']} (source: {r['publisher']})\n"
+            if r["summary"]:
+                news_str += f"{r['summary']}\n"
+            if r["link"]:
+                news_str += f"Link: {r['link']}\n"
+            news_str += "\n"
+
+        return f"## Global Market News Fallback, from {start_date} to {curr_date}:\n\n{news_str}"
+
+    # Standard Yahoo formatting path
+    try:
         curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
         start_dt = curr_dt - relativedelta(days=look_back_days)
         start_date = start_dt.strftime("%Y-%m-%d")
@@ -215,8 +273,6 @@ def get_global_news_yfinance(
         news_str = ""
         kept = 0
         for article in all_news[:limit]:
-            # Extract uniformly (flat + nested) and apply the same look-ahead-safe
-            # window filter, so flat articles can't leak future news (#1007).
             data = _extract_article_data(article)
             if not _in_news_window(data["pub_date"], start_dt, curr_dt):
                 continue
@@ -228,12 +284,10 @@ def get_global_news_yfinance(
             news_str += "\n"
             kept += 1
 
-        # All candidates fell outside the window -> say so rather than return an
-        # empty-bodied report (#993).
         if kept == 0:
             return f"No global news found between {start_date} and {curr_date}"
 
         return f"## Global Market News, from {start_date} to {curr_date}:\n\n{news_str}"
 
     except Exception as e:
-        return f"Error fetching global news: {str(e)}"
+        return f"Error formatting global news: {str(e)}"

@@ -5,9 +5,8 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 
 ## 仓库
 
-- **上游**：`https://github.com/TauricResearch/TradingAgents`（`tauric` remote）
-- **Fork**：`https://github.com/leavingme/TradingAgents`（`myfork` remote，推送目标）
-- **镜像**：`https://github.com/leavingme/TradingAgents`（`origin` remote，仅 fetch）
+- **上游**：`https://github.com/TauricResearch/TradingAgents`（`tauric` remote，仅 fetch）
+- **Fork**：`https://github.com/leavingme/TradingAgents`（`origin` remote，fetch + push 目标）
 - **工作区根目录**：`/data/workspace/TradingAgents`
 - **分支**：`main`
 - **版本**：v0.3.0（`85946c2 chore: release v0.3.0`）+ 15 个 fork 本地提交
@@ -245,14 +244,14 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 
 ## Git 工作流
 
-- **推送目标**：`myfork`（不是 `origin`，也不是 `tauric`）
-- `origin` 和 `tauric` 是 fetch-only 镜像；不要推送到那里
-- 正常同步使用 `git push myfork main`
-- GitHub SSH 22 端口可能超时。若 `git push myfork main` 报
+- **推送目标**：`origin`（不是 `tauric`）
+- `tauric` 是上游只读镜像；不要推送到那里
+- 正常同步使用 `git push origin main`
+- GitHub SSH 22 端口可能超时。若 `git push origin main` 报
   `ssh: connect to host github.com port 22: Connection timed out`，使用：
-  `env GIT_SSH_COMMAND='ssh -o HostName=ssh.github.com -o Port=443 -o StrictHostKeyChecking=accept-new' git push myfork main`
+  `env GIT_SSH_COMMAND='ssh -o HostName=ssh.github.com -o Port=443 -o StrictHostKeyChecking=accept-new' git push origin main`
 - 如果已经 push 后又 `commit --amend`，用 `--force-with-lease`，不要普通
-  force push：`git push --force-with-lease myfork main`。
+  force push：`git push --force-with-lease origin main`。
 - `results/` 已 gitignored — smoke output 不应提交
 - API key 位于 `~/.zshrc` export 和 `.longbridge_mcp_token.json` —
   不要写入 config 文件，也不要提交（遵守 secret-file-editing protocol）

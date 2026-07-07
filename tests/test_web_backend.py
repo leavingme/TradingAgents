@@ -294,3 +294,26 @@ def test_store_trims_full_final_state_before_persisting(tmp_path):
         "decision": "Hold",
         "report_path": str(tmp_path / "report.md"),
     }
+
+
+def test_build_runtime_config_merges_nested_overrides():
+    from web.backend.models import RunCreateRequest
+    from web.backend.runner_worker import to_analysis_request
+    from tradingagents.runtime.config_builder import build_runtime_config
+
+    request = RunCreateRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-05",
+        config_overrides={
+            "data_vendors": {
+                "core_stock_apis": "yfinance",
+            }
+        }
+    )
+    analysis_request = to_analysis_request("run-test-nested", request)
+    config = build_runtime_config(analysis_request)
+
+    assert config["data_vendors"]["core_stock_apis"] == "yfinance"
+    # Ensure other default values in data_vendors are NOT lost
+    assert config["data_vendors"]["news_data"] == "web_search, duckduckgo, alpha_vantage, yfinance"
+

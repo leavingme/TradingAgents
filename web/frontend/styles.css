@@ -1310,3 +1310,230 @@ h2, .panel-title {
     width: min(180px, 54vw);
   }
 }
+
+/* ============================================================
+   Capability Providers page styles
+   ============================================================ */
+.providers-view {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.providers-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.provider-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 24px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: transform var(--t-smooth), border-color var(--t-smooth), box-shadow var(--t-smooth);
+}
+
+.provider-card:hover {
+  border-color: var(--border-medium);
+  box-shadow: var(--shadow-lg), 0 0 24px rgba(59, 130, 246, 0.05);
+}
+
+.provider-card-header {
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 14px;
+}
+
+.provider-card-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.provider-card-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.provider-card-body {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(400px, 2fr);
+  gap: 32px;
+  margin-top: 20px;
+}
+
+.provider-selector-area, .provider-comparison-area {
+  display: flex;
+  flex-direction: column;
+}
+
+.provider-selector-area h4,
+.provider-comparison-area h4 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+}
+
+.provider-sortable-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.provider-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: background var(--t-fast), border-color var(--t-fast), opacity var(--t-fast);
+}
+
+.provider-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-medium);
+}
+
+.provider-item.disabled {
+  opacity: 0.45;
+}
+
+.provider-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.provider-item-left input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--text-muted);
+  cursor: pointer;
+  accent-color: var(--accent-blue);
+}
+
+.provider-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.provider-item-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.provider-order-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.btn-order {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 10px;
+  border-radius: 3px;
+  line-height: 1;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+
+.btn-order:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.btn-order:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.comparison-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.comparison-table th {
+  background: rgba(255, 255, 255, 0.02);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.comparison-table tr:last-child td {
+  border-bottom: none;
+}
+
+.comparison-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.speed-fast {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--accent-green);
+}
+
+.speed-medium {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent-blue);
+}
+
+.speed-slow {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--accent-amber);
+}
+
+.quality-high {
+  background: rgba(139, 92, 246, 0.1);
+  color: var(--accent-purple);
+}
+
+.quality-medium {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent-blue);
+}
+
+@media (max-width: 900px) {
+  .provider-card-body {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+}
+

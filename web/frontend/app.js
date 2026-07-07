@@ -19,8 +19,11 @@ const runView       = document.querySelector('#runView');
 const settingsView  = document.querySelector('#settingsView');
 const runViewButton = document.querySelector('#runViewButton');
 const settingsViewButton = document.querySelector('#settingsViewButton');
+const providersViewButton = document.querySelector('#providersViewButton');
 const settingsForm  = document.querySelector('#settingsForm');
 const resetSettings = document.querySelector('#resetSettings');
+const resetProviders = document.querySelector('#resetProviders');
+const providersView = document.querySelector('#providersView');
 const statusEl      = document.querySelector('#runStatus');
 const statusDot     = document.querySelector('#statusDot');
 const runIdEl       = document.querySelector('#runId');
@@ -159,6 +162,44 @@ const translations = {
     llmCalls: 'LLM',
     toolCalls: 'tools',
     tokens: 'Tokens',
+    navProviders: 'Providers',
+    providersTitle: 'Capability Providers',
+    providersSubtitle: 'Select and prioritize data & capability providers for your analysis runs.',
+    resetProviders: 'Reset Defaults',
+    prioritySetting: 'Priority & Enable Settings',
+    sideBySideComparison: 'Side-by-Side Comparison',
+    compProvider: 'Provider',
+    compSpeed: 'Speed',
+    compQuality: 'Quality',
+    compApiKey: 'API Key',
+    compRateLimit: 'Rate Limit',
+    compCoverage: 'Coverage',
+    compTokenRequired: 'Token Required',
+    compKeyRequired: 'Key Required',
+    compNone: 'None',
+    compHigh: 'High',
+    compMedium: 'Medium',
+    compTight: 'Tight',
+    compGlobal: 'Global',
+    compNoLimit: 'No Limit',
+    catCoreStockTitle: 'Core Stock Price Data (OHLCV)',
+    catCoreStockDesc: 'Provides historical and current price bar data for target tickers.',
+    catTechIndTitle: 'Technical Indicators',
+    catTechIndDesc: 'Provides indicators like SMA, EMA, MACD, RSI, and Bollinger Bands.',
+    catFundamentalsTitle: 'Company Fundamental Data',
+    catFundamentalsDesc: 'Financial statements (income statements, balance sheets, cashflow statements).',
+    catNewsTitle: 'News & Social Data',
+    catNewsDesc: 'Fetches news articles, insider transactions, and market news.',
+    catMacroTitle: 'Macroeconomic Data',
+    catMacroDesc: 'Economic metrics like inflation, GDP, central bank interest rates.',
+    catPredictionTitle: 'Prediction Markets',
+    catPredictionDesc: 'Market-implied probabilities for forward-looking macro events.',
+    badgeUltraFast: 'Ultra Fast',
+    badgeFast: 'Fast',
+    badgeMedium: 'Medium',
+    badgeSlower: 'Slower',
+    badgeStandard: 'Standard',
+    badgePremium: 'Premium',
   },
   zh: {
     pageTitle: 'TradingAgents — AI 市场情报',
@@ -253,6 +294,44 @@ const translations = {
     llmCalls: 'LLM',
     toolCalls: '工具',
     tokens: 'Tokens',
+    navProviders: '服务商',
+    providersTitle: '服务商配置',
+    providersSubtitle: '管理及排列各个底层能力的数服务商优先级及开关。',
+    resetProviders: '恢复默认',
+    prioritySetting: '优先级及启用设置',
+    sideBySideComparison: '服务商横向评测',
+    compProvider: '服务商',
+    compSpeed: '速度',
+    compQuality: '数据质量',
+    compApiKey: 'API 密钥',
+    compRateLimit: '频次限制',
+    compCoverage: '覆盖范围',
+    compTokenRequired: '需要 Token',
+    compKeyRequired: '需要 API Key',
+    compNone: '无需',
+    compHigh: '高频 / 宽裕',
+    compMedium: '中等频次',
+    compTight: '极其严格',
+    compGlobal: '全球',
+    compNoLimit: '无限制 (本地计算)',
+    catCoreStockTitle: '核心 K 线股价数据 (OHLCV)',
+    catCoreStockDesc: '提供个股的历史和实时K线数据。',
+    catTechIndTitle: '技术分析指标',
+    catTechIndDesc: '提供 SMA, EMA, MACD, RSI, 布林带等指标。',
+    catFundamentalsTitle: '公司财务基本面数据',
+    catFundamentalsDesc: '利润表、资产负债表、现金流量表等财务数据。',
+    catNewsTitle: '新闻与社交动态舆情',
+    catNewsDesc: '获取个股新闻、全球宏观新闻和内幕交易信息。',
+    catMacroTitle: '宏观经济数据指标',
+    catMacroDesc: '美国和全球通胀、GDP、美联储利率等数据。',
+    catPredictionTitle: '预测事件概率市场',
+    catPredictionDesc: 'Polymarket 等前瞻性事件市场概率。',
+    badgeUltraFast: '极速',
+    badgeFast: '快速',
+    badgeMedium: '中等',
+    badgeSlower: '较慢',
+    badgeStandard: '标准',
+    badgePremium: '优质',
   },
 };
 const modelPresets = {
@@ -397,6 +476,13 @@ loadEnvStatus();
 
 runViewButton.addEventListener('click', () => showView('run'));
 settingsViewButton.addEventListener('click', () => showView('settings'));
+providersViewButton.addEventListener('click', () => showView('providers'));
+resetProviders.addEventListener('click', () => {
+  try {
+    window.localStorage.removeItem(providersStorageKey);
+  } catch {}
+  loadProviders();
+});
 window.addEventListener('hashchange', handleHashRoute);
 handleHashRoute();
 
@@ -506,9 +592,11 @@ async function loadConfigDefaults() {
     configDefaults = await response.json();
     applyConfigDefaults(configDefaults);
     applySavedSettings();
+    loadProviders();
   } catch {
     // Keep the static HTML defaults when the API is unavailable.
     applySavedSettings();
+    loadProviders();
   }
 }
 
@@ -518,6 +606,11 @@ async function loadEnvStatus() {
     if (!response.ok) return;
     envStatus = await response.json();
     renderApiKeyStatus();
+    if (providersState && typeof providersState === 'object' && Object.keys(providersState).length > 0) {
+      Object.keys(availableCategoryVendors).forEach(cat => {
+        renderCategoryProviders(cat);
+      });
+    }
   } catch {
     // API key status is informational; runs still use server-side env config.
   }
@@ -750,17 +843,28 @@ function saveSettings() {
 
 function showView(view, updateHash = true) {
   const settingsActive = view === 'settings';
-  runControls.classList.toggle('hidden', settingsActive);
-  runView.classList.toggle('hidden', settingsActive);
+  const providersActive = view === 'providers';
+  const runActive = view === 'run';
+  
+  runControls.classList.toggle('hidden', settingsActive || providersActive);
+  runView.classList.toggle('hidden', settingsActive || providersActive);
   settingsView.classList.toggle('hidden', !settingsActive);
-  runControls.hidden = settingsActive;
-  runView.hidden = settingsActive;
+  providersView.classList.toggle('hidden', !providersActive);
+  
+  runControls.hidden = settingsActive || providersActive;
+  runView.hidden = settingsActive || providersActive;
   settingsView.hidden = !settingsActive;
-  runViewButton.classList.toggle('active', !settingsActive);
+  providersView.hidden = !providersActive;
+  
+  runViewButton.classList.toggle('active', runActive);
   settingsViewButton.classList.toggle('active', settingsActive);
+  providersViewButton.classList.toggle('active', providersActive);
+  
   if (updateHash) {
     if (settingsActive) {
       window.location.hash = 'settings';
+    } else if (providersActive) {
+      window.location.hash = 'providers';
     } else if (currentRunId) {
       setRunHash(currentRunId);
     } else {
@@ -773,6 +877,10 @@ function handleHashRoute() {
   const hash = window.location.hash.slice(1);
   if (hash === 'settings') {
     showView('settings', false);
+    return;
+  }
+  if (hash === 'providers') {
+    showView('providers', false);
     return;
   }
 
@@ -801,12 +909,16 @@ function setRunHash(runId, replace = false) {
 function buildPayload(data) {
   const selectedAnalysts = data.getAll('analysts');
   const settings = currentSettings();
+  const activeVendors = currentProviders();
   return {
     ticker: selectedTicker(data),
     analysis_date: data.get('analysisDate'),
     asset_type: data.get('assetType'),
     selected_analysts: selectedAnalysts.length ? selectedAnalysts : ['market'],
     ...settings,
+    config_overrides: {
+      data_vendors: activeVendors
+    }
   };
 }
 
@@ -1288,4 +1400,174 @@ function statusClass(status) {
   if (status === 'running')   return 'running';
   if (status === 'failed' || status === 'cancelled') return 'error';
   return 'ready';
+}
+
+// ── Capability Providers Management ──────────────────────────────────────────
+const providersStorageKey = 'tradingagents.web.providers';
+let providersState = {};
+
+const availableCategoryVendors = {
+  core_stock_apis: ["longbridge_mcp", "longbridge", "yfinance", "alpha_vantage"],
+  technical_indicators: ["longbridge_mcp", "longbridge", "yfinance", "alpha_vantage"],
+  fundamental_data: ["longbridge_mcp", "longbridge", "yfinance", "alpha_vantage"],
+  news_data: ["web_search", "duckduckgo", "alpha_vantage", "yfinance"],
+  macro_data: ["fred"],
+  prediction_markets: ["polymarket"],
+};
+
+const providerMeta = {
+  longbridge_mcp: { name: "Longbridge MCP" },
+  longbridge: { name: "Longbridge CLI" },
+  yfinance: { name: "Yahoo Finance" },
+  alpha_vantage: { name: "Alpha Vantage" },
+  web_search: { name: "Web Search" },
+  duckduckgo: { name: "DuckDuckGo" },
+  fred: { name: "FRED" },
+  polymarket: { name: "Polymarket" },
+};
+
+function saveProviders() {
+  try {
+    window.localStorage.setItem(providersStorageKey, JSON.stringify(providersState));
+  } catch {
+    // Local persistence is optional
+  }
+}
+
+function parseCategoryDefault(category, defaultStr) {
+  const defaultsList = defaultStr ? defaultStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const result = [];
+  
+  defaultsList.forEach(v => {
+    if (availableCategoryVendors[category].includes(v)) {
+      result.push({ id: v, enabled: true });
+    }
+  });
+  
+  availableCategoryVendors[category].forEach(v => {
+    if (!defaultsList.includes(v)) {
+      result.push({ id: v, enabled: false });
+    }
+  });
+  
+  return result;
+}
+
+function loadProviders() {
+  let saved = null;
+  try {
+    saved = JSON.parse(window.localStorage.getItem(providersStorageKey) || 'null');
+  } catch {}
+  
+  if (saved && typeof saved === 'object') {
+    providersState = saved;
+  } else {
+    providersState = {};
+    const defaultDataVendors = configDefaults?.data_vendors || {
+      core_stock_apis: "longbridge_mcp, longbridge",
+      technical_indicators: "longbridge_mcp, longbridge",
+      fundamental_data: "longbridge_mcp, longbridge",
+      news_data: "web_search, duckduckgo, alpha_vantage, yfinance",
+      macro_data: "fred",
+      prediction_markets: "polymarket"
+    };
+    
+    Object.keys(availableCategoryVendors).forEach(cat => {
+      providersState[cat] = parseCategoryDefault(cat, defaultDataVendors[cat]);
+    });
+  }
+  
+  Object.keys(availableCategoryVendors).forEach(cat => {
+    renderCategoryProviders(cat);
+  });
+}
+
+function renderCategoryProviders(category) {
+  const container = document.querySelector(`#list_${category}`);
+  if (!container) return;
+  
+  const vendors = providersState[category];
+  container.innerHTML = '';
+  
+  vendors.forEach((v, index) => {
+    const li = document.createElement('li');
+    li.className = `provider-item${v.enabled ? '' : ' disabled'}`;
+    li.dataset.vendor = v.id;
+    li.dataset.index = index;
+    
+    const meta = providerMeta[v.id] || { name: v.id };
+    let badgeText = '';
+    let badgeClass = '';
+    
+    if (envStatus && envStatus.data_vendors && envStatus.data_vendors[v.id]) {
+      const status = envStatus.data_vendors[v.id];
+      const isConfigured = status.configured;
+      if (status.required) {
+        badgeText = isConfigured ? t('apiKeyConfigured') : t('apiKeyMissing');
+        badgeClass = isConfigured ? 'configured' : 'missing';
+      } else {
+        badgeText = t('apiKeyNotRequired');
+        badgeClass = 'optional';
+      }
+    } else {
+      badgeText = t('apiKeyNotRequired');
+      badgeClass = 'optional';
+    }
+    
+    li.innerHTML = `
+      <div class="provider-item-left">
+        <input type="checkbox" class="provider-enable-checkbox" ${v.enabled ? 'checked' : ''} />
+        <span class="provider-name">${meta.name}</span>
+      </div>
+      <div class="provider-item-right">
+        <span class="env-status-badge ${badgeClass}">${badgeText}</span>
+        <div class="provider-order-buttons">
+          <button type="button" class="btn-order btn-order-up" title="Move Up" ${index === 0 ? 'disabled' : ''}>▲</button>
+          <button type="button" class="btn-order btn-order-down" title="Move Down" ${index === vendors.length - 1 ? 'disabled' : ''}>▼</button>
+        </div>
+      </div>
+    `;
+    
+    const checkbox = li.querySelector('.provider-enable-checkbox');
+    checkbox.addEventListener('change', () => {
+      v.enabled = checkbox.checked;
+      li.classList.toggle('disabled', !v.enabled);
+      saveProviders();
+    });
+    
+    const upBtn = li.querySelector('.btn-order-up');
+    upBtn.addEventListener('click', () => {
+      if (index > 0) {
+        const temp = vendors[index];
+        vendors[index] = vendors[index - 1];
+        vendors[index - 1] = temp;
+        saveProviders();
+        renderCategoryProviders(category);
+      }
+    });
+    
+    const downBtn = li.querySelector('.btn-order-down');
+    downBtn.addEventListener('click', () => {
+      if (index < vendors.length - 1) {
+        const temp = vendors[index];
+        vendors[index] = vendors[index + 1];
+        vendors[index + 1] = temp;
+        saveProviders();
+        renderCategoryProviders(category);
+      }
+    });
+    
+    container.appendChild(li);
+  });
+}
+
+function currentProviders() {
+  const result = {};
+  Object.keys(providersState).forEach(cat => {
+    const enabledVendors = providersState[cat]
+      .filter(v => v.enabled)
+      .map(v => v.id);
+    result[cat] = enabledVendors.join(', ');
+  });
+  return result;
 }

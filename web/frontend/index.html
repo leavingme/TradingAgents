@@ -16,17 +16,17 @@
     <!-- marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css?v=20260707-agent-report-i18n" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260707-providers-config" />
   </head>
   <body>
     <!-- Ambient background orbs -->
     <div class="bg-orb bg-orb-1" aria-hidden="true"></div>
     <div class="bg-orb bg-orb-2" aria-hidden="true"></div>
     <div class="bg-orb bg-orb-3" aria-hidden="true"></div>
-
+ 
     <main class="shell">
       <section class="workspace">
-
+ 
         <!-- Top bar -->
         <header class="topbar">
           <div class="brand">
@@ -45,6 +45,7 @@
             <nav class="view-nav" aria-label="Primary">
               <button id="runViewButton" type="button" class="view-tab active" data-i18n="navRun">Run</button>
               <button id="settingsViewButton" type="button" class="view-tab" data-i18n="navSettings">Settings</button>
+              <button id="providersViewButton" type="button" class="view-tab" data-i18n="navProviders">Providers</button>
             </nav>
             <div class="status-pill">
               <span class="status-dot" id="statusDot"></span>
@@ -308,6 +309,362 @@
           </form>
         </section>
 
+        <!-- Providers View -->
+        <section id="providersView" class="providers-view hidden" aria-label="Capability Providers" hidden>
+          <div class="settings-header">
+            <div>
+              <h2 data-i18n="providersTitle">Capability Providers</h2>
+              <p data-i18n="providersSubtitle">Select and prioritize data & capability providers for your analysis runs.</p>
+            </div>
+            <button id="resetProviders" type="button" class="btn-secondary" data-i18n="resetProviders">Reset Defaults</button>
+          </div>
+
+          <div class="providers-grid">
+            <!-- Card 1: Core Stock API -->
+            <div class="provider-card" data-category="core_stock_apis">
+              <div class="provider-card-header">
+                <h3 data-i18n="catCoreStockTitle">Core Stock Price Data (OHLCV)</h3>
+                <p class="provider-card-desc" data-i18n="catCoreStockDesc">Provides historical and current price bar data for target tickers.</p>
+              </div>
+              <div class="provider-card-body">
+                <div class="provider-selector-area">
+                  <h4 data-i18n="prioritySetting">Priority & Enable Settings</h4>
+                  <ul class="provider-sortable-list" id="list_core_stock_apis"></ul>
+                </div>
+                <div class="provider-comparison-area">
+                  <h4 data-i18n="sideBySideComparison">Side-by-Side Comparison</h4>
+                  <div class="comparison-table-wrapper">
+                    <table class="comparison-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="compProvider">Provider</th>
+                          <th data-i18n="compSpeed">Speed</th>
+                          <th data-i18n="compQuality">Quality</th>
+                          <th data-i18n="compApiKey">API Key</th>
+                          <th data-i18n="compRateLimit">Rate Limit</th>
+                          <th data-i18n="compCoverage">Coverage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>Longbridge MCP</strong></td>
+                          <td><span class="badge speed-fast" data-i18n="badgeUltraFast">Ultra Fast</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compTokenRequired">Token Required</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td>US/HK/CN</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Longbridge CLI</strong></td>
+                          <td><span class="badge speed-medium" data-i18n="badgeFast">Fast</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compTokenRequired">Token Required</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td>US/HK/CN</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Yahoo Finance</strong></td>
+                          <td><span class="badge speed-medium" data-i18n="badgeMedium">Medium</span></td>
+                          <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
+                          <td data-i18n="compNone">None</td>
+                          <td data-i18n="compMedium">Medium</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Alpha Vantage</strong></td>
+                          <td><span class="badge speed-slow" data-i18n="badgeMedium">Medium</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compKeyRequired">Key Required</td>
+                          <td data-i18n="compTight">Tight (25/day)</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 2: Technical Indicators -->
+            <div class="provider-card" data-category="technical_indicators">
+              <div class="provider-card-header">
+                <h3 data-i18n="catTechIndTitle">Technical Indicators</h3>
+                <p class="provider-card-desc" data-i18n="catTechIndDesc">Provides indicators like SMA, EMA, MACD, RSI, and Bollinger Bands.</p>
+              </div>
+              <div class="provider-card-body">
+                <div class="provider-selector-area">
+                  <h4 data-i18n="prioritySetting">Priority & Enable Settings</h4>
+                  <ul class="provider-sortable-list" id="list_technical_indicators"></ul>
+                </div>
+                <div class="provider-comparison-area">
+                  <h4 data-i18n="sideBySideComparison">Side-by-Side Comparison</h4>
+                  <div class="comparison-table-wrapper">
+                    <table class="comparison-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="compProvider">Provider</th>
+                          <th data-i18n="compSpeed">Speed</th>
+                          <th data-i18n="compQuality">Quality</th>
+                          <th data-i18n="compApiKey">API Key</th>
+                          <th data-i18n="compRateLimit">Rate Limit</th>
+                          <th data-i18n="compCoverage">Coverage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>Longbridge MCP</strong></td>
+                          <td><span class="badge speed-fast" data-i18n="badgeUltraFast">Ultra Fast</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compTokenRequired">Token Required</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td>US/HK/CN</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Longbridge CLI</strong></td>
+                          <td><span class="badge speed-medium" data-i18n="badgeFast">Fast</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compTokenRequired">Token Required</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td>US/HK/CN</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Yahoo Finance (stockstats)</strong></td>
+                          <td><span class="badge speed-slow" data-i18n="badgeSlower">Slower</span></td>
+                          <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
+                          <td data-i18n="compNone">None</td>
+                          <td data-i18n="compNoLimit">No Limit (Local)</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Alpha Vantage</strong></td>
+                          <td><span class="badge speed-slow" data-i18n="badgeMedium">Medium</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compKeyRequired">Key Required</td>
+                          <td data-i18n="compTight">Tight (25/day)</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 3: Fundamental Data -->
+            <div class="provider-card" data-category="fundamental_data">
+              <div class="provider-card-header">
+                <h3 data-i18n="catFundamentalsTitle">Company Fundamental Data</h3>
+                <p class="provider-card-desc" data-i18n="catFundamentalsDesc">Financial statements (income statements, balance sheets, cashflow statements).</p>
+              </div>
+              <div class="provider-card-body">
+                <div class="provider-selector-area">
+                  <h4 data-i18n="prioritySetting">Priority & Enable Settings</h4>
+                  <ul class="provider-sortable-list" id="list_fundamental_data"></ul>
+                </div>
+                <div class="provider-comparison-area">
+                  <h4 data-i18n="sideBySideComparison">Side-by-Side Comparison</h4>
+                  <div class="comparison-table-wrapper">
+                    <table class="comparison-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="compProvider">Provider</th>
+                          <th data-i18n="compSpeed">Speed</th>
+                          <th data-i18n="compQuality">Quality</th>
+                          <th data-i18n="compApiKey">API Key</th>
+                          <th data-i18n="compRateLimit">Rate Limit</th>
+                          <th data-i18n="compCoverage">Coverage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>Longbridge MCP</strong></td>
+                          <td><span class="badge speed-fast" data-i18n="badgeUltraFast">Ultra Fast</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compTokenRequired">Token Required</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td>US/HK/CN</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Longbridge CLI</strong></td>
+                          <td><span class="badge speed-medium" data-i18n="badgeFast">Fast</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compTokenRequired">Token Required</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td>US/HK/CN</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Yahoo Finance</strong></td>
+                          <td><span class="badge speed-medium" data-i18n="badgeMedium">Medium</span></td>
+                          <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
+                          <td data-i18n="compNone">None</td>
+                          <td data-i18n="compMedium">Medium</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Alpha Vantage</strong></td>
+                          <td><span class="badge speed-slow" data-i18n="badgeMedium">Medium</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compKeyRequired">Key Required</td>
+                          <td data-i18n="compTight">Tight (25/day)</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 4: News & Social Data -->
+            <div class="provider-card" data-category="news_data">
+              <div class="provider-card-header">
+                <h3 data-i18n="catNewsTitle">News & Social Data</h3>
+                <p class="provider-card-desc" data-i18n="catNewsDesc">Fetches news articles, insider transactions, and market news.</p>
+              </div>
+              <div class="provider-card-body">
+                <div class="provider-selector-area">
+                  <h4 data-i18n="prioritySetting">Priority & Enable Settings</h4>
+                  <ul class="provider-sortable-list" id="list_news_data"></ul>
+                </div>
+                <div class="provider-comparison-area">
+                  <h4 data-i18n="sideBySideComparison">Side-by-Side Comparison</h4>
+                  <div class="comparison-table-wrapper">
+                    <table class="comparison-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="compProvider">Provider</th>
+                          <th data-i18n="compSpeed">Speed</th>
+                          <th data-i18n="compQuality">Quality</th>
+                          <th data-i18n="compApiKey">API Key</th>
+                          <th data-i18n="compRateLimit">Rate Limit</th>
+                          <th data-i18n="compCoverage">Coverage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>Web Search</strong></td>
+                          <td><span class="badge speed-medium" data-i18n="badgeMedium">Medium</span></td>
+                          <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
+                          <td data-i18n="compNone">None</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                        <tr>
+                          <td><strong>DuckDuckGo</strong></td>
+                          <td><span class="badge speed-medium" data-i18n="badgeMedium">Medium</span></td>
+                          <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
+                          <td data-i18n="compNone">None</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Yahoo Finance (Westock/DDG)</strong></td>
+                          <td><span class="badge speed-fast" data-i18n="badgeFast">Fast</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgeHigh">High</span></td>
+                          <td data-i18n="compNone">None</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                        <tr>
+                          <td><strong>Alpha Vantage</strong></td>
+                          <td><span class="badge speed-slow" data-i18n="badgeMedium">Medium</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
+                          <td data-i18n="compKeyRequired">Key Required</td>
+                          <td data-i18n="compTight">Tight (25/day)</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 5: Macro Data -->
+            <div class="provider-card" data-category="macro_data">
+              <div class="provider-card-header">
+                <h3 data-i18n="catMacroTitle">Macroeconomic Data</h3>
+                <p class="provider-card-desc" data-i18n="catMacroDesc">Economic metrics like inflation, GDP, central bank interest rates.</p>
+              </div>
+              <div class="provider-card-body">
+                <div class="provider-selector-area">
+                  <h4 data-i18n="prioritySetting">Priority & Enable Settings</h4>
+                  <ul class="provider-sortable-list" id="list_macro_data"></ul>
+                </div>
+                <div class="provider-comparison-area">
+                  <h4 data-i18n="sideBySideComparison">Side-by-Side Comparison</h4>
+                  <div class="comparison-table-wrapper">
+                    <table class="comparison-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="compProvider">Provider</th>
+                          <th data-i18n="compSpeed">Speed</th>
+                          <th data-i18n="compQuality">Quality</th>
+                          <th data-i18n="compApiKey">API Key</th>
+                          <th data-i18n="compRateLimit">Rate Limit</th>
+                          <th data-i18n="compCoverage">Coverage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>FRED</strong></td>
+                          <td><span class="badge speed-fast" data-i18n="badgeFast">Fast</span></td>
+                          <td><span class="badge quality-high" data-i18n="badgeHigh">High</span></td>
+                          <td data-i18n="compKeyRequired">Key Required</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td>US Macro</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 6: Prediction Markets -->
+            <div class="provider-card" data-category="prediction_markets">
+              <div class="provider-card-header">
+                <h3 data-i18n="catPredictionTitle">Prediction Markets</h3>
+                <p class="provider-card-desc" data-i18n="catPredictionDesc">Market-implied probabilities for forward-looking macro events.</p>
+              </div>
+              <div class="provider-card-body">
+                <div class="provider-selector-area">
+                  <h4 data-i18n="prioritySetting">Priority & Enable Settings</h4>
+                  <ul class="provider-sortable-list" id="list_prediction_markets"></ul>
+                </div>
+                <div class="provider-comparison-area">
+                  <h4 data-i18n="sideBySideComparison">Side-by-Side Comparison</h4>
+                  <div class="comparison-table-wrapper">
+                    <table class="comparison-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="compProvider">Provider</th>
+                          <th data-i18n="compSpeed">Speed</th>
+                          <th data-i18n="compQuality">Quality</th>
+                          <th data-i18n="compApiKey">API Key</th>
+                          <th data-i18n="compRateLimit">Rate Limit</th>
+                          <th data-i18n="compCoverage">Coverage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>Polymarket</strong></td>
+                          <td><span class="badge speed-fast" data-i18n="badgeFast">Fast</span></td>
+                          <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
+                          <td data-i18n="compNone">None</td>
+                          <td data-i18n="compHigh">High</td>
+                          <td data-i18n="compGlobal">Global</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
         <!-- Main dashboard -->
         <section id="runView" class="dashboard">
 
@@ -391,6 +748,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260707-agent-report-i18n" type="module"></script>
+    <script src="/static/app.js?v=20260707-providers-config" type="module"></script>
   </body>
 </html>

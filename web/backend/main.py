@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients.api_key_env import PROVIDER_API_KEY_ENV
 from tradingagents.llm_clients.openai_client import OPENAI_COMPATIBLE_PROVIDERS
 
@@ -35,6 +36,7 @@ async def get_config_defaults():
         "google_thinking_level": fields["google_thinking_level"].default,
         "openai_reasoning_effort": fields["openai_reasoning_effort"].default,
         "anthropic_effort": fields["anthropic_effort"].default,
+        "data_vendors": DEFAULT_CONFIG.get("data_vendors", {}),
     }
 
 
@@ -49,7 +51,45 @@ async def get_env_status():
             "configured": bool(env_var and os.environ.get(env_var)),
             "required": required,
         }
-    return {"providers": providers}
+
+    # Add data vendors status
+    data_vendors = {}
+    
+    # 1. FRED
+    data_vendors["fred"] = {
+        "env_var": "FRED_API_KEY",
+        "configured": bool(os.environ.get("FRED_API_KEY")),
+        "required": True,
+    }
+    # 2. Alpha Vantage
+    data_vendors["alpha_vantage"] = {
+        "env_var": "ALPHA_VANTAGE_API_KEY",
+        "configured": bool(os.environ.get("ALPHA_VANTAGE_API_KEY")),
+        "required": True,
+    }
+    # 3. Longbridge MCP (presence of token file)
+    from tradingagents.dataflows.longbridge_mcp import TOKEN_PATH
+    data_vendors["longbridge_mcp"] = {
+        "env_var": ".longbridge_mcp_token.json",
+        "configured": TOKEN_PATH.exists(),
+        "required": True,
+    }
+    # 4. Longbridge CLI (presence of CLI executable)
+    import shutil
+    data_vendors["longbridge"] = {
+        "env_var": "longbridge CLI in PATH",
+        "configured": shutil.which("longbridge") is not None,
+        "required": True,
+    }
+    # 5. Polymarket, web_search, duckduckgo, yfinance do not require credentials
+    for v in ["polymarket", "web_search", "duckduckgo", "yfinance"]:
+        data_vendors[v] = {
+            "env_var": None,
+            "configured": True,
+            "required": False,
+        }
+
+    return {"providers": providers, "data_vendors": data_vendors}
 
 
 @app.post("/api/runs", response_model=RunRecordResponse)

@@ -42,5 +42,11 @@ def build_runtime_config(request: AnalysisRequest) -> dict[str, Any]:
     if request.anthropic_effort is not None:
         config["anthropic_effort"] = request.anthropic_effort
 
-    config.update(request.config_overrides)
+    # Merge config_overrides (1-level deep for dict-valued keys like data_vendors)
+    for key, val in request.config_overrides.items():
+        if isinstance(val, dict) and isinstance(config.get(key), dict):
+            config[key] = config[key].copy()
+            config[key].update(val)
+        else:
+            config[key] = val
     return config

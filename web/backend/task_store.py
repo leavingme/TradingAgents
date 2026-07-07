@@ -1,10 +1,7 @@
 """SQLite-backed run store for TradingAgents Web UI.
 
-Persists runs and events to ~/.tradingagents/webui_runs.db (or the path
-specified by the TRADINGAGENTS_WEBUI_DB environment variable).  In-memory
-event queues are kept per-run so live SSE streaming works without touching
-the DB on every event read; past-run event replay reads directly from the
-events table.
+Delegates core SQLite operations to tradingagents.runtime.history_store.
+In-memory event queues are kept per-run so live SSE streaming works.
 """
 
 from __future__ import annotations
@@ -12,50 +9,14 @@ from __future__ import annotations
 import json
 import os
 import queue
-import sqlite3
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tradingagents.runtime import AnalysisEvent
-
+from tradingagents.runtime import AnalysisEvent, history_store, DB_PATH
 from .models import RunCreateRequest, RunStatus
-
-# ---------------------------------------------------------------------------
-# DB path resolution
-# ---------------------------------------------------------------------------
-
-def _default_db_path() -> Path:
-    """Return a writable default DB path.
-
-    The normal user-facing location is ``~/.tradingagents/webui_runs.db``.
-    Some managed/sandboxed environments can read ``$HOME`` but cannot create
-    SQLite files there, so fall back to a workspace-local hidden directory.
-    An explicit ``TRADINGAGENTS_WEBUI_DB`` always wins and is not redirected.
-    """
-
-    configured = os.environ.get("TRADINGAGENTS_WEBUI_DB")
-    if configured:
-        return Path(configured)
-
-    home_path = Path.home() / ".tradingagents" / "webui_runs.db"
-    fallback_path = Path.cwd() / ".tradingagents" / "webui_runs.db"
-
-    try:
-        home_path.parent.mkdir(parents=True, exist_ok=True)
-        probe_path = home_path.parent / ".write_test"
-        with probe_path.open("w", encoding="utf-8") as probe:
-            probe.write("")
-        probe_path.unlink(missing_ok=True)
-        return home_path
-    except OSError:
-        return fallback_path
-
-
-DB_PATH = _default_db_path()
-
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -105,158 +66,77 @@ class RunRecord:
 
 
 class TaskStore:
-    """Thread-safe run store backed by SQLite with in-memory SSE queues."""
+    """Thread-safe run store delegating SQL persistence to core history_store."""
 
     def __init__(self, db_path: Path = DB_PATH):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db_path = db_path
+        # Sync core history_store with the configured db_path
+        history_store._db_path = db_path
+        history_store._init_db()
+
         # In-memory cache: run_id -> RunRecord (for active + recently created runs)
         self._runs: dict[str, RunRecord] = {}
         self._lock = threading.RLock()
-        self._init_db()
-        self._recover_runs()
+        
+        # Recover any active runs left in running/pending state from a previous session
+        history_store._recover_runs()
 
-    # ------------------------------------------------------------------
-    # DB helpers
-    # ------------------------------------------------------------------
-
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_db(self) -> None:
-        with self._conn() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS runs (
-                    run_id            TEXT PRIMARY KEY,
-                    ticker            TEXT NOT NULL,
-                    analysis_date     TEXT NOT NULL,
-                    asset_type        TEXT NOT NULL,
-                    selected_analysts TEXT NOT NULL,
-                    llm_provider      TEXT,
-                    research_depth    INTEGER,
-                    status            TEXT NOT NULL DEFAULT 'pending',
-                    created_at        TEXT NOT NULL,
-                    started_at        TEXT,
-                    finished_at       TEXT,
-                    report_path       TEXT,
-                    error             TEXT,
-                    event_count       INTEGER NOT NULL DEFAULT 0
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS events (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                    run_id     TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    agent      TEXT,
-                    content    TEXT,
-                    timestamp  TEXT NOT NULL,
-                    FOREIGN KEY (run_id) REFERENCES runs(run_id)
-                )
-            """)
-
-    def _recover_runs(self) -> None:
-        """Mark any run left in running/pending state (from a previous server
-        session) as failed so clients don't wait forever."""
-        with self._conn() as conn:
-            conn.execute(
-                "UPDATE runs SET status='failed', error='server restarted',"
-                " finished_at=? WHERE status IN ('running', 'pending')",
-                (_now(),),
-            )
-
-    # ------------------------------------------------------------------
-    # Row → RunRecord reconstruction
-    # ------------------------------------------------------------------
-
-    def _row_to_record(self, row: sqlite3.Row) -> RunRecord:
-        """Reconstruct a RunRecord from a DB row.
-
-        Events are loaded from the events table so replay works for finished
-        runs.  A sentinel (None) is pre-loaded into the event_queue so any
-        SSE consumer exits cleanly instead of blocking forever.
-        """
+    def _dict_to_record(self, run_dict: dict[str, Any]) -> RunRecord:
+        """Reconstruct a RunRecord from a history_store dictionary representation."""
         request = RunCreateRequest(
-            ticker=row["ticker"],
-            analysis_date=row["analysis_date"],
-            asset_type=row["asset_type"],
-            selected_analysts=json.loads(row["selected_analysts"]),
-            llm_provider=row["llm_provider"],
-            research_depth=row["research_depth"],
+            ticker=run_dict["ticker"],
+            analysis_date=run_dict["analysis_date"],
+            asset_type=run_dict["asset_type"],
+            selected_analysts=json.loads(run_dict["selected_analysts"]),
+            llm_provider=run_dict["llm_provider"],
+            research_depth=run_dict["research_depth"],
         )
 
-        # Load persisted events
-        with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT event_type, agent, content, timestamp FROM events"
-                " WHERE run_id=? ORDER BY id",
-                (row["run_id"],),
-            ).fetchall()
-
         events: list[AnalysisEvent] = []
-        for ev_row in rows:
-            content = json.loads(ev_row["content"]) if ev_row["content"] else None
+        for ev in run_dict.get("events", []):
             events.append(
                 AnalysisEvent(
-                    type=ev_row["event_type"],
-                    run_id=row["run_id"],
-                    agent=ev_row["agent"],
-                    content=content,
-                    timestamp=ev_row["timestamp"],
+                    type=ev["type"],
+                    run_id=run_dict["run_id"],
+                    agent=ev["agent"],
+                    content=ev["content"],
+                    timestamp=ev["timestamp"],
                 )
             )
 
-        # Pre-load a sentinel so SSE consumers don't block on finished runs
         q: queue.Queue[AnalysisEvent | None] = queue.Queue()
         for ev in events:
             q.put(ev)
         q.put(None)  # sentinel
 
         return RunRecord(
-            run_id=row["run_id"],
+            run_id=run_dict["run_id"],
             request=request,
-            status=row["status"],
-            created_at=row["created_at"],
-            started_at=row["started_at"],
-            finished_at=row["finished_at"],
-            report_path=row["report_path"],
-            error=row["error"],
+            status=run_dict["status"],
+            created_at=run_dict["created_at"],
+            started_at=run_dict["started_at"],
+            finished_at=run_dict["finished_at"],
+            report_path=run_dict["report_path"],
+            error=run_dict["error"],
             events=events,
             event_queue=q,
         )
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def create(self, run_id: str, request: RunCreateRequest) -> RunRecord:
         with self._lock:
             record = RunRecord(run_id=run_id, request=request)
             self._runs[run_id] = record
 
-            with self._conn() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO runs
-                        (run_id, ticker, analysis_date, asset_type,
-                         selected_analysts, llm_provider, research_depth,
-                         status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        run_id,
-                        request.ticker,
-                        str(request.analysis_date),
-                        request.asset_type,
-                        json.dumps(list(request.selected_analysts)),
-                        request.llm_provider,
-                        request.research_depth,
-                        record.status,
-                        record.created_at,
-                    ),
-                )
+            history_store.create_run(
+                run_id=run_id,
+                ticker=request.ticker,
+                analysis_date=str(request.analysis_date),
+                asset_type=request.asset_type,
+                selected_analysts=request.selected_analysts,
+                llm_provider=request.llm_provider,
+                research_depth=request.research_depth,
+                status=record.status,
+                created_at=record.created_at,
+            )
             return record
 
     def get(self, run_id: str) -> RunRecord | None:
@@ -265,36 +145,30 @@ class TaskStore:
             if run_id in self._runs:
                 return self._runs[run_id]
 
-            # Slow path: load from DB
-            with self._conn() as conn:
-                row = conn.execute(
-                    "SELECT * FROM runs WHERE run_id=?", (run_id,)
-                ).fetchone()
-
-            if row is None:
+            # Slow path: load from DB via history_store
+            run_dict = history_store.get_run(run_id)
+            if run_dict is None:
                 return None
 
-            record = self._row_to_record(row)
+            record = self._dict_to_record(run_dict)
             self._runs[run_id] = record
             return record
 
     def list(self) -> list[RunRecord]:
         """Return up to 100 runs ordered by created_at DESC, sourced from DB."""
         with self._lock:
-            with self._conn() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM runs ORDER BY created_at DESC LIMIT 100"
-                ).fetchall()
-
+            runs_list = history_store.list_runs(limit=100)
             result: list[RunRecord] = []
-            for row in rows:
-                run_id = row["run_id"]
+            for run_dict in runs_list:
+                run_id = run_dict["run_id"]
                 if run_id in self._runs:
                     result.append(self._runs[run_id])
                 else:
-                    record = self._row_to_record(row)
-                    self._runs[run_id] = record
-                    result.append(record)
+                    full_run = history_store.get_run(run_id)
+                    if full_run:
+                        record = self._dict_to_record(full_run)
+                        self._runs[run_id] = record
+                        result.append(record)
             return result
 
     def mark_started(self, run_id: str) -> None:
@@ -303,11 +177,7 @@ class TaskStore:
             record.status = "running"
             record.started_at = _now()
 
-            with self._conn() as conn:
-                conn.execute(
-                    "UPDATE runs SET status='running', started_at=? WHERE run_id=?",
-                    (record.started_at, run_id),
-                )
+            history_store.mark_started(run_id, started_at=record.started_at)
 
     def add_event(self, run_id: str, event: AnalysisEvent) -> None:
         with self._lock:
@@ -323,30 +193,8 @@ class TaskStore:
                 if isinstance(event.content, dict):
                     record.error = event.content.get("error")
 
-            # Persist event to DB
-            timestamp = getattr(event, "timestamp", None) or _now()
-            content_json = (
-                json.dumps(event.content, default=str) if event.content is not None else None
-            )
-
-            with self._conn() as conn:
-                conn.execute(
-                    "INSERT INTO events (run_id, event_type, agent, content, timestamp)"
-                    " VALUES (?, ?, ?, ?, ?)",
-                    (run_id, event.type, event.agent, content_json, timestamp),
-                )
-                # Update derived columns on the runs row
-                conn.execute(
-                    "UPDATE runs SET event_count=?, report_path=COALESCE(?, report_path),"
-                    " error=COALESCE(?, error), status=? WHERE run_id=?",
-                    (
-                        len(record.events),
-                        record.report_path,
-                        record.error,
-                        record.status,
-                        run_id,
-                    ),
-                )
+            # Persist event to DB via history_store
+            history_store.add_event(run_id, event)
 
             # Push to live SSE queue
             record.event_queue.put(event)
@@ -358,11 +206,7 @@ class TaskStore:
                 record.status = status
             record.finished_at = _now()
 
-            with self._conn() as conn:
-                conn.execute(
-                    "UPDATE runs SET status=?, finished_at=? WHERE run_id=?",
-                    (record.status, record.finished_at, run_id),
-                )
+            history_store.mark_finished(run_id, record.status, finished_at=record.finished_at)
 
             # Sentinel signals SSE consumer to close the stream
             record.event_queue.put(None)
@@ -380,11 +224,7 @@ class TaskStore:
             record.cancel_requested = True
             record.status = "cancelled"
 
-            with self._conn() as conn:
-                conn.execute(
-                    "UPDATE runs SET status='cancelled' WHERE run_id=?",
-                    (run_id,),
-                )
+            history_store.request_cancel(run_id)
             return True
 
 

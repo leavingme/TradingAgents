@@ -37,7 +37,51 @@ ANALYST_REPORT_MAP = {
 
 
 def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
-    """Run a TradingAgents analysis and yield structured events."""
+    """Run a TradingAgents analysis, yield structured events, and persist history."""
+    from .history import history_store
+
+    # 1. Register the run in SQLite history
+    history_store.create_run(
+        run_id=request.run_id,
+        ticker=request.ticker,
+        analysis_date=str(request.analysis_date),
+        asset_type=request.asset_type,
+        selected_analysts=request.selected_analysts,
+        llm_provider=request.llm_provider,
+        research_depth=request.research_depth,
+    )
+    # Mark the run as started in the database
+    history_store.mark_started(request.run_id)
+
+    has_error = False
+    last_event = None
+    try:
+        for event in _run_analysis_stream_impl(request):
+            last_event = event
+            # Persist event to the history DB
+            history_store.add_event(request.run_id, event)
+            yield event
+    except Exception as exc:
+        has_error = True
+        err_event = AnalysisEvent(
+            type="error",
+            run_id=request.run_id,
+            content={"error": str(exc), "error_type": type(exc).__name__},
+        )
+        history_store.add_event(request.run_id, err_event)
+        raise exc
+    finally:
+        if not has_error:
+            status = "completed"
+            if last_event and last_event.type == "error":
+                status = "failed"
+            elif last_event and last_event.type == "run_cancelled":
+                status = "cancelled"
+            history_store.mark_finished(request.run_id, status)
+
+
+def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
+    """Internal implementation of TradingAgents analysis streaming."""
     config = build_runtime_config(request)
     selected_analysts = _ordered_analysts(request.selected_analysts)
     callbacks = list(request.callbacks)

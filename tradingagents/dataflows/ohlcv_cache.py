@@ -73,15 +73,23 @@ def read_cached_ohlcv(
         return None
 
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    if hasattr(df["Date"].dt, "tz") and df["Date"].dt.tz is not None:
+        df["Date"] = df["Date"].dt.tz_localize(None)
     df = df.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 
     req_end = pd.to_datetime(end_date)
+    if hasattr(req_end, "tz") and req_end.tz is not None:
+        req_end = req_end.tz_localize(None)
+
     latest = df["Date"].max()
 
     if (req_end - latest).days > MAX_STALE_DAYS:
         return None  # stale: needs a fresh fetch
 
     req_start = pd.to_datetime(start_date)
+    if hasattr(req_start, "tz") and req_start.tz is not None:
+        req_start = req_start.tz_localize(None)
+
     window = df[(df["Date"] >= req_start) & (df["Date"] <= req_end)].copy()
     return window if not window.empty else None
 

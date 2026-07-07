@@ -197,3 +197,71 @@ def resolve_social_query(symbol: str) -> dict[str, str]:
         "news_query": base_sym,
     }
 
+
+def to_westock_code(symbol: str) -> str:
+    """Convert standard TradingAgents symbol format to westock format.
+
+    e.g. 
+      0700.HK -> hk00700
+      NVDA -> usNVDA
+      600519.SH -> sh600519
+      000001.SZ -> sz000001
+      300750.SZ -> sz300750
+    """
+    if not symbol:
+        return ""
+    s = symbol.upper().strip()
+    # Remove CFD trailing qualifier if any
+    s = s.rstrip("+")
+    # If already in westock format (e.g. sh600519, hk00700, usAAPL)
+    if (s.startswith("SH") or s.startswith("SZ") or s.startswith("BJ") or s.startswith("HK") or s.startswith("US")) and s[2:].isalnum():
+        return s.lower()
+
+    # Check HK
+    if s.endswith(".HK"):
+        num = s[:-3].zfill(5)
+        return f"hk{num}"
+    # Check A-shares
+    if s.endswith(".SH"):
+        return f"sh{s[:-3]}"
+    if s.endswith(".SZ"):
+        return f"sz{s[:-3]}"
+    if s.endswith(".BJ"):
+        return f"bj{s[:-3]}"
+
+    # Check standard US equities
+    if s.isalpha():
+        return f"us{s}"
+
+    # Default fallback
+    return s.lower()
+
+
+WESTOCK_SCRIPT = "/data/hermes/skills/westock-data/scripts/index.js"
+
+
+def is_westock_available() -> bool:
+    """Return True if westock-data skill exists on this machine."""
+    import os
+    return os.path.exists(WESTOCK_SCRIPT)
+
+
+def run_westock(args: list[str], raw: bool = True) -> str:
+    """Execute a westock-data command and return the stdout as a string.
+
+    If raw is True, appends --raw to get structured output.
+    """
+    import subprocess
+    if not is_westock_available():
+        raise RuntimeError("westock-data skill is not available on this machine.")
+    cmd = ["node", WESTOCK_SCRIPT] + args
+    if raw and "--raw" not in args:
+        cmd.append("--raw")
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return res.stdout
+    except subprocess.CalledProcessError as e:
+        logger.error("westock command failed: %s\nStdout: %s\nStderr: %s", e, e.stdout, e.stderr)
+        raise RuntimeError(f"westock-data failed: {e.stderr or e.stdout or str(e)}")
+
+

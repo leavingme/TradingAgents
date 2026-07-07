@@ -168,6 +168,43 @@ def _search_macro_fallback(indicator: str, curr_date: str) -> str:
     return "\n".join(lines)
 
 
+_FRED_TO_WESTOCK_MAP = {
+    # Policy rates
+    "FEDFUNDS": "us_monetary",
+    "fed_funds_rate": "us_monetary",
+    "federal_funds_rate": "us_monetary",
+    "fed_funds": "us_monetary",
+    # Yields
+    "DGS2": "us_monetary",
+    "DGS10": "us_monetary",
+    "DGS30": "us_monetary",
+    "T10Y2Y": "us_monetary",
+    "10y_2y_spread": "us_monetary",
+    "yield_curve": "us_monetary",
+    # Inflation
+    "CPIAUCSL": "us_inflation",
+    "cpi": "us_inflation",
+    "core_cpi": "us_inflation",
+    "CPILFESL": "us_inflation",
+    "pce": "us_inflation",
+    "PCEPI": "us_inflation",
+    "core_pce": "us_inflation",
+    "PCEPILFE": "us_inflation",
+    "inflation_expectations": "us_inflation",
+    # Growth
+    "GDPC1": "us_eco_growth",
+    "gdp": "us_eco_growth",
+    "real_gdp": "us_eco_growth",
+    # Labor
+    "UNRATE": "us_employment",
+    "unemployment_rate": "us_employment",
+    "unemployment": "us_employment",
+    "PAYEMS": "us_employment",
+    "nonfarm_payrolls": "us_employment",
+    "payrolls": "us_employment",
+}
+
+
 def get_macro_data(
     indicator: str,
     curr_date: str,
@@ -189,14 +226,70 @@ def get_macro_data(
     if look_back_days is None:
         look_back_days = DEFAULT_LOOKBACK_DAYS
 
+    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
+
+    from .symbol_utils import is_westock_available, run_westock
+    if is_westock_available():
+        # Get mapped westock indicator
+        w_indicator = _FRED_TO_WESTOCK_MAP.get(indicator)
+        if not w_indicator:
+            try:
+                resolved_id = _resolve_series_id(indicator)
+                w_indicator = _FRED_TO_WESTOCK_MAP.get(resolved_id)
+            except ValueError:
+                pass
+
+        if w_indicator:
+            logger.info("westock-data available; fetching macro indicator %s (mapped to %s)", indicator, w_indicator)
+            try:
+                raw = run_westock(["macro", "indicator", w_indicator], raw=True)
+                import json
+                data = json.loads(raw)
+                if data and isinstance(data, list):
+                    # Flatten list of lists/dicts
+                    flat_data = []
+                    for item in data:
+                        if isinstance(item, list):
+                            flat_data.extend(item)
+                        elif isinstance(item, dict):
+                            flat_data.append(item)
+
+                    # Filter by OccurDate <= curr_date (format YYYYMMDD)
+                    cutoff_int = int(curr_date.replace("-", ""))
+                    flat_data = [d for d in flat_data if d.get("OccurDate", 99999999) <= cutoff_int]
+
+                    # Sort by date descending
+                    flat_data.sort(key=lambda x: x.get("OccurDate", 0), reverse=True)
+
+                    shown = flat_data[:40]
+                    lines = [
+                        f"## westock-data Macro Indicator: {indicator.upper()} (via {w_indicator})",
+                        f"- Requested date: {curr_date}",
+                        f"- Window: {start_date} to {curr_date}",
+                        "",
+                        "| Date | Indicator Name | Actual | Forecast | Former |",
+                        "| --- | --- | ---: | ---: | ---: |"
+                    ]
+                    for d in shown:
+                        date_str = str(d.get("OccurDate", ""))
+                        if len(date_str) == 8:
+                            date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                        name = d.get("IndicatorName", "")
+                        actual = d.get("ActualValue") or "N/A"
+                        forecast = d.get("ForecastValue") or "N/A"
+                        former = d.get("FormerValue") or "N/A"
+                        lines.append(f"| {date_str} | {name} | {actual} | {forecast} | {former} |")
+
+                    return "\n".join(lines)
+            except Exception as exc:
+                logger.warning("westock-data macro fetch failed: %s; trying FRED", exc)
+
     # Check API key configuration upfront
     try:
         get_api_key()
     except FredNotConfiguredError:
         return _search_macro_fallback(indicator, curr_date)
-
-    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-    start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
 
     # Invalid LLM-supplied indicator: return guidance rather than raising, so a
     # bad argument doesn't abort the run (the routing layer also degrades macro

@@ -129,6 +129,30 @@ def get_news_yfinance(
     canonical = normalize_symbol(ticker)
     resolved = "" if canonical == ticker else f" (resolved to {canonical})"
 
+    from .symbol_utils import is_westock_available, to_westock_code, run_westock
+    if is_westock_available():
+        w_code = to_westock_code(ticker)
+        logger.info("westock-data available; fetching news for %s (mapped to %s)", ticker, w_code)
+        try:
+            raw = run_westock(["news", "list", w_code, "--limit", str(article_limit)], raw=True)
+            import json
+            articles = json.loads(raw)
+            if articles and isinstance(articles, list):
+                news_str = ""
+                for a in articles:
+                    title = a.get("title", a.get("news_title", "No title"))
+                    src = a.get("src", a.get("source", "Unknown"))
+                    time_str = a.get("time", "")
+                    link = a.get("url", "")
+                    news_str += f"### {title} (source: {src})\n"
+                    news_str += f"Published: {time_str}\n"
+                    if link:
+                        news_str += f"Link: {link}\n"
+                    news_str += "\n"
+                return f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n{news_str}"
+        except Exception as exc:
+            logger.warning("westock-data news list failed: %s; trying yfinance", exc)
+
     from .symbol_utils import resolve_social_query
     sq = resolve_social_query(ticker)
     query = sq["news_query"]
@@ -209,6 +233,34 @@ def get_global_news_yfinance(
     if limit is None:
         limit = config["global_news_article_limit"]
     search_queries = config["global_news_queries"]
+
+    from .symbol_utils import is_westock_available, run_westock
+    if is_westock_available():
+        logger.info("westock-data available; fetching global/hot news")
+        try:
+            raw = run_westock(["hot", "news", "--limit", str(limit)], raw=True)
+            import json
+            articles = json.loads(raw)
+            if articles and isinstance(articles, list):
+                news_str = ""
+                for a in articles:
+                    title = a.get("news_title", "No title")
+                    src = a.get("source", "Unknown")
+                    ts = a.get("publish_time")
+                    time_str = ""
+                    if ts:
+                        time_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                    news_str += f"### {title} (source: {src})\n"
+                    if time_str:
+                        news_str += f"Published: {time_str}\n"
+                    news_str += "\n"
+                # Calculate date range
+                curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+                start_dt = curr_dt - relativedelta(days=look_back_days)
+                start_date = start_dt.strftime("%Y-%m-%d")
+                return f"## Global Market News, from {start_date} to {curr_date}:\n\n{news_str}"
+        except Exception as exc:
+            logger.warning("westock-data global/hot news failed: %s; trying yfinance", exc)
 
     all_news = []
     seen_titles = set()

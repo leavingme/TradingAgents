@@ -31,6 +31,8 @@ import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[2]  # /data/disk/workspace/TradingAgents
 TOKEN_PATH = ROOT / ".longbridge_mcp_token.json"
 
@@ -331,11 +333,41 @@ def get_stock_data(
     """
     Fetch daily OHLCV via MCP `history_candlesticks_by_date`.
 
+    Results are cached to ~/.tradingagents/cache/{SYMBOL}-{start}-{end}.csv so
+    that repeated calls for the same date range skip the network round-trip.
+    Cache is keyed by (symbol, start_date, end_date); stale detection relies on
+    end_date — when end_date is today or in the past the cache is always reused.
+
     Server schema (verified v0.7.1):
         required: symbol, period, forward_adjust, trade_sessions
         optional: start, end
     """
+    from .config import get_config
+    from .utils import safe_ticker_component
+
     sym = normalize_symbol(symbol)
+    safe_sym = safe_ticker_component(sym.replace(".", "_"))
+
+    config = get_config()
+    cache_dir = config["data_cache_dir"]
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, f"{safe_sym}-{start_date}-{end_date}.csv")
+
+    # --- cache read ---
+    if os.path.exists(cache_file):
+        cached = pd.read_csv(cache_file, on_bad_lines="skip", encoding="utf-8")
+        if not cached.empty and "Close" in cached.columns:
+            # Rebuild the text table from cached data
+            rows = list(cached[["Date", "Open", "High", "Low", "Close", "Volume"]].itertuples(index=False, name=None))
+            table = _format_text_table(("Date", "Open", "High", "Low", "Close", "Volume"), rows)
+            return (
+                f"# Stock data for {sym} from {start_date} to {end_date}\n"
+                f"# Total records: {len(rows)}\n"
+                f"# Data retrieved from local cache on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                + table
+            )
+
+    # --- fetch from MCP ---
     args = {
         "symbol": sym,
         "period": "day",
@@ -363,6 +395,12 @@ def get_stock_data(
             b.get("Open"), b.get("High"), b.get("Low"),
             b.get("Close"), b.get("Volume"),
         ))
+
+    # --- cache write ---
+    df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+    if not df.empty:
+        df.to_csv(cache_file, index=False, encoding="utf-8")
+
     table = _format_text_table(("Date", "Open", "High", "Low", "Close", "Volume"), rows)
     return (
         f"# Stock data for {sym} from {start_date} to {end_date}\n"

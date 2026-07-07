@@ -150,7 +150,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     os.makedirs(config["data_cache_dir"], exist_ok=True)
     data_file = os.path.join(
         config["data_cache_dir"],
-        f"{safe_symbol}-YFin-data-{start_str}-{end_str}.csv",
+        f"{safe_symbol}-{start_str}-{end_str}.csv",
     )
 
     # A cached file may be empty if a prior fetch failed (unknown symbol,

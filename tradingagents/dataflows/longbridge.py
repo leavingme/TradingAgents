@@ -157,14 +157,36 @@ def get_stock_data(
     """
     Fetch daily OHLCV data via `longbridge kline`, then filter to [start_date, end_date].
 
+    Results are cached to ~/.tradingagents/cache/{SYMBOL}-{start}-{end}.csv so
+    that repeated calls for the same date range skip the subprocess round-trip.
+
     Returns a CSV string with the same shape TradingAgents expects (Date, Open,
     High, Low, Close, Volume), prefixed with a # comment header for LLM context.
     """
-    sym = normalize_symbol(symbol)
+    from .config import get_config
+    from .utils import safe_ticker_component
 
-    # Fetch a generous window then filter (CLI doesn't expose a precise date filter
-    # on the default `kline` call; `kline history` does, but only one symbol at a
-    # time and is slower for narrow ranges — default `kline --count N` works fine).
+    sym = normalize_symbol(symbol)
+    safe_sym = safe_ticker_component(sym.replace(".", "_"))
+
+    config = get_config()
+    cache_dir = config["data_cache_dir"]
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, f"{safe_sym}-{start_date}-{end_date}.csv")
+
+    # --- cache read ---
+    if os.path.exists(cache_file):
+        cached = pd.read_csv(cache_file, on_bad_lines="skip", encoding="utf-8")
+        if not cached.empty and "Close" in cached.columns:
+            cached.set_index("Date", inplace=True)
+            return (
+                f"# Stock data for {sym} from {start_date} to {end_date}\n"
+                f"# Total records: {len(cached)}\n"
+                f"# Data retrieved from local cache on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                + cached.to_csv()
+            )
+
+    # --- fetch from CLI ---
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d")
         end = datetime.strptime(end_date, "%Y-%m-%d")
@@ -172,7 +194,6 @@ def get_stock_data(
         return f"Error: invalid date format (need yyyy-mm-dd): {e}"
 
     span_days = max((end - start).days + 1, 30)
-    # Cap at the CLI's reasonable max; pull enough to cover any reasonable analysis window
     count = min(max(span_days + 5, 30), 500)
 
     try:
@@ -185,7 +206,6 @@ def get_stock_data(
 
     rows = []
     for k in raw:
-        # CLI returns ISO date strings as "time"; convert to date
         ts = k.get("time", "")
         try:
             d = datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
@@ -210,14 +230,16 @@ def get_stock_data(
     if df.empty:
         return f"No data found for symbol '{sym}' between {start_date} and {end_date}"
 
+    # --- cache write ---
+    df.to_csv(cache_file, index=False, encoding="utf-8")
+
     df.set_index("Date", inplace=True)
-    csv_string = df.to_csv()
     header = (
         f"# Stock data for {sym} from {start_date} to {end_date}\n"
         f"# Total records: {len(df)}\n"
         f"# Data retrieved from Longbridge CLI on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     )
-    return header + csv_string
+    return header + df.to_csv()
 
 
 # ---- technical_indicators: via `longbridge quant run` (PineScript V6) ----

@@ -32,7 +32,6 @@ dependencies = [
     "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",
     "uvicorn>=0.30.0",
-    "yfinance>=1.4.1",
 ]
 
 [project.optional-dependencies]

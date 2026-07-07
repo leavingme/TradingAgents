@@ -3,7 +3,6 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-import yfinance as yf
 from langchain_core.messages import HumanMessage, RemoveMessage
 
 # Import tools from separate utility files
@@ -107,17 +106,35 @@ def resolve_instrument_identity(ticker: str) -> dict:
     the price action to a narrative and invent an identity that then cascaded
     through every downstream agent.
 
-    Best-effort by design: if yfinance is unavailable, rate-limited, or doesn't
-    recognise the ticker, we try to fall back to Longbridge MCP/CLI static_info.
+    Best-effort by design: we try westock-data profile first, and fall back to
+    Longbridge MCP/CLI static_info.
     """
-    from tradingagents.dataflows.symbol_utils import normalize_symbol
+    from tradingagents.dataflows.symbol_utils import is_westock_available, to_westock_code, run_westock
 
     info = {}
-    try:
-        info = yf.Ticker(normalize_symbol(ticker)).info or {}
-    except Exception as exc:  # noqa: BLE001 — fail open, never block the run
-        logger.warning("yfinance identity lookup failed for %s: %s; trying Longbridge fallback", ticker, exc)
-        # Try Longbridge MCP
+    
+    # Try westock-data profile first
+    if is_westock_available():
+        w_code = to_westock_code(ticker)
+        logger.info("westock-data available; resolving instrument identity for %s (mapped to %s)", ticker, w_code)
+        try:
+            raw = run_westock(["profile", w_code], raw=True)
+            import json
+            res = json.loads(raw)
+            if res and res.get("success") and isinstance(res.get("data"), dict):
+                data = res["data"]
+                info = {
+                    "longName": data.get("name"),
+                    "sector": data.get("industry"),  # westock has industry as top sector
+                    "industry": data.get("industry"),
+                    "exchange": data.get("exchange"),
+                    "quoteType": "EQUITY",
+                }
+        except Exception as exc:
+            logger.warning("westock-data identity lookup failed for %s: %s; trying Longbridge", ticker, exc)
+
+    # Try Longbridge MCP if westock is unavailable or failed
+    if not info:
         try:
             from tradingagents.dataflows.longbridge_mcp import normalize_symbol as mcp_normalize, _client, _first_item
             mcp_sym = mcp_normalize(ticker)

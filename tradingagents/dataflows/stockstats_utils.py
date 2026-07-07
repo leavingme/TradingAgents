@@ -4,9 +4,7 @@ import time
 from typing import Annotated
 
 import pandas as pd
-import yfinance as yf
 from stockstats import wrap
-from yfinance.exceptions import YFRateLimitError
 
 from .config import get_config
 from .symbol_utils import NoMarketDataError, normalize_symbol
@@ -21,22 +19,8 @@ MAX_OHLCV_STALE_DAYS = 10
 
 
 def yf_retry(func, max_retries=3, base_delay=2.0):
-    """Execute a yfinance call with exponential backoff on rate limits.
-
-    yfinance raises YFRateLimitError on HTTP 429 responses but does not
-    retry them internally. This wrapper adds retry logic specifically
-    for rate limits. Other exceptions propagate immediately.
-    """
-    for attempt in range(max_retries + 1):
-        try:
-            return func()
-        except YFRateLimitError:
-            if attempt < max_retries:
-                delay = base_delay * (2 ** attempt)
-                logger.warning(f"Yahoo Finance rate limited, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(delay)
-            else:
-                raise
+    """Dummy retry helper for backwards-compatibility since yfinance is removed."""
+    return func()
 
 
 def _ensure_date_column(data: pd.DataFrame) -> pd.DataFrame:
@@ -159,19 +143,58 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
         _assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
         return data
 
-    # --- fetch from yfinance ---
-    downloaded = yf_retry(lambda: yf.download(
-        canonical,
-        start=start_str,
-        end=end_str,
-        multi_level_index=False,
-        progress=False,
-        auto_adjust=True,
-    ))
-    downloaded = _ensure_date_column(downloaded.reset_index())
+    # --- fetch from westock-data or Longbridge ---
+    from .symbol_utils import is_westock_available, to_westock_code, run_westock
+    downloaded = None
+    if is_westock_available():
+        w_code = to_westock_code(symbol)
+        logger.info("westock-data available; downloading OHLCV for %s (mapped to %s)", symbol, w_code)
+        try:
+            # We want to pull ~365 observations
+            raw = run_westock(["kline", w_code, "--period", "day", "--limit", "365"], raw=True)
+            import json
+            klines = json.loads(raw)
+            if klines and isinstance(klines, list):
+                df = pd.DataFrame(klines)
+                df = df.rename(columns={
+                    "last": "Close",
+                    "open": "Open",
+                    "high": "High",
+                    "low": "Low",
+                    "volume": "Volume"
+                })
+                if "date" in df.columns:
+                    df = df.rename(columns={"date": "Date"})
+                df["Date"] = pd.to_datetime(df["Date"])
+                for col in ["Open", "High", "Low", "Close"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce")
+                if "Volume" in df.columns:
+                    df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
+                downloaded = df.sort_values("Date").reset_index(drop=True)
+        except Exception as exc:
+            logger.warning("westock kline failed: %s; trying Longbridge fallback", exc)
+
+    if downloaded is None or downloaded.empty:
+        logger.info("westock-data unavailable or failed; downloading OHLCV via Longbridge")
+        try:
+            from .interface import route_to_vendor
+            # Force routing to longbridge vendors for core_stock_apis to prevent recursion
+            csv_str = route_to_vendor("get_stock_data", symbol, start_str, curr_date)
+            import io
+            # Parse CSV string, stripping commented lines
+            cleaned_lines = "\n".join([line for line in csv_str.splitlines() if not line.startswith("#")])
+            downloaded = pd.read_csv(io.StringIO(cleaned_lines))
+            downloaded["Date"] = pd.to_datetime(downloaded["Date"])
+        except Exception as exc:
+            logger.error("Longbridge OHLCV fetch failed: %s", exc)
+            raise NoMarketDataError(symbol, canonical, f"no market data available: {exc}")
+
+    # Ensure Date column standard layout
+    downloaded = _ensure_date_column(downloaded)
     if downloaded.empty or "Close" not in downloaded.columns:
         raise NoMarketDataError(
-            symbol, canonical, "Yahoo Finance returned no rows"
+            symbol, canonical, "No market data returned"
         )
 
     # --- cache write ---

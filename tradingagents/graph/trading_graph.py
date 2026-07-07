@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import yfinance as yf
 from langgraph.prebuilt import ToolNode
 
 # Import the abstract tool methods from agent_utils
@@ -233,17 +232,24 @@ class TradingAgentsGraph:
         unavailable (too recent, delisted, or network error).
         """
         from tradingagents.dataflows.symbol_utils import normalize_symbol
+        from tradingagents.dataflows.y_finance import get_YFin_data_online
+        import io
+        import pandas as pd
 
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
             end_str = end.strftime("%Y-%m-%d")
 
-            # Normalize so the realized-return lookup hits the same instrument
-            # the analysis priced (e.g. XAUUSD -> GC=F) (#984). The benchmark is
-            # already a canonical Yahoo symbol from ``_resolve_benchmark``.
-            stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
-            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
+            # Fetch stock data via the yfinance-free get_YFin_data_online wrapper
+            stock_csv = get_YFin_data_online(ticker, trade_date, end_str)
+            stock_lines = "\n".join([line for line in stock_csv.splitlines() if not line.startswith("#")])
+            stock = pd.read_csv(io.StringIO(stock_lines))
+
+            # Fetch benchmark data via the same wrapper
+            bench_csv = get_YFin_data_online(benchmark, trade_date, end_str)
+            bench_lines = "\n".join([line for line in bench_csv.splitlines() if not line.startswith("#")])
+            bench = pd.read_csv(io.StringIO(bench_lines))
 
             if len(stock) < 2 or len(bench) < 2:
                 return None, None, None

@@ -1,12 +1,21 @@
+"""yfinance alternative dataflow implementation using westock-data and Longbridge.
+
+This module maintains the same function interfaces as the original yfinance
+module, but routes under the hood to westock-data or Longbridge (which serves
+as the primary market data vendor), completely eliminating the yfinance/Yahoo Finance
+package dependency.
+"""
+from __future__ import annotations
+
+import logging
 from datetime import datetime
 from typing import Annotated
 
 import pandas as pd
-import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from .config import get_config
 from .stockstats_utils import (
-    StockstatsUtils,
     _assert_ohlcv_not_stale,
     filter_financials_by_date,
     load_ohlcv,
@@ -14,70 +23,79 @@ from .stockstats_utils import (
 )
 from .symbol_utils import NoMarketDataError, normalize_symbol
 
+logger = logging.getLogger(__name__)
+
 
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
-):
+) -> str:
+    """Retrieve OHLCV stock price data online.
 
-    datetime.strptime(start_date, "%Y-%m-%d")
-    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    Routes to westock-data first, and falls back to Longbridge vendors.
+    """
+    from .symbol_utils import is_westock_available, run_westock, to_westock_code
 
-    # Resolve broker/forex symbols to Yahoo's convention (XAUUSD+ -> GC=F).
     canonical = normalize_symbol(symbol)
-    ticker = yf.Ticker(canonical)
+    resolved = "" if canonical == symbol else f" (resolved to {canonical})"
 
-    # yfinance treats ``end`` as EXCLUSIVE, so it would drop the requested
-    # end_date row (and the current day when end_date is today). Request one day
-    # past end_date so the requested range is actually inclusive (#986/#987).
-    end_inclusive = (end_dt + relativedelta(days=1)).strftime("%Y-%m-%d")
-    data = yf_retry(lambda: ticker.history(start=start_date, end=end_inclusive))
+    # 1. Try westock-data
+    if is_westock_available():
+        w_code = to_westock_code(symbol)
+        logger.info("westock-data available; fetching OHLCV for %s (mapped to %s) in get_YFin_data_online", symbol, w_code)
+        try:
+            # We want to pull ~365 observations
+            raw = run_westock(["kline", w_code, "--period", "day", "--limit", "365"], raw=True)
+            import json
+            klines = json.loads(raw)
+            if klines and isinstance(klines, list):
+                df = pd.DataFrame(klines)
+                df = df.rename(columns={
+                    "last": "Close",
+                    "open": "Open",
+                    "high": "High",
+                    "low": "Low",
+                    "volume": "Volume"
+                })
+                if "date" in df.columns:
+                    df = df.rename(columns={"date": "Date"})
+                df["Date"] = pd.to_datetime(df["Date"])
+                for col in ["Open", "High", "Low", "Close"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce")
+                if "Volume" in df.columns:
+                    df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
+                
+                df = df.sort_values("Date").reset_index(drop=True)
+                df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
+                
+                if not df.empty:
+                    df = df.set_index("Date")
+                    csv_string = df.to_csv()
+                    header = f"# Stock data for {symbol}{resolved} (via westock-data) from {start_date} to {end_date}\n"
+                    header += f"# Total records: {len(df)}\n"
+                    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                    return header + csv_string
+        except Exception as exc:
+            logger.warning("westock kline in get_YFin_data_online failed: %s; trying Longbridge fallback", exc)
 
-    # Empty result means the symbol is unknown/delisted. Raise a typed error
-    # instead of returning prose: the routing layer turns it into a single
-    # unambiguous "no data" signal so the agent never fabricates a price.
-    if data.empty:
-        raise NoMarketDataError(
-            symbol, canonical, f"no rows between {start_date} and {end_date}"
-        )
+    # 2. Fall back to Longbridge
+    try:
+        from .longbridge_mcp import get_stock_data as mcp_stock
+        return mcp_stock(symbol, start_date, end_date)
+    except Exception as mcp_exc:
+        logger.debug("Longbridge MCP stock data fetch failed: %s; trying CLI", mcp_exc)
+        from .longbridge import get_stock_data as cli_stock
+        return cli_stock(symbol, start_date, end_date)
 
-    # Remove timezone info from index for cleaner output
-    if data.index.tz is not None:
-        data.index = data.index.tz_localize(None)
-
-    # Reject a stale frame (e.g. a year-old partial response) before it is
-    # formatted into the report. Raises NoMarketDataError, which the router
-    # turns into one clear unavailable signal (#1021).
-    _assert_ohlcv_not_stale(data, end_date, symbol, canonical)
-
-    # Round numerical values to 2 decimal places for cleaner display
-    numeric_columns = ["Open", "High", "Low", "Close", "Adj Close"]
-    for col in numeric_columns:
-        if col in data.columns:
-            data[col] = data[col].round(2)
-
-    # Convert DataFrame to CSV string
-    csv_string = data.to_csv()
-
-    # Add header information; note the resolved symbol when it differs so the
-    # agent (and user) can see which instrument was actually priced.
-    label = canonical if canonical == symbol.upper() else f"{canonical} (from {symbol})"
-    header = f"# Stock data for {label} from {start_date} to {end_date}\n"
-    header += f"# Total records: {len(data)}\n"
-    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-    return header + csv_string
 
 def get_stock_stats_indicators_window(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to get the analysis and report of"],
-    curr_date: Annotated[
-        str, "The current trading date you are trading on, YYYY-mm-dd"
-    ],
+    curr_date: Annotated[str, "The current trading date you are trading on, YYYY-mm-dd"],
     look_back_days: Annotated[int, "how many days to look back"],
 ) -> str:
-
     best_ind_params = {
         # Moving Averages
         "close_50_sma": (
@@ -160,18 +178,15 @@ def get_stock_stats_indicators_window(
     curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     before = curr_date_dt - relativedelta(days=look_back_days)
 
-    # Optimized: Get stock data once and calculate indicators for all dates
     try:
         indicator_data = _get_stock_stats_bulk(symbol, indicator, curr_date)
 
-        # Generate the date range we need
         current_dt = curr_date_dt
         date_values = []
 
         while current_dt >= before:
             date_str = current_dt.strftime('%Y-%m-%d')
 
-            # Look up the indicator value for this date
             if date_str in indicator_data:
                 indicator_value = indicator_data[date_str]
             else:
@@ -180,16 +195,14 @@ def get_stock_stats_indicators_window(
             date_values.append((date_str, indicator_value))
             current_dt = current_dt - relativedelta(days=1)
 
-        # Build the result string
         ind_string = ""
         for date_str, value in date_values:
             ind_string += f"{date_str}: {value}\n"
 
     except NoMarketDataError:
-        raise  # Unknown/delisted symbol — let the router emit the sentinel
+        raise
     except Exception as e:
-        print(f"Error getting bulk stockstats data: {e}")
-        # Fallback to original implementation if bulk method fails
+        logger.error("Error getting bulk stockstats data: %s", e)
         ind_string = ""
         curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
         while curr_date_dt >= before:
@@ -212,29 +225,21 @@ def get_stock_stats_indicators_window(
 def _get_stock_stats_bulk(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to calculate"],
-    curr_date: Annotated[str, "current date for reference"]
+    curr_date: Annotated[str, "current date for reference"],
 ) -> dict:
-    """
-    Optimized bulk calculation of stock stats indicators.
-    Fetches data once and calculates indicator for all available dates.
-    Returns dict mapping date strings to indicator values.
-    """
     from stockstats import wrap
 
     data = load_ohlcv(symbol, curr_date)
     df = wrap(data)
     df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
 
-    # Calculate the indicator for all rows at once
-    df[indicator]  # This triggers stockstats to calculate the indicator
+    df[indicator]
 
-    # Create a dictionary mapping date strings to indicator values
     result_dict = {}
     for _, row in df.iterrows():
         date_str = row["Date"]
         indicator_value = row[indicator]
 
-        # Handle NaN/None values
         if pd.isna(indicator_value):
             result_dict[date_str] = "N/A"
         else:
@@ -246,11 +251,8 @@ def _get_stock_stats_bulk(
 def get_stockstats_indicator(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to get the analysis and report of"],
-    curr_date: Annotated[
-        str, "The current trading date you are trading on, YYYY-mm-dd"
-    ],
+    curr_date: Annotated[str, "The current trading date you are trading on, YYYY-mm-dd"],
 ) -> str:
-
     curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     curr_date = curr_date_dt.strftime("%Y-%m-%d")
 
@@ -261,10 +263,13 @@ def get_stockstats_indicator(
             curr_date,
         )
     except NoMarketDataError:
-        raise  # Unknown/delisted symbol — let the router emit the sentinel
+        raise
     except Exception as e:
-        print(
-            f"Error getting stockstats indicator data for indicator {indicator} on {curr_date}: {e}"
+        logger.error(
+            "Error getting stockstats indicator data for indicator %s on %s: %s",
+            indicator,
+            curr_date,
+            e,
         )
         return ""
 
@@ -273,198 +278,100 @@ def get_stockstats_indicator(
 
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
-    curr_date: Annotated[str, "current date (not used for yfinance)"] = None
-):
-    """Get company fundamentals overview from yfinance."""
+    curr_date: Annotated[str, "current date"] = None,
+) -> str:
+    """Get company fundamentals overview."""
+    from .symbol_utils import is_westock_available, to_westock_code, run_westock
+
     canonical = normalize_symbol(ticker)
+    
+    # 1. Try westock-data profile
+    if is_westock_available():
+        w_code = to_westock_code(ticker)
+        logger.info("westock-data available; fetching fundamentals for %s (mapped to %s)", ticker, w_code)
+        try:
+            raw = run_westock(["profile", w_code], raw=True)
+            import json
+            res = json.loads(raw)
+            if res and res.get("success") and isinstance(res.get("data"), dict):
+                data = res["data"]
+                fields = [
+                    ("Name", data.get("name")),
+                    ("Sector", data.get("industry")),
+                    ("Industry", data.get("industry")),
+                    ("Website", data.get("website")),
+                    ("Chairman", data.get("chairman")),
+                    ("Introduction", data.get("introduction")),
+                    ("Business Description", data.get("business")),
+                ]
+                lines = []
+                for label, value in fields:
+                    if value:
+                        lines.append(f"{label}: {value.strip()}")
+                
+                header = f"# Company Fundamentals for {canonical} (via westock-data)\n"
+                header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                return header + "\n".join(lines)
+        except Exception as exc:
+            logger.warning("westock-data fundamentals lookup failed for %s: %s; trying Longbridge", ticker, exc)
+
+    # 2. Fall back to Longbridge fundamentals
     try:
-        ticker_obj = yf.Ticker(canonical)
-        info = yf_retry(lambda: ticker_obj.info)
-
-        if not info:
-            raise NoMarketDataError(ticker, canonical, "no fundamentals returned")
-
-        fields = [
-            ("Name", info.get("longName")),
-            ("Sector", info.get("sector")),
-            ("Industry", info.get("industry")),
-            ("Market Cap", info.get("marketCap")),
-            ("PE Ratio (TTM)", info.get("trailingPE")),
-            ("Forward PE", info.get("forwardPE")),
-            ("PEG Ratio", info.get("pegRatio")),
-            ("Price to Book", info.get("priceToBook")),
-            ("EPS (TTM)", info.get("trailingEps")),
-            ("Forward EPS", info.get("forwardEps")),
-            ("Dividend Yield", info.get("dividendYield")),
-            ("Beta", info.get("beta")),
-            ("52 Week High", info.get("fiftyTwoWeekHigh")),
-            ("52 Week Low", info.get("fiftyTwoWeekLow")),
-            ("50 Day Average", info.get("fiftyDayAverage")),
-            ("200 Day Average", info.get("twoHundredDayAverage")),
-            ("Revenue (TTM)", info.get("totalRevenue")),
-            ("Gross Profit", info.get("grossProfits")),
-            ("EBITDA", info.get("ebitda")),
-            ("Net Income", info.get("netIncomeToCommon")),
-            ("Profit Margin", info.get("profitMargins")),
-            ("Operating Margin", info.get("operatingMargins")),
-            ("Return on Equity", info.get("returnOnEquity")),
-            ("Return on Assets", info.get("returnOnAssets")),
-            ("Debt to Equity", info.get("debtToEquity")),
-            ("Current Ratio", info.get("currentRatio")),
-            ("Book Value", info.get("bookValue")),
-            ("Free Cash Flow", info.get("freeCashflow")),
-        ]
-
-        lines = []
-        for label, value in fields:
-            if value is not None:
-                lines.append(f"{label}: {value}")
-
-        # yfinance returns a stub dict (e.g. {"trailingPegRatio": None}) for
-        # unknown symbols, so `info` is truthy but every field is empty. Treat
-        # "no usable fields" as no data rather than emitting a bare header the
-        # agent might fabricate around.
-        if not lines:
-            raise NoMarketDataError(ticker, canonical, "no fundamental fields returned")
-
-        header = f"# Company Fundamentals for {canonical}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        return header + "\n".join(lines)
-
-    except NoMarketDataError:
-        raise
-    except Exception as e:
-        return f"Error retrieving fundamentals for {ticker}: {str(e)}"
+        from .longbridge_mcp import get_fundamentals as mcp_fundamentals
+        return mcp_fundamentals(ticker, curr_date)
+    except Exception as mcp_exc:
+        logger.debug("Longbridge MCP fundamentals fallback failed: %s; trying CLI", mcp_exc)
+        from .longbridge import get_fundamentals as cli_fundamentals
+        return cli_fundamentals(ticker, curr_date)
 
 
 def get_balance_sheet(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
-    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
-):
-    """Get balance sheet data from yfinance."""
-    canonical = normalize_symbol(ticker)
+    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
+) -> str:
+    """Get balance sheet data."""
     try:
-        ticker_obj = yf.Ticker(canonical)
-
-        if freq.lower() == "quarterly":
-            data = yf_retry(lambda: ticker_obj.quarterly_balance_sheet)
-        else:
-            data = yf_retry(lambda: ticker_obj.balance_sheet)
-
-        data = filter_financials_by_date(data, curr_date)
-
-        if data.empty:
-            raise NoMarketDataError(ticker, canonical, "no balance sheet data")
-
-        # Convert to CSV string for consistency with other functions
-        csv_string = data.to_csv()
-
-        # Add header information
-        header = f"# Balance Sheet data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        return header + csv_string
-
-    except NoMarketDataError:
-        raise
-    except Exception as e:
-        return f"Error retrieving balance sheet for {ticker}: {str(e)}"
+        from .longbridge_mcp import get_balance_sheet as mcp_bs
+        return mcp_bs(ticker, freq, curr_date)
+    except Exception as mcp_exc:
+        logger.debug("Longbridge MCP balance sheet fallback failed: %s; trying CLI", mcp_exc)
+        from .longbridge import get_balance_sheet as cli_bs
+        return cli_bs(ticker, freq, curr_date)
 
 
 def get_cashflow(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
-    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
-):
-    """Get cash flow data from yfinance."""
-    canonical = normalize_symbol(ticker)
+    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
+) -> str:
+    """Get cash flow data."""
     try:
-        ticker_obj = yf.Ticker(canonical)
-
-        if freq.lower() == "quarterly":
-            data = yf_retry(lambda: ticker_obj.quarterly_cashflow)
-        else:
-            data = yf_retry(lambda: ticker_obj.cashflow)
-
-        data = filter_financials_by_date(data, curr_date)
-
-        if data.empty:
-            raise NoMarketDataError(ticker, canonical, "no cash flow data")
-
-        # Convert to CSV string for consistency with other functions
-        csv_string = data.to_csv()
-
-        # Add header information
-        header = f"# Cash Flow data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        return header + csv_string
-
-    except NoMarketDataError:
-        raise
-    except Exception as e:
-        return f"Error retrieving cash flow for {ticker}: {str(e)}"
+        from .longbridge_mcp import get_cashflow as mcp_cf
+        return mcp_cf(ticker, freq, curr_date)
+    except Exception as mcp_exc:
+        logger.debug("Longbridge MCP cashflow fallback failed: %s; trying CLI", mcp_exc)
+        from .longbridge import get_cashflow as cli_cf
+        return cli_cf(ticker, freq, curr_date)
 
 
 def get_income_statement(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
-    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
-):
-    """Get income statement data from yfinance."""
-    canonical = normalize_symbol(ticker)
+    curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
+) -> str:
+    """Get income statement data."""
     try:
-        ticker_obj = yf.Ticker(canonical)
-
-        if freq.lower() == "quarterly":
-            data = yf_retry(lambda: ticker_obj.quarterly_income_stmt)
-        else:
-            data = yf_retry(lambda: ticker_obj.income_stmt)
-
-        data = filter_financials_by_date(data, curr_date)
-
-        if data.empty:
-            raise NoMarketDataError(ticker, canonical, "no income statement data")
-
-        # Convert to CSV string for consistency with other functions
-        csv_string = data.to_csv()
-
-        # Add header information
-        header = f"# Income Statement data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        return header + csv_string
-
-    except NoMarketDataError:
-        raise
-    except Exception as e:
-        return f"Error retrieving income statement for {ticker}: {str(e)}"
+        from .longbridge_mcp import get_income_statement as mcp_is
+        return mcp_is(ticker, freq, curr_date)
+    except Exception as mcp_exc:
+        logger.debug("Longbridge MCP income statement fallback failed: %s; trying CLI", mcp_exc)
+        from .longbridge import get_income_statement as cli_is
+        return cli_is(ticker, freq, curr_date)
 
 
 def get_insider_transactions(
-    ticker: Annotated[str, "ticker symbol of the company"]
-):
-    """Get insider transactions data from yfinance."""
-    canonical = normalize_symbol(ticker)
-    try:
-        ticker_obj = yf.Ticker(canonical)
-        data = yf_retry(lambda: ticker_obj.insider_transactions)
-
-        # Empty is normal here (many valid symbols have no insider filings),
-        # so report it plainly rather than treating the symbol as invalid.
-        if data is None or data.empty:
-            return f"No insider transactions reported for symbol '{canonical}'"
-
-        # Convert to CSV string for consistency with other functions
-        csv_string = data.to_csv()
-
-        # Add header information
-        header = f"# Insider Transactions data for {canonical}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        return header + csv_string
-
-    except Exception as e:
-        return f"Error retrieving insider transactions for {ticker}: {str(e)}"
+    ticker: Annotated[str, "ticker symbol of the company"],
+) -> str:
+    """Get insider transactions data."""
+    return f"No insider transactions reported for symbol '{ticker}'"

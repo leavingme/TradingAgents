@@ -100,6 +100,22 @@ def get_news_yfinance(
         news = yf_retry(lambda: stock.get_news(count=article_limit))
 
         if not news:
+            # Fallback to search query for company news (essential for foreign tickers like 0700.HK)
+            from .symbol_utils import resolve_social_query
+            sq = resolve_social_query(ticker)
+            query = sq["news_query"]
+            logger.info("yfinance news empty for %r; falling back to yf.Search for query %r", ticker, query)
+            try:
+                search = yf_retry(lambda: yf.Search(
+                    query=query,
+                    news_count=article_limit,
+                    enable_fuzzy_query=True,
+                ))
+                news = search.news
+            except Exception as exc:
+                logger.warning("yf.Search fallback failed for %s: %s", ticker, exc)
+
+        if not news:
             return f"No news found for {ticker}{resolved}"
 
         # Parse date range for filtering

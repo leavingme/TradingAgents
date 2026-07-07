@@ -55,6 +55,9 @@ def create_sentiment_analyst(llm):
     report via structured output (with a free-text fallback for providers
     that do not support it).
     """
+    from tradingagents.agents.utils.agent_utils import get_no_preamble_instruction
+    from tradingagents.dataflows.symbol_utils import resolve_social_query
+
     structured_llm = bind_structured(llm, SentimentReport, "Sentiment Analyst")
 
     def sentiment_analyst_node(state):
@@ -63,12 +66,16 @@ def create_sentiment_analyst(llm):
         start_date = _seven_days_back(end_date)
         instrument_context = get_instrument_context_from_state(state)
 
+        # Resolve social-media specific tickers/queries to prevent empty feeds
+        # on foreign tickers (e.g. 0700.HK -> TCEHY / Tencent)
+        sq = resolve_social_query(ticker)
+
         # Pre-fetch all three sources. Each fetcher degrades gracefully and
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+        stocktwits_block = fetch_stocktwits_messages(sq["stocktwits"], limit=30)
+        reddit_block = fetch_reddit_posts(sq["reddit"])
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -77,7 +84,7 @@ def create_sentiment_analyst(llm):
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
-        )
+        ) + get_no_preamble_instruction()
 
         prompt = ChatPromptTemplate.from_messages(
             [

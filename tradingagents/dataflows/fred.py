@@ -133,6 +133,49 @@ def _request(path: str, params: dict) -> dict:
     return response.json()
 
 
+def _search_macro_fallback(indicator: str, curr_date: str) -> str:
+    """Fallback to searching Yahoo Finance news for the macro indicator when FRED is missing."""
+    import yfinance as yf
+    from .stockstats_utils import yf_retry
+    from .yfinance_news import _extract_article_data
+
+    # Map friendly alias to readable name for query
+    readable = indicator.replace("_", " ").strip()
+    query = f"US {readable} macro economy data value {curr_date[:4]}"
+    logger.info("FRED API Key missing; falling back to yf.Search for macro query %r", query)
+
+    try:
+        search = yf_retry(lambda: yf.Search(
+            query=query,
+            news_count=5,
+            enable_fuzzy_query=True,
+        ))
+        news = search.news
+    except Exception as e:
+        return f"FRED: API Key not configured and web search fallback failed: {e}"
+
+    if not news:
+        return f"FRED: API Key not configured and no search results found for query '{query}'"
+
+    lines = [
+        f"## FRED Fallback: {readable.upper()} Search Results",
+        f"- Note: FRED_API_KEY not configured. This is a search-based fallback for date around {curr_date}.",
+        "",
+        "### Recent relevant news/data observations",
+        ""
+    ]
+    for article in news[:5]:
+        data = _extract_article_data(article)
+        lines.append(f"#### {data['title']} (source: {data['publisher']})")
+        if data["summary"]:
+            lines.append(data["summary"])
+        if data["link"]:
+            lines.append(f"Link: {data['link']}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def get_macro_data(
     indicator: str,
     curr_date: str,
@@ -153,6 +196,12 @@ def get_macro_data(
     """
     if look_back_days is None:
         look_back_days = DEFAULT_LOOKBACK_DAYS
+
+    # Check API key configuration upfront
+    try:
+        get_api_key()
+    except FredNotConfiguredError:
+        return _search_macro_fallback(indicator, curr_date)
 
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")

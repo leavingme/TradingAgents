@@ -136,3 +136,64 @@ def normalize_symbol(raw: str) -> str:
 def is_yahoo_safe(symbol: str) -> bool:
     """True when ``symbol`` only contains characters Yahoo symbols use."""
     return bool(symbol) and _YAHOO_SAFE.fullmatch(symbol) is not None
+
+
+_SOCIAL_TICKER_MAP = {
+    "0700.HK": {"stocktwits": "TCEHY", "reddit": "Tencent OR TCEHY", "news_query": "Tencent"},
+    "9988.HK": {"stocktwits": "BABA", "reddit": "Alibaba OR BABA", "news_query": "Alibaba"},
+    "3690.HK": {"stocktwits": "MPNGF", "reddit": "Meituan", "news_query": "Meituan"},
+    "1810.HK": {"stocktwits": "XIACY", "reddit": "Xiaomi", "news_query": "Xiaomi"},
+    "9888.HK": {"stocktwits": "BIDU", "reddit": "Baidu OR BIDU", "news_query": "Baidu"},
+    "9618.HK": {"stocktwits": "JD", "reddit": "JD.com OR JD", "news_query": "JD.com"},
+    "9999.HK": {"stocktwits": "NTES", "reddit": "NetEase OR NTES", "news_query": "NetEase"},
+    "1211.HK": {"stocktwits": "BYDDY", "reddit": "BYD OR BYDDY", "news_query": "BYD"},
+    "0981.HK": {"stocktwits": "SMICY", "reddit": "SMIC", "news_query": "SMIC"},
+}
+
+
+def clean_company_name(name: str) -> str:
+    """Clean company names for search queries by removing common corporate suffixes."""
+    if not name:
+        return ""
+    # Remove common suffixes case-insensitively
+    suffixes = [
+        r"\bcorp(?:oration)?\b",
+        r"\binc(?:orporated)?\b",
+        r"\bltd\b",
+        r"\blimited\b",
+        r"\bplc\b",
+        r"\bco\b",
+        r"\bholdings?\b",
+        r"\bs\.a\b",
+        r"\ba\.g\b",
+    ]
+    cleaned = name
+    for pattern in suffixes:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+    # Strip non-alphanumeric/spaces/dots
+    cleaned = re.sub(r"[^\w\s.-]", "", cleaned)
+    # Collapse multiple spaces
+    cleaned = " ".join(cleaned.split())
+    return cleaned.strip()
+
+
+def resolve_social_query(symbol: str) -> dict[str, str]:
+    """Map a ticker to its social media / news search terms.
+
+    Returns a dict with keys:
+      - 'stocktwits': Symbol to use for StockTwits stream.
+      - 'reddit': Search query to use for Reddit search.
+      - 'news_query': Text query to use for news search.
+    """
+    sym = symbol.upper().strip()
+    if sym in _SOCIAL_TICKER_MAP:
+        return _SOCIAL_TICKER_MAP[sym]
+
+    # Defaults: clean up ticker or strip exchange suffixes
+    base_sym = sym.partition(".")[0]
+    return {
+        "stocktwits": base_sym,
+        "reddit": sym,
+        "news_query": base_sym,
+    }
+

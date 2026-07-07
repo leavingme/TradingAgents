@@ -43,6 +43,7 @@ __all__ = [
     "resolve_instrument_identity",
     "get_instrument_context_from_state",
     "get_language_instruction",
+    "get_no_preamble_instruction",
     "create_msg_delete",
 ]
 
@@ -64,6 +65,26 @@ def get_language_instruction() -> str:
     if lang.strip().lower() == "english":
         return ""
     return f" Write your entire response in {lang}."
+
+
+def get_no_preamble_instruction() -> str:
+    """Return a prompt instruction that forbids reasoning preamble in report output.
+
+    LLMs sometimes include internal chain-of-thought text (e.g.
+    'I have all the data I need', 'Note one discrepancy...') at the start of
+    their final report output, breaking professional report formatting.
+    This instruction is added to every analyst system message to prevent it.
+    """
+    return (
+        " IMPORTANT OUTPUT FORMAT: Do NOT include any internal reasoning,"
+        " meta-commentary, scratchpad text, or status statements"
+        " (such as 'I have all the data I need', 'I was able to gather',"
+        " 'Note one discrepancy', 'I\'ll now write', 'Based on the data I gathered',"
+        " 'Let me now', 'After gathering') in your report."
+        " Begin your response DIRECTLY with the report content,"
+        " starting with a proper markdown heading (e.g. '# Market Analysis Report')."
+        " Do not add any introductory sentence before the first heading."
+    )
 
 
 def _clean_identity_value(value: Any) -> str | None:

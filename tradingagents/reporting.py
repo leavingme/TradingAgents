@@ -8,8 +8,60 @@ run produces the same on-disk report tree a CLI run does.
 
 from datetime import datetime
 from pathlib import Path
+import re
 
 from tradingagents.dataflows.config import get_config
+
+
+# ---- Reasoning preamble cleaner -----------------------------------------------
+
+# First-person / meta-commentary phrases that signal an LLM is including its
+# internal chain-of-thought in what should be a professional report output.
+# When the report content starts with one of these patterns (before any heading),
+# everything up to the first markdown heading is stripped.
+_REASONING_PREAMBLE_PATTERNS = re.compile(
+    r"^(?:"
+    r"I have all the data"
+    r"|I was able to"
+    r"|I(?:'ve| have) gathered"
+    r"|I(?:'ve| have) collected"
+    r"|I(?:'ve| have) retrieved"
+    r"|I(?:'ve| have) completed"
+    r"|I(?:'ve| have) analyzed"
+    r"|I'll (?:now |proceed|use|treat)"
+    r"|Note (?:one|that|a) (?:discrepancy|issue|conflict|important)"
+    r"|Based on the (?:data|information|tools|results) (?:gathered|collected|retrieved|I've)"
+    r"|Let me (?:now|proceed|compile|write|analyze)"
+    r"|After (?:gathering|collecting|analyzing|reviewing)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _strip_reasoning_preamble(text: str) -> str:
+    """Remove LLM scratchpad / reasoning text that leaked before the first heading.
+
+    When the report does not start with a markdown heading ('# ...') and its
+    first non-empty line matches a known reasoning-preamble pattern, strip
+    everything before the first heading.  If no heading exists (very short
+    answer or pure prose), leave the content unchanged so we don't silently
+    discard a valid report.
+    """
+    if not text:
+        return text
+    stripped = text.lstrip()
+    # Fast path: already starts with a heading — nothing to do.
+    if stripped.startswith("#"):
+        return text
+    # Check whether the opening line is a reasoning preamble.
+    first_line = stripped.split("\n", 1)[0].strip()
+    if not _REASONING_PREAMBLE_PATTERNS.match(first_line):
+        return text
+    # Find the first heading and trim everything before it.
+    heading_match = re.search(r"^#{1,6}\s", text, re.MULTILINE)
+    if heading_match:
+        return text[heading_match.start():]
+    return text
 
 
 _AGENT_LABELS = {
@@ -115,20 +167,24 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
     analyst_parts = []
     if final_state.get("market_report"):
         analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "market.md").write_text(final_state["market_report"], encoding="utf-8")
-        analyst_parts.append(("Market Analyst", final_state["market_report"]))
+        cleaned = _strip_reasoning_preamble(final_state["market_report"])
+        (analysts_dir / "market.md").write_text(cleaned, encoding="utf-8")
+        analyst_parts.append(("Market Analyst", cleaned))
     if final_state.get("sentiment_report"):
         analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "sentiment.md").write_text(final_state["sentiment_report"], encoding="utf-8")
-        analyst_parts.append(("Sentiment Analyst", final_state["sentiment_report"]))
+        cleaned = _strip_reasoning_preamble(final_state["sentiment_report"])
+        (analysts_dir / "sentiment.md").write_text(cleaned, encoding="utf-8")
+        analyst_parts.append(("Sentiment Analyst", cleaned))
     if final_state.get("news_report"):
         analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "news.md").write_text(final_state["news_report"], encoding="utf-8")
-        analyst_parts.append(("News Analyst", final_state["news_report"]))
+        cleaned = _strip_reasoning_preamble(final_state["news_report"])
+        (analysts_dir / "news.md").write_text(cleaned, encoding="utf-8")
+        analyst_parts.append(("News Analyst", cleaned))
     if final_state.get("fundamentals_report"):
         analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "fundamentals.md").write_text(final_state["fundamentals_report"], encoding="utf-8")
-        analyst_parts.append(("Fundamentals Analyst", final_state["fundamentals_report"]))
+        cleaned = _strip_reasoning_preamble(final_state["fundamentals_report"])
+        (analysts_dir / "fundamentals.md").write_text(cleaned, encoding="utf-8")
+        analyst_parts.append(("Fundamentals Analyst", cleaned))
     if analyst_parts:
         content = "\n\n".join(
             f"### {report_agent_label(name, output_language)}\n{text}" for name, text in analyst_parts

@@ -4,6 +4,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
+    get_no_preamble_instruction,
     get_stock_data,
     get_verified_market_snapshot,
 )
@@ -53,6 +54,7 @@ Before writing the final report, call get_verified_market_snapshot for this tick
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()
+            + get_no_preamble_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(

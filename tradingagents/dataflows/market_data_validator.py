@@ -96,11 +96,13 @@ def _load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     explicit = [v.strip() for v in chain.split(",") if v.strip() and v.strip() != "default"]
 
     if explicit:
-        # Pull a 120-day window ending at curr_date for indicator coverage.
+        # Pull a 365-day window ending at curr_date for indicator coverage.
+        # 200 SMA needs 200+ trading days ≈ 280 calendar days; 365 days gives
+        # a comfortable buffer for simple averages and convergence room for EMAs.
         try:
             import datetime as _dt
             end = _dt.datetime.strptime(curr_date, "%Y-%m-%d")
-            start = (end - _dt.timedelta(days=120)).strftime("%Y-%m-%d")
+            start = (end - _dt.timedelta(days=365)).strftime("%Y-%m-%d")
             raw = route_to_vendor("get_stock_data", symbol, start, curr_date)
             df = _parse_vendor_csv(raw)
             if not df.empty and "Close" in df.columns:
@@ -110,8 +112,6 @@ def _load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
                 "falling back to yfinance", explicit, symbol,
             )
         except NoMarketDataError as exc:
-            # The configured vendor chain exhausted without usable data; let
-            # yfinance have a try before we surface a hard failure.
             logger.warning(
                 "data_vendors chain %s raised NoMarketDataError for %s "
                 "(%s); falling back to yfinance",

@@ -326,18 +326,64 @@ const reportSectionOrder = [
   'final_trade_decision',
 ];
 const reportSectionTitles = {
-  market_report: 'Market Analyst',
-  sentiment_report: 'Sentiment Analyst',
-  news_report: 'News Analyst',
-  fundamentals_report: 'Fundamentals Analyst',
-  bull_researcher: 'Bull Researcher',
-  bear_researcher: 'Bear Researcher',
-  investment_plan: 'Research Team Decision',
-  trader_investment_plan: 'Trader',
-  aggressive_analyst: 'Aggressive Analyst',
-  conservative_analyst: 'Conservative Analyst',
-  neutral_analyst: 'Neutral Analyst',
-  final_trade_decision: 'Portfolio Manager',
+  en: {
+    market_report: 'Market Analyst',
+    sentiment_report: 'Sentiment Analyst',
+    news_report: 'News Analyst',
+    fundamentals_report: 'Fundamentals Analyst',
+    bull_researcher: 'Bull Researcher',
+    bear_researcher: 'Bear Researcher',
+    investment_plan: 'Research Team Decision',
+    trader_investment_plan: 'Trader',
+    aggressive_analyst: 'Aggressive Analyst',
+    conservative_analyst: 'Conservative Analyst',
+    neutral_analyst: 'Neutral Analyst',
+    final_trade_decision: 'Portfolio Manager',
+  },
+  zh: {
+    market_report: '市场分析师',
+    sentiment_report: '情绪分析师',
+    news_report: '新闻分析师',
+    fundamentals_report: '基本面分析师',
+    bull_researcher: '看多研究员',
+    bear_researcher: '看空研究员',
+    investment_plan: '研究团队决策',
+    trader_investment_plan: '交易员计划',
+    aggressive_analyst: '激进风险分析师',
+    conservative_analyst: '保守风险分析师',
+    neutral_analyst: '中性风险分析师',
+    final_trade_decision: '组合经理决策',
+  },
+};
+const agentDisplayNames = {
+  en: {
+    'Market Analyst': 'Market Analyst',
+    'Sentiment Analyst': 'Sentiment Analyst',
+    'News Analyst': 'News Analyst',
+    'Fundamentals Analyst': 'Fundamentals Analyst',
+    'Bull Researcher': 'Bull Researcher',
+    'Bear Researcher': 'Bear Researcher',
+    'Research Manager': 'Research Manager',
+    Trader: 'Trader',
+    'Aggressive Analyst': 'Aggressive Analyst',
+    'Neutral Analyst': 'Neutral Analyst',
+    'Conservative Analyst': 'Conservative Analyst',
+    'Portfolio Manager': 'Portfolio Manager',
+  },
+  zh: {
+    'Market Analyst': '市场分析师',
+    'Sentiment Analyst': '情绪分析师',
+    'News Analyst': '新闻分析师',
+    'Fundamentals Analyst': '基本面分析师',
+    'Bull Researcher': '看多研究员',
+    'Bear Researcher': '看空研究员',
+    'Research Manager': '研究经理',
+    Trader: '交易员',
+    'Aggressive Analyst': '激进风险分析师',
+    'Neutral Analyst': '中性风险分析师',
+    'Conservative Analyst': '保守风险分析师',
+    'Portfolio Manager': '组合经理',
+  },
 };
 
 // ── Initialise date field ────────────────────────────────────────────────────
@@ -975,6 +1021,8 @@ function agentCell(text, className) {
 
 /** Convert snake_case agent names to Title Case for display. */
 function formatAgentName(name) {
+  const displayName = agentDisplayNames[activeLocale]?.[name] ?? agentDisplayNames.en[name];
+  if (displayName) return displayName;
   return name
     .replace(/_/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase());
@@ -1172,7 +1220,9 @@ function orderedReportSections() {
 }
 
 function reportSectionTitle(section) {
-  return reportSectionTitles[section] || formatAgentName(section);
+  return reportSectionTitles[activeLocale]?.[section]
+    ?? reportSectionTitles.en[section]
+    ?? formatAgentName(section);
 }
 
 async function loadRunReport(runId) {

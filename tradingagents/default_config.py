@@ -124,16 +124,14 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Category-level configuration (default for all tools in category).
     # The configured value is the exact vendor chain — requests are NOT silently
     # routed to vendors you didn't choose. For ordered fallback, list several,
-    # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
-    # Longbridge is the primary vendor for prices/indicators/fundamentals —
-    # MCP variant first (clean schema, OAuth-managed auth), CLI variant is the
-    # fallback if the MCP bearer is missing or expired. CLI/MCP both lack
-    # native news, so news stays on web_search (free, no key) + DDG fallback.
+    # e.g. "westock,alpha_vantage". "default" uses all available vendors.
+    # Westock is the first-level vendor for prices/indicators/fundamentals.
+    # Longbridge MCP/CLI remain fallbacks for coverage and auth gaps.
     "data_vendors": {
-        "core_stock_apis": "longbridge_mcp, longbridge",
-        "technical_indicators": "longbridge_mcp, longbridge",
-        "fundamental_data": "longbridge_mcp, longbridge",
-        "news_data": "web_search, duckduckgo, alpha_vantage, yfinance",
+        "core_stock_apis": "westock, longbridge_mcp, longbridge",
+        "technical_indicators": "westock, longbridge_mcp, longbridge",
+        "fundamental_data": "westock, longbridge_mcp, longbridge",
+        "news_data": "web_search, duckduckgo, alpha_vantage, westock",
         "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },

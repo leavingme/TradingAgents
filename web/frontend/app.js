@@ -23,6 +23,7 @@ const providersViewButton = document.querySelector('#providersViewButton');
 const settingsForm  = document.querySelector('#settingsForm');
 const resetSettings = document.querySelector('#resetSettings');
 const resetProviders = document.querySelector('#resetProviders');
+const ohlcvSettingsBody = document.querySelector('#ohlcvSettingsBody');
 const providersView = document.querySelector('#providersView');
 const statusEl      = document.querySelector('#runStatus');
 const statusDot     = document.querySelector('#statusDot');
@@ -40,6 +41,7 @@ const clearLog      = document.querySelector('#clearLog');
 const loadReport    = document.querySelector('#loadReport');
 const reportSectionSelect = document.querySelector('#reportSectionSelect');
 const refreshHistory= document.querySelector('#refreshHistory');
+const clearHistory  = document.querySelector('#clearHistory');
 const historyList   = document.querySelector('#historyList');
 const apiKeyStatusList = document.querySelector('#apiKeyStatusList');
 const llmProvider   = document.querySelector('#llmProvider');
@@ -165,15 +167,38 @@ const translations = {
     navProviders: 'Providers',
     providersTitle: 'Capability Providers',
     providersSubtitle: 'Select and prioritize data & capability providers for your analysis runs.',
+    providersSummaryTitle: 'Provider Data Capability Summary',
+    providersSummarySubtitle: 'Verified by real provider requests. This summarizes market coverage, newest available data, and the smallest K-line interval each provider can return.',
     resetProviders: 'Reset Defaults',
     prioritySetting: 'Priority & Enable Settings',
     sideBySideComparison: 'Side-by-Side Comparison',
+    summaryProvider: 'Provider',
+    summaryMarkets: 'Markets',
+    summaryLatest: 'Newest data observed',
+    summaryGranularity: 'Smallest K-line interval',
+    summaryNotes: 'Notes',
+    coverageUsHkCn: 'US stocks / Hong Kong stocks / China A-shares',
+    summaryMarketsAll: 'US stocks / China A-shares / Hong Kong stocks',
+    summaryWestockLatest: 'Observed latest rows: US stocks 2026-07-07, China A-shares 2026-07-08, Hong Kong stocks 2026-07-08',
+    summaryWestockGranularity: '1-minute K-line for China A-shares only',
+    summaryWestockNote: 'Works well as the default OHLCV source. Its minute-level K-line data is limited to China A-share stocks.',
+    summaryLongbridgeCliLatest: 'Observed current data for US stocks, China A-shares, and Hong Kong stocks',
+    summaryLongbridgeGranularity: '1-minute K-line supported',
+    summaryLongbridgeCliNote: 'Useful when Westock data is stale, unavailable, or when minute-level data is needed outside China A-shares.',
+    summaryLongbridgeMcpLatest: 'Observed current data for US stocks, China A-shares, and Hong Kong stocks',
+    summaryLongbridgeMcpNote: 'Provides the same market coverage as Longbridge CLI when the Longbridge MCP credential is valid.',
+    providersSummaryFootnote: 'Last real provider verification: 2026-07-08.',
     compProvider: 'Provider',
     compSpeed: 'Speed',
     compQuality: 'Quality',
     compApiKey: 'API Key',
     compRateLimit: 'Rate Limit',
     compCoverage: 'Coverage',
+    providerSettings: 'Current Settings',
+    providerStatus: 'Status',
+    providerEnabled: 'enabled',
+    providerDisabled: 'disabled',
+    providerPriority: 'priority',
     compTokenRequired: 'Token Required',
     compKeyRequired: 'Key Required',
     compNone: 'None',
@@ -186,6 +211,30 @@ const translations = {
     catCoreStockDesc: 'Provides historical and current price bar data for target tickers.',
     catTechIndTitle: 'Technical Indicators',
     catTechIndDesc: 'Provides indicators like SMA, EMA, MACD, RSI, and Bollinger Bands.',
+    indicatorSourceTitle: 'Indicator Coverage & Source',
+    indicatorSourceDesc: 'Shows whether each technical indicator is directly provided by a vendor, computed by the vendor, or computed locally from OHLCV data.',
+    indicatorColumn: 'Indicator',
+    indicatorMeaningColumn: 'Meaning',
+    indicatorSourceLocal: 'Local calculation',
+    indicatorSourceVendor: 'Vendor-side calculation',
+    indicatorSourceNative: 'Native API',
+    indicatorSourceMissing: 'Not wired',
+    indicatorClose10Ema: '10-day EMA',
+    indicatorClose50Sma: '50-day SMA',
+    indicatorClose200Sma: '200-day SMA',
+    indicatorSma: '20-day SMA alias',
+    indicatorSma50: '50-day SMA alias',
+    indicatorMacd: 'MACD line',
+    indicatorMacds: 'MACD signal line',
+    indicatorMacdh: 'MACD histogram',
+    indicatorRsi: 'RSI',
+    indicatorBoll: 'Bollinger middle band',
+    indicatorBollUb: 'Bollinger upper band',
+    indicatorBollLb: 'Bollinger lower band',
+    indicatorAtr: 'ATR volatility',
+    indicatorVwma: 'Volume-weighted moving average',
+    indicatorMfi: 'Money Flow Index',
+    indicatorSourceFootnote: 'Verified capability: Westock passed 13 indicators; Longbridge MCP and CLI passed 14 indicators across US stocks, China A-shares, and Hong Kong stocks. Alpha Vantage is shown for source type comparison and is not in the default technical-indicator chain.',
     catFundamentalsTitle: 'Company Fundamental Data',
     catFundamentalsDesc: 'Financial statements (income statements, balance sheets, cashflow statements).',
     catNewsTitle: 'News & Social Data',
@@ -297,15 +346,38 @@ const translations = {
     navProviders: '服务商',
     providersTitle: '服务商配置',
     providersSubtitle: '管理及排列各个底层能力的数服务商优先级及开关。',
+    providersSummaryTitle: '数据能力实测摘要',
+    providersSummarySubtitle: '基于真实服务商请求验证，汇总各服务商支持的市场、能拿到的最新数据，以及最小 K 线周期。',
     resetProviders: '恢复默认',
     prioritySetting: '优先级及启用设置',
     sideBySideComparison: '服务商横向评测',
+    summaryProvider: '服务商',
+    summaryMarkets: '市场覆盖',
+    summaryLatest: '实测最新数据',
+    summaryGranularity: '最小 K 线周期',
+    summaryNotes: '说明',
+    coverageUsHkCn: '美股 / 港股 / A 股',
+    summaryMarketsAll: '美股 / A 股 / 港股',
+    summaryWestockLatest: '实测最新数据：美股 2026-07-07，A 股 2026-07-08，港股 2026-07-08',
+    summaryWestockGranularity: '仅 A 股支持 1 分钟 K 线',
+    summaryWestockNote: '适合做默认 OHLCV 来源，但分钟级 K 线仅覆盖 A 股个股。',
+    summaryLongbridgeCliLatest: '实测美股、A 股、港股均可获得当前数据',
+    summaryLongbridgeGranularity: '支持 1 分钟 K 线',
+    summaryLongbridgeCliNote: '当 Westock 数据过旧、不可用，或需要 A 股之外的分钟级数据时，适合作为备用来源。',
+    summaryLongbridgeMcpLatest: '实测美股、A 股、港股均可获得当前数据',
+    summaryLongbridgeMcpNote: 'Longbridge MCP 凭证有效时，市场覆盖与 Longbridge CLI 一致。',
+    providersSummaryFootnote: '最后一次真实服务商验证：2026-07-08。',
     compProvider: '服务商',
     compSpeed: '速度',
     compQuality: '数据质量',
     compApiKey: 'API 密钥',
     compRateLimit: '频次限制',
     compCoverage: '覆盖范围',
+    providerSettings: '当前设置',
+    providerStatus: '状态',
+    providerEnabled: '已启用',
+    providerDisabled: '未启用',
+    providerPriority: '优先级',
     compTokenRequired: '需要 Token',
     compKeyRequired: '需要 API Key',
     compNone: '无需',
@@ -318,6 +390,30 @@ const translations = {
     catCoreStockDesc: '提供个股的历史和实时K线数据。',
     catTechIndTitle: '技术分析指标',
     catTechIndDesc: '提供 SMA, EMA, MACD, RSI, 布林带等指标。',
+    indicatorSourceTitle: '指标覆盖与来源',
+    indicatorSourceDesc: '说明每个技术指标是服务商原生提供、服务商侧计算，还是由项目基于 OHLCV 本地计算。',
+    indicatorColumn: '指标',
+    indicatorMeaningColumn: '含义',
+    indicatorSourceLocal: '本地计算',
+    indicatorSourceVendor: '服务商侧计算',
+    indicatorSourceNative: '原生提供',
+    indicatorSourceMissing: '未接入',
+    indicatorClose10Ema: '10 日 EMA',
+    indicatorClose50Sma: '50 日 SMA',
+    indicatorClose200Sma: '200 日 SMA',
+    indicatorSma: '20 日 SMA 别名',
+    indicatorSma50: '50 日 SMA 别名',
+    indicatorMacd: 'MACD 线',
+    indicatorMacds: 'MACD 信号线',
+    indicatorMacdh: 'MACD 柱状图',
+    indicatorRsi: 'RSI',
+    indicatorBoll: '布林带中轨',
+    indicatorBollUb: '布林带上轨',
+    indicatorBollLb: '布林带下轨',
+    indicatorAtr: 'ATR 波动率',
+    indicatorVwma: '成交量加权均线',
+    indicatorMfi: '资金流量指标',
+    indicatorSourceFootnote: '能力验证结果：Westock 通过 13 个指标；Longbridge MCP 和 CLI 通过 14 个指标，验证范围覆盖美股、A 股和港股。Alpha Vantage 仅用于说明来源类型，不在默认技术指标链中。',
     catFundamentalsTitle: '公司财务基本面数据',
     catFundamentalsDesc: '利润表、资产负债表、现金流量表等财务数据。',
     catNewsTitle: '新闻与社交动态舆情',
@@ -568,6 +664,17 @@ clearLog.addEventListener('click', () => {
 
 // ── Refresh history ──────────────────────────────────────────────────────────
 refreshHistory.addEventListener('click', refreshRunHistory);
+
+clearHistory.addEventListener('click', async () => {
+  const confirmMsg = activeLocale === 'zh' ? '您确定要清空所有运行历史数据吗？' : 'Are you sure you want to clear all history?';
+  if (!confirm(confirmMsg)) return;
+  const res = await fetch('/api/runs', { method: 'DELETE' });
+  if (res.ok) {
+    window.location.hash = '';
+    refreshRunHistory();
+    resetToInitialState();
+  }
+});
 
 // ── Load report ──────────────────────────────────────────────────────────────
 loadReport.addEventListener('click', async () => {
@@ -859,7 +966,7 @@ function showView(view, updateHash = true) {
   runViewButton.classList.toggle('active', runActive);
   settingsViewButton.classList.toggle('active', settingsActive);
   providersViewButton.classList.toggle('active', providersActive);
-  
+
   if (updateHash) {
     if (settingsActive) {
       window.location.hash = 'settings';
@@ -1166,9 +1273,54 @@ function renderHistoryItem(run) {
   const count = document.createElement('span');
   count.textContent = formatEventCount(run.event_count);
 
-  meta.append(statusBadge, count);
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'btn-icon delete-run-btn';
+  deleteBtn.title = activeLocale === 'zh' ? '删除运行记录' : 'Delete run';
+  deleteBtn.innerHTML = `
+    <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
+      <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5Zm-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5ZM4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06Zm6.53-.06a.5.5 0 0 0-.51.49l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.488-.55ZM1.962 3.5l.847 10.59a1 1 0 0 0 .997.91h6.23a1 1 0 0 0 .997-.91L11.892 3.5H1.962Z"/>
+    </svg>
+  `;
+  deleteBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const confirmMsg = activeLocale === 'zh' ? '您确定要删除此条运行记录吗？' : 'Are you sure you want to delete this run?';
+    if (!confirm(confirmMsg)) return;
+    const res = await fetch(`/api/runs/${run.run_id}`, { method: 'DELETE' });
+    if (res.ok) {
+      const currentHashRunId = window.location.hash.slice(1).startsWith('run=')
+        ? decodeURIComponent(window.location.hash.slice(5))
+        : null;
+      if (currentHashRunId === run.run_id) {
+        window.location.hash = '';
+        resetToInitialState();
+      }
+      refreshRunHistory();
+    }
+  });
+
+  meta.append(statusBadge, count, deleteBtn);
   item.append(button, meta);
   return item;
+}
+
+function resetToInitialState() {
+  currentRunId = null;
+  if (source) {
+    source.close();
+    source = null;
+  }
+  setStatus('ready', 'ready');
+  setBusy(false);
+  eventLog.replaceChildren();
+  reportViewer.replaceChildren();
+  reportSectionSelect.innerHTML = '';
+  agentList.replaceChildren();
+  llmCountEl.textContent = '--';
+  toolCountEl.textContent = '--';
+  tokenCountEl.textContent = '--';
+  eventCountEl.textContent = '--';
+  document.querySelector('#runDuration').textContent = '--';
 }
 
 async function selectHistoryRun(runId, options = {}) {
@@ -1407,18 +1559,18 @@ const providersStorageKey = 'tradingagents.web.providers';
 let providersState = {};
 
 const availableCategoryVendors = {
-  core_stock_apis: ["longbridge_mcp", "longbridge", "yfinance", "alpha_vantage"],
-  technical_indicators: ["longbridge_mcp", "longbridge", "yfinance", "alpha_vantage"],
-  fundamental_data: ["longbridge_mcp", "longbridge", "yfinance", "alpha_vantage"],
-  news_data: ["web_search", "duckduckgo", "alpha_vantage", "yfinance"],
+  core_stock_apis: ["westock", "longbridge_mcp", "longbridge", "alpha_vantage"],
+  technical_indicators: ["westock", "longbridge_mcp", "longbridge", "alpha_vantage"],
+  fundamental_data: ["westock", "longbridge_mcp", "longbridge", "alpha_vantage"],
+  news_data: ["web_search", "duckduckgo", "alpha_vantage", "westock"],
   macro_data: ["fred"],
   prediction_markets: ["polymarket"],
 };
 
 const providerMeta = {
+  westock: { name: "Westock" },
   longbridge_mcp: { name: "Longbridge MCP" },
   longbridge: { name: "Longbridge CLI" },
-  yfinance: { name: "Yahoo Finance" },
   alpha_vantage: { name: "Alpha Vantage" },
   web_search: { name: "Web Search" },
   duckduckgo: { name: "DuckDuckGo" },
@@ -1464,10 +1616,10 @@ function loadProviders() {
   } else {
     providersState = {};
     const defaultDataVendors = configDefaults?.data_vendors || {
-      core_stock_apis: "longbridge_mcp, longbridge",
-      technical_indicators: "longbridge_mcp, longbridge",
-      fundamental_data: "longbridge_mcp, longbridge",
-      news_data: "web_search, duckduckgo, alpha_vantage, yfinance",
+      core_stock_apis: "westock, longbridge_mcp, longbridge",
+      technical_indicators: "westock, longbridge_mcp, longbridge",
+      fundamental_data: "westock, longbridge_mcp, longbridge",
+      news_data: "web_search, duckduckgo, alpha_vantage, westock",
       macro_data: "fred",
       prediction_markets: "polymarket"
     };
@@ -1480,6 +1632,7 @@ function loadProviders() {
   Object.keys(availableCategoryVendors).forEach(cat => {
     renderCategoryProviders(cat);
   });
+  renderOhlcvSettingsTable();
 }
 
 function renderCategoryProviders(category) {
@@ -1559,6 +1712,46 @@ function renderCategoryProviders(category) {
     
     container.appendChild(li);
   });
+
+  if (category === 'core_stock_apis') {
+    renderOhlcvSettingsTable();
+  }
+}
+
+function renderOhlcvSettingsTable() {
+  if (!ohlcvSettingsBody) return;
+  const configuredRows = providersState.core_stock_apis || availableCategoryVendors.core_stock_apis.map(id => ({ id, enabled: false }));
+  if (!configuredRows.length) {
+    ohlcvSettingsBody.innerHTML = '';
+    return;
+  }
+
+  ohlcvSettingsBody.innerHTML = configuredRows.map((setting, index) => {
+    const meta = providerMeta[setting.id] || { name: setting.id };
+    const status = envStatus?.data_vendors?.[setting.id];
+    const credential = status
+      ? (status.required
+        ? (status.configured ? t('apiKeyConfigured') : t('apiKeyMissing'))
+        : t('apiKeyNotRequired'))
+      : t('apiKeyNotRequired');
+    return `
+      <tr>
+        <td><strong>${escapeHtml(meta.name)}</strong></td>
+        <td>${escapeHtml(index + 1)}</td>
+        <td><span class="badge ${setting.enabled ? 'quality-high' : 'quality-neutral'}">${escapeHtml(setting.enabled ? t('providerEnabled') : t('providerDisabled'))}</span></td>
+        <td>${escapeHtml(credential)}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function currentProviders() {

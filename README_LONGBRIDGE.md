@@ -29,10 +29,10 @@ from tradingagents.default_config import DEFAULT_CONFIG
 
 config = DEFAULT_CONFIG.copy()
 config["data_vendors"] = {
-    "core_stock_apis": "longbridge",
-    "technical_indicators": "longbridge",
-    "fundamental_data": "yfinance",
-    "news_data": "yfinance",
+    "core_stock_apis": "westock, longbridge_mcp, longbridge",
+    "technical_indicators": "westock, longbridge_mcp, longbridge",
+    "fundamental_data": "westock, longbridge_mcp, longbridge",
+    "news_data": "web_search, duckduckgo, alpha_vantage, westock",
 }
 
 ta = TradingAgentsGraph(debug=True, config=config)

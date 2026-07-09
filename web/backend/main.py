@@ -81,8 +81,8 @@ async def get_env_status():
         "configured": shutil.which("longbridge") is not None,
         "required": True,
     }
-    # 5. Polymarket, web_search, duckduckgo, yfinance do not require credentials
-    for v in ["polymarket", "web_search", "duckduckgo", "yfinance"]:
+    # 5. Polymarket, web_search, duckduckgo, westock do not require credentials
+    for v in ["polymarket", "web_search", "duckduckgo", "westock"]:
         data_vendors[v] = {
             "env_var": None,
             "configured": True,
@@ -168,6 +168,19 @@ async def cancel_run(run_id: str):
         raise HTTPException(status_code=404, detail="run not found")
     record = store.get(run_id)
     return record.to_response()
+
+
+@app.delete("/api/runs/{run_id}")
+async def delete_run(run_id: str):
+    if not store.delete(run_id):
+        raise HTTPException(status_code=404, detail="run not found")
+    return {"status": "deleted"}
+
+
+@app.delete("/api/runs")
+async def clear_runs():
+    store.clear_all()
+    return {"status": "cleared"}
 
 
 def _sse(event: str, data: dict) -> str:

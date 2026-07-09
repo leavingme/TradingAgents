@@ -178,7 +178,7 @@ You will see a screen where you can select your desired tickers, analysis date, 
 
 ### Markets and tickers
 
-TradingAgents works with any market Yahoo Finance covers, using the exchange-suffixed ticker. Company identity and the alpha benchmark resolve automatically per market.
+TradingAgents works with any market Westock covers, using the exchange-suffixed ticker. Company identity and the alpha benchmark resolve automatically per market.
 
 - US: `AAPL`, `SPY`
 - Hong Kong: `0700.HK` · Tokyo: `7203.T` · London: `AZN.L`

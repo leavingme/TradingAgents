@@ -1,6 +1,6 @@
 import time
 
-from tradingagents.dataflows.y_finance import (
+from tradingagents.dataflows.westock import (
     get_stock_stats_indicators_window,
 )
 

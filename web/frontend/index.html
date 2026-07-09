@@ -16,7 +16,7 @@
     <!-- marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css?v=20260707-providers-config" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260708-indicator-source-matrix" />
   </head>
   <body>
     <!-- Ambient background orbs -->
@@ -319,6 +319,50 @@
             <button id="resetProviders" type="button" class="btn-secondary" data-i18n="resetProviders">Reset Defaults</button>
           </div>
 
+          <section class="provider-summary-card" aria-label="Provider capability summary">
+            <div class="provider-card-header">
+              <h3 data-i18n="providersSummaryTitle">Provider Data Capability Summary</h3>
+              <p class="provider-card-desc" data-i18n="providersSummarySubtitle">Verified by real provider requests. This summarizes market coverage, newest available data, and the smallest K-line interval each provider can return.</p>
+            </div>
+            <div class="comparison-table-wrapper">
+              <table class="comparison-table provider-summary-table">
+                <thead>
+                  <tr>
+                    <th data-i18n="summaryProvider">Provider</th>
+                    <th data-i18n="summaryMarkets">Markets</th>
+                    <th data-i18n="summaryLatest">Newest data observed</th>
+                    <th data-i18n="summaryGranularity">Smallest K-line interval</th>
+                    <th data-i18n="summaryNotes">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Westock</strong></td>
+                    <td data-i18n="summaryMarketsAll">US stocks / China A-shares / Hong Kong stocks</td>
+                    <td data-i18n="summaryWestockLatest">Observed latest rows: US stocks 2026-07-07, China A-shares 2026-07-08, Hong Kong stocks 2026-07-08</td>
+                    <td><span class="badge quality-medium" data-i18n="summaryWestockGranularity">1-minute K-line for China A-shares only</span></td>
+                    <td data-i18n="summaryWestockNote">Works well as the default OHLCV source. Its minute-level K-line data is limited to China A-share stocks.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Longbridge CLI</strong></td>
+                    <td data-i18n="summaryMarketsAll">US stocks / China A-shares / Hong Kong stocks</td>
+                    <td data-i18n="summaryLongbridgeCliLatest">Observed current data for US stocks, China A-shares, and Hong Kong stocks</td>
+                    <td><span class="badge quality-high" data-i18n="summaryLongbridgeGranularity">1-minute K-line supported</span></td>
+                    <td data-i18n="summaryLongbridgeCliNote">Useful when Westock data is stale, unavailable, or when minute-level data is needed outside China A-shares.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Longbridge MCP</strong></td>
+                    <td data-i18n="summaryMarketsAll">US stocks / China A-shares / Hong Kong stocks</td>
+                    <td data-i18n="summaryLongbridgeMcpLatest">Observed current data for US stocks, China A-shares, and Hong Kong stocks</td>
+                    <td><span class="badge quality-high" data-i18n="summaryLongbridgeGranularity">1-minute K-line supported</span></td>
+                    <td data-i18n="summaryLongbridgeMcpNote">Provides the same market coverage as Longbridge CLI when the Longbridge MCP credential is valid.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="provider-summary-footnote" data-i18n="providersSummaryFootnote">Last real provider verification: 2026-07-08.</p>
+          </section>
+
           <div class="providers-grid">
             <!-- Card 1: Core Stock API -->
             <div class="provider-card" data-category="core_stock_apis">
@@ -332,53 +376,18 @@
                   <ul class="provider-sortable-list" id="list_core_stock_apis"></ul>
                 </div>
                 <div class="provider-comparison-area">
-                  <h4 data-i18n="sideBySideComparison">Side-by-Side Comparison</h4>
+                  <h4 data-i18n="providerSettings">Current Settings</h4>
                   <div class="comparison-table-wrapper">
                     <table class="comparison-table">
                       <thead>
                         <tr>
                           <th data-i18n="compProvider">Provider</th>
-                          <th data-i18n="compSpeed">Speed</th>
-                          <th data-i18n="compQuality">Quality</th>
+                          <th data-i18n="providerPriority">priority</th>
+                          <th data-i18n="providerStatus">Status</th>
                           <th data-i18n="compApiKey">API Key</th>
-                          <th data-i18n="compRateLimit">Rate Limit</th>
-                          <th data-i18n="compCoverage">Coverage</th>
                         </tr>
                       </thead>
-                      <tbody>
-                        <tr>
-                          <td><strong>Longbridge MCP</strong></td>
-                          <td><span class="badge speed-fast" data-i18n="badgeUltraFast">Ultra Fast</span></td>
-                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
-                          <td data-i18n="compTokenRequired">Token Required</td>
-                          <td data-i18n="compHigh">High</td>
-                          <td>US/HK/CN</td>
-                        </tr>
-                        <tr>
-                          <td><strong>Longbridge CLI</strong></td>
-                          <td><span class="badge speed-medium" data-i18n="badgeFast">Fast</span></td>
-                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
-                          <td data-i18n="compTokenRequired">Token Required</td>
-                          <td data-i18n="compHigh">High</td>
-                          <td>US/HK/CN</td>
-                        </tr>
-                        <tr>
-                          <td><strong>Yahoo Finance</strong></td>
-                          <td><span class="badge speed-medium" data-i18n="badgeMedium">Medium</span></td>
-                          <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
-                          <td data-i18n="compNone">None</td>
-                          <td data-i18n="compMedium">Medium</td>
-                          <td data-i18n="compGlobal">Global</td>
-                        </tr>
-                        <tr>
-                          <td><strong>Alpha Vantage</strong></td>
-                          <td><span class="badge speed-slow" data-i18n="badgeMedium">Medium</span></td>
-                          <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
-                          <td data-i18n="compKeyRequired">Key Required</td>
-                          <td data-i18n="compTight">Tight (25/day)</td>
-                          <td data-i18n="compGlobal">Global</td>
-                        </tr>
-                      </tbody>
+                      <tbody id="ohlcvSettingsBody"></tbody>
                     </table>
                   </div>
                 </div>
@@ -417,7 +426,7 @@
                           <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
                           <td data-i18n="compTokenRequired">Token Required</td>
                           <td data-i18n="compHigh">High</td>
-                          <td>US/HK/CN</td>
+                          <td data-i18n="coverageUsHkCn">US stocks / Hong Kong stocks / China A-shares</td>
                         </tr>
                         <tr>
                           <td><strong>Longbridge CLI</strong></td>
@@ -425,10 +434,10 @@
                           <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
                           <td data-i18n="compTokenRequired">Token Required</td>
                           <td data-i18n="compHigh">High</td>
-                          <td>US/HK/CN</td>
+                          <td data-i18n="coverageUsHkCn">US stocks / Hong Kong stocks / China A-shares</td>
                         </tr>
                         <tr>
-                          <td><strong>Yahoo Finance (stockstats)</strong></td>
+                          <td><strong>Westock (stockstats)</strong></td>
                           <td><span class="badge speed-slow" data-i18n="badgeSlower">Slower</span></td>
                           <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
                           <td data-i18n="compNone">None</td>
@@ -446,6 +455,131 @@
                       </tbody>
                     </table>
                   </div>
+                </div>
+                <div class="provider-indicator-source-area">
+                  <h4 data-i18n="indicatorSourceTitle">Indicator Coverage & Source</h4>
+                  <p class="provider-card-desc" data-i18n="indicatorSourceDesc">Shows whether each technical indicator is directly provided by a vendor, computed by the vendor, or computed locally from OHLCV data.</p>
+                  <div class="comparison-table-wrapper">
+                    <table class="comparison-table provider-summary-table provider-indicator-source-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="indicatorColumn">Indicator</th>
+                          <th data-i18n="indicatorMeaningColumn">Meaning</th>
+                          <th>Westock</th>
+                          <th>Longbridge MCP / CLI</th>
+                          <th>Alpha Vantage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><code>close_10_ema</code></td>
+                          <td data-i18n="indicatorClose10Ema">10-day EMA</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>close_50_sma</code></td>
+                          <td data-i18n="indicatorClose50Sma">50-day SMA</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>close_200_sma</code></td>
+                          <td data-i18n="indicatorClose200Sma">200-day SMA</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>sma</code></td>
+                          <td data-i18n="indicatorSma">20-day SMA alias</td>
+                          <td><span class="badge indicator-source-missing" data-i18n="indicatorSourceMissing">Not wired</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-missing" data-i18n="indicatorSourceMissing">Not wired</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>sma50</code></td>
+                          <td data-i18n="indicatorSma50">50-day SMA alias</td>
+                          <td><span class="badge indicator-source-missing" data-i18n="indicatorSourceMissing">Not wired</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-missing" data-i18n="indicatorSourceMissing">Not wired</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>macd</code></td>
+                          <td data-i18n="indicatorMacd">MACD line</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>macds</code></td>
+                          <td data-i18n="indicatorMacds">MACD signal line</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>macdh</code></td>
+                          <td data-i18n="indicatorMacdh">MACD histogram</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>rsi</code></td>
+                          <td data-i18n="indicatorRsi">RSI</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>boll</code></td>
+                          <td data-i18n="indicatorBoll">Bollinger middle band</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>boll_ub</code></td>
+                          <td data-i18n="indicatorBollUb">Bollinger upper band</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>boll_lb</code></td>
+                          <td data-i18n="indicatorBollLb">Bollinger lower band</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>atr</code></td>
+                          <td data-i18n="indicatorAtr">ATR volatility</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-native" data-i18n="indicatorSourceNative">Native API</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>vwma</code></td>
+                          <td data-i18n="indicatorVwma">Volume-weighted moving average</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-vendor" data-i18n="indicatorSourceVendor">Vendor-side calculation</span></td>
+                          <td><span class="badge indicator-source-missing" data-i18n="indicatorSourceMissing">Not wired</span></td>
+                        </tr>
+                        <tr>
+                          <td><code>mfi</code></td>
+                          <td data-i18n="indicatorMfi">Money Flow Index</td>
+                          <td><span class="badge indicator-source-local" data-i18n="indicatorSourceLocal">Local calculation</span></td>
+                          <td><span class="badge indicator-source-missing" data-i18n="indicatorSourceMissing">Not wired</span></td>
+                          <td><span class="badge indicator-source-missing" data-i18n="indicatorSourceMissing">Not wired</span></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p class="provider-summary-footnote" data-i18n="indicatorSourceFootnote">Verified capability: Westock passed 13 indicators; Longbridge MCP and CLI passed 14 indicators across US stocks, China A-shares, and Hong Kong stocks. Alpha Vantage is shown for source type comparison and is not in the default technical-indicator chain.</p>
                 </div>
               </div>
             </div>
@@ -482,7 +616,7 @@
                           <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
                           <td data-i18n="compTokenRequired">Token Required</td>
                           <td data-i18n="compHigh">High</td>
-                          <td>US/HK/CN</td>
+                          <td data-i18n="coverageUsHkCn">US stocks / Hong Kong stocks / China A-shares</td>
                         </tr>
                         <tr>
                           <td><strong>Longbridge CLI</strong></td>
@@ -490,10 +624,10 @@
                           <td><span class="badge quality-high" data-i18n="badgePremium">Premium</span></td>
                           <td data-i18n="compTokenRequired">Token Required</td>
                           <td data-i18n="compHigh">High</td>
-                          <td>US/HK/CN</td>
+                          <td data-i18n="coverageUsHkCn">US stocks / Hong Kong stocks / China A-shares</td>
                         </tr>
                         <tr>
-                          <td><strong>Yahoo Finance</strong></td>
+                          <td><strong>Westock</strong></td>
                           <td><span class="badge speed-medium" data-i18n="badgeMedium">Medium</span></td>
                           <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
                           <td data-i18n="compNone">None</td>
@@ -558,7 +692,7 @@
                           <td data-i18n="compGlobal">Global</td>
                         </tr>
                         <tr>
-                          <td><strong>Yahoo Finance (Westock/DDG)</strong></td>
+                          <td><strong>Westock / DuckDuckGo</strong></td>
                           <td><span class="badge speed-fast" data-i18n="badgeFast">Fast</span></td>
                           <td><span class="badge quality-high" data-i18n="badgeHigh">High</span></td>
                           <td data-i18n="compNone">None</td>
@@ -698,6 +832,11 @@
                   <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
                 </svg>
               </button>
+              <button id="clearHistory" type="button" class="btn-icon delete-all-history" title="Clear all history" data-i18n-title="clearHistory">
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5Zm-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5ZM4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06Zm6.53-.06a.5.5 0 0 0-.51.49l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.488-.55ZM1.962 3.5l.847 10.59a1 1 0 0 0 .997.91h6.23a1 1 0 0 0 .997-.91L11.892 3.5H1.962Z"/>
+                </svg>
+              </button>
             </div>
             <ol id="historyList" class="history-list"></ol>
           </section>
@@ -748,6 +887,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260707-providers-config" type="module"></script>
+    <script src="/static/app.js?v=20260708-indicator-source-matrix" type="module"></script>
   </body>
 </html>

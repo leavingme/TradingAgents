@@ -306,14 +306,14 @@ def test_build_runtime_config_merges_nested_overrides():
         analysis_date="2026-07-05",
         config_overrides={
             "data_vendors": {
-                "core_stock_apis": "yfinance",
+                "core_stock_apis": "westock",
             }
         }
     )
     analysis_request = to_analysis_request("run-test-nested", request)
     config = build_runtime_config(analysis_request)
 
-    assert config["data_vendors"]["core_stock_apis"] == "yfinance"
+    assert config["data_vendors"]["core_stock_apis"] == "westock"
     # Ensure other default values in data_vendors are NOT lost
-    assert config["data_vendors"]["news_data"] == "web_search, duckduckgo, alpha_vantage, yfinance"
+    assert config["data_vendors"]["news_data"] == "web_search, duckduckgo, alpha_vantage, westock"
 

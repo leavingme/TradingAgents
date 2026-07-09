@@ -3,6 +3,7 @@ context-anchored message placeholder (#888)."""
 
 import unittest
 from unittest.mock import patch
+import json
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
@@ -20,48 +21,55 @@ class ResolveInstrumentIdentityTests(unittest.TestCase):
     def setUp(self):
         resolve_instrument_identity.cache_clear()
 
-    def test_resolves_company_metadata_from_yfinance(self):
-        with patch("tradingagents.agents.utils.agent_utils.yf.Ticker") as mock:
-            mock.return_value.info = {
-                "longName": "TOTO LTD.",
-                "shortName": "TOTO",
-                "sector": "Industrials",
+    def test_resolves_company_metadata_from_westock(self):
+        payload = {
+            "success": True,
+            "data": {
+                "name": "TOTO LTD.",
                 "industry": "Building Products & Equipment",
                 "exchange": "PNK",
-                "quoteType": "EQUITY",
-            }
+            },
+        }
+        with patch("tradingagents.dataflows.symbol_utils.is_westock_available", return_value=True), \
+                patch("tradingagents.dataflows.symbol_utils.run_westock", return_value=json.dumps(payload)) as run:
             identity = resolve_instrument_identity("totdy")
-        mock.assert_called_once_with("TOTDY")
+        run.assert_called_once()
         self.assertEqual(identity["company_name"], "TOTO LTD.")
-        self.assertEqual(identity["sector"], "Industrials")
+        self.assertEqual(identity["sector"], "Building Products & Equipment")
         self.assertEqual(identity["industry"], "Building Products & Equipment")
         self.assertEqual(identity["exchange"], "PNK")
 
     def test_falls_back_to_short_name(self):
-        with patch("tradingagents.agents.utils.agent_utils.yf.Ticker") as mock:
-            mock.return_value.info = {"shortName": "TOTO", "sector": "Industrials"}
+        with patch("tradingagents.dataflows.symbol_utils.is_westock_available", return_value=False), \
+                patch("tradingagents.dataflows.longbridge_mcp._client", side_effect=RuntimeError("no mcp")), \
+                patch("tradingagents.dataflows.longbridge._run_cli_json_list", return_value=[{"name": "TOTO"}]):
             identity = resolve_instrument_identity("TOTDY")
         self.assertEqual(identity["company_name"], "TOTO")
 
     def test_skips_placeholder_values(self):
-        with patch("tradingagents.agents.utils.agent_utils.yf.Ticker") as mock:
-            mock.return_value.info = {"longName": "  ", "sector": "None", "industry": "n/a"}
+        payload = {"success": True, "data": {"name": "  ", "industry": "n/a"}}
+        with patch("tradingagents.dataflows.symbol_utils.is_westock_available", return_value=True), \
+                patch("tradingagents.dataflows.symbol_utils.run_westock", return_value=json.dumps(payload)), \
+                patch("tradingagents.dataflows.longbridge_mcp._client", side_effect=RuntimeError("no mcp")), \
+                patch("tradingagents.dataflows.longbridge._run_cli_json_list", side_effect=RuntimeError("no cli")):
             identity = resolve_instrument_identity("TOTDY")
-        self.assertEqual(identity, {})
+        self.assertNotIn("company_name", identity)
+        self.assertNotIn("industry", identity)
 
     def test_fails_open_on_exception(self):
-        with patch(
-            "tradingagents.agents.utils.agent_utils.yf.Ticker",
-            side_effect=RuntimeError("rate limited"),
-        ):
+        with patch("tradingagents.dataflows.symbol_utils.is_westock_available", return_value=True), \
+                patch("tradingagents.dataflows.symbol_utils.run_westock", side_effect=RuntimeError("rate limited")), \
+                patch("tradingagents.dataflows.longbridge_mcp._client", side_effect=RuntimeError("no mcp")), \
+                patch("tradingagents.dataflows.longbridge._run_cli_json_list", side_effect=RuntimeError("no cli")):
             self.assertEqual(resolve_instrument_identity("TOTDY"), {})
 
     def test_result_is_cached(self):
-        with patch("tradingagents.agents.utils.agent_utils.yf.Ticker") as mock:
-            mock.return_value.info = {"longName": "TOTO LTD."}
+        payload = {"success": True, "data": {"name": "TOTO LTD."}}
+        with patch("tradingagents.dataflows.symbol_utils.is_westock_available", return_value=True), \
+                patch("tradingagents.dataflows.symbol_utils.run_westock", return_value=json.dumps(payload)) as run:
             first = resolve_instrument_identity("TOTDY")
             second = resolve_instrument_identity("TOTDY")
-        mock.assert_called_once()  # second call served from cache
+        run.assert_called_once()  # second call served from cache
         self.assertEqual(first, second)
 
 
@@ -103,8 +111,8 @@ class GetInstrumentContextFromStateTests(unittest.TestCase):
         self.assertEqual(get_instrument_context_from_state(state), "PRECOMPUTED")
 
     def test_fallback_is_network_free_ticker_only(self):
-        # No instrument_context and no yfinance call — must not hit the network.
-        with patch("tradingagents.agents.utils.agent_utils.yf.Ticker") as mock:
+        # No instrument_context and no westock call — must not hit the network.
+        with patch("tradingagents.dataflows.symbol_utils.run_westock") as mock:
             context = get_instrument_context_from_state(
                 {"company_of_interest": "NVDA", "asset_type": "stock"}
             )

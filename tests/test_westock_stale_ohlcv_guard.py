@@ -13,7 +13,6 @@ import pandas as pd
 import pytest
 
 import tradingagents.dataflows.config as config_module
-import tradingagents.dataflows.y_finance as y_finance
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.config import set_config
@@ -59,28 +58,6 @@ class StaleGuardUnitTests(unittest.TestCase):
 
 
 @pytest.mark.unit
-class StaleGuardPropagationTests(unittest.TestCase):
-    def test_get_yfin_data_online_raises_on_stale_frame(self):
-        stale = pd.DataFrame(
-            {
-                "Open": [280.0], "High": [286.0], "Low": [278.0],
-                "Close": [284.45], "Volume": [1_000_000],
-            },
-            index=pd.DatetimeIndex([pd.Timestamp("2025-06-11")], name="Date"),
-        )
-
-        class DummyTicker:
-            def __init__(self, symbol):
-                pass
-
-            def history(self, start, end):
-                return stale
-
-        with mock.patch.object(y_finance.yf, "Ticker", DummyTicker), \
-                self.assertRaises(NoMarketDataError):
-            y_finance.get_YFin_data_online("CB", "2026-06-01", "2026-06-11")
-
-
 @pytest.mark.unit
 class StaleGuardRoutingTests(unittest.TestCase):
     def setUp(self):
@@ -90,7 +67,7 @@ class StaleGuardRoutingTests(unittest.TestCase):
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
 
     def test_router_sentinel_surfaces_stale_reason(self):
-        set_config({"data_vendors": {"core_stock_apis": "yfinance"}})
+        set_config({"data_vendors": {"core_stock_apis": "westock"}})
 
         def _stale(symbol, *a, **k):
             raise NoMarketDataError(
@@ -99,7 +76,7 @@ class StaleGuardRoutingTests(unittest.TestCase):
 
         with mock.patch.dict(
             interface.VENDOR_METHODS,
-            {"get_stock_data": {"yfinance": _stale}},
+            {"get_stock_data": {"westock": _stale}},
             clear=False,
         ):
             out = interface.route_to_vendor(

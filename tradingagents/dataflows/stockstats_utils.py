@@ -14,19 +14,14 @@ logger = logging.getLogger(__name__)
 
 # A vendor's latest OHLCV row this many calendar days before the requested date
 # is treated as stale. Generous enough to span long holiday weekends, tight
-# enough to catch the year-old frames yfinance occasionally returns (#1021).
+# enough to catch the year-old frames westock occasionally returns (#1021).
 MAX_OHLCV_STALE_DAYS = 10
-
-
-def yf_retry(func, max_retries=3, base_delay=2.0):
-    """Dummy retry helper for backwards-compatibility since yfinance is removed."""
-    return func()
 
 
 def _ensure_date_column(data: pd.DataFrame) -> pd.DataFrame:
     """Normalize the date column to ``Date``.
 
-    Some yfinance builds leave the index unnamed (so ``reset_index()`` yields
+    Some westock builds leave the index unnamed (so ``reset_index()`` yields
     ``index``) or use ``Datetime`` for intraday data. Rename the first
     date-like column so indicators don't silently drop when it isn't ``Date``.
     """
@@ -56,7 +51,7 @@ def _coerce_ohlcv_dates(data: pd.DataFrame) -> pd.Series:
     """Return parsed dates from an OHLCV frame, whether Date is a column or the index."""
     if "Date" in data.columns:
         return pd.to_datetime(data["Date"], errors="coerce").dropna()
-    # yfinance keeps the dates in the index (a DatetimeIndex, sometimes unnamed).
+    # westock keeps the dates in the index (a DatetimeIndex, sometimes unnamed).
     if isinstance(data.index, pd.DatetimeIndex):
         return pd.Series(pd.to_datetime(data.index, errors="coerce")).dropna()
     # Fallback: expose the index and look for any date-like column.
@@ -115,9 +110,14 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     MAX_OHLCV_STALE_DAYS behind curr_date is a fresh download triggered and
     merged back into the file.
     """
-    from .ohlcv_cache import symbol_to_cache_key, read_cached_ohlcv, merge_and_write_ohlcv
+    from .ohlcv_cache import (
+        symbol_to_cache_key,
+        read_cached_ohlcv,
+        merge_and_write_ohlcv,
+        normalize_ohlcv_dates,
+    )
 
-    # Resolve broker/forex symbols (XAUUSD+ -> GC=F) to Yahoo's convention,
+    # Resolve broker/forex symbols (XAUUSD+ -> GC=F) to Westock's convention,
     # then reject values that would escape the cache directory when
     # interpolated into the cache filename (e.g. ``../../tmp/x``).
     canonical = normalize_symbol(symbol)
@@ -130,7 +130,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     today_date = pd.Timestamp.today()
     start_date = today_date - pd.DateOffset(years=5)
     start_str = start_date.strftime("%Y-%m-%d")
-    # yfinance ``end`` is EXCLUSIVE; request tomorrow so today's row is included
+    # westock ``end`` is EXCLUSIVE; request tomorrow so today's row is included
     # when curr_date is the current day (#986).
     end_str = (today_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     curr_date_dt = pd.to_datetime(curr_date)
@@ -192,6 +192,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
 
     # Ensure Date column standard layout
     downloaded = _ensure_date_column(downloaded)
+    downloaded = normalize_ohlcv_dates(downloaded, cache_key)
     if downloaded.empty or "Close" not in downloaded.columns:
         raise NoMarketDataError(
             symbol, canonical, "No market data returned"
@@ -209,7 +210,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
 def filter_financials_by_date(data: pd.DataFrame, curr_date: str) -> pd.DataFrame:
     """Drop financial statement columns (fiscal period timestamps) after curr_date.
 
-    yfinance financial statements use fiscal period end dates as columns.
+    westock financial statements use fiscal period end dates as columns.
     Columns after curr_date represent future data and are removed to
     prevent look-ahead bias.
     """

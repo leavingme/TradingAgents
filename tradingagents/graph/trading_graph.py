@@ -232,7 +232,7 @@ class TradingAgentsGraph:
         unavailable (too recent, delisted, or network error).
         """
         from tradingagents.dataflows.symbol_utils import normalize_symbol
-        from tradingagents.dataflows.y_finance import get_YFin_data_online
+        from tradingagents.dataflows.westock import get_westock_data_online
         import io
         import pandas as pd
 
@@ -241,13 +241,12 @@ class TradingAgentsGraph:
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
             end_str = end.strftime("%Y-%m-%d")
 
-            # Fetch stock data via the yfinance-free get_YFin_data_online wrapper
-            stock_csv = get_YFin_data_online(ticker, trade_date, end_str)
+            stock_csv = get_westock_data_online(ticker, trade_date, end_str)
             stock_lines = "\n".join([line for line in stock_csv.splitlines() if not line.startswith("#")])
             stock = pd.read_csv(io.StringIO(stock_lines))
 
             # Fetch benchmark data via the same wrapper
-            bench_csv = get_YFin_data_online(benchmark, trade_date, end_str)
+            bench_csv = get_westock_data_online(benchmark, trade_date, end_str)
             bench_lines = "\n".join([line for line in bench_csv.splitlines() if not line.startswith("#")])
             bench = pd.read_csv(io.StringIO(bench_lines))
 
@@ -315,7 +314,7 @@ class TradingAgentsGraph:
     def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
         """Resolve ticker identity once and return the full instrument context.
 
-        Deterministic yfinance lookup (cached, fail-open) injected into a
+        Deterministic westock lookup (cached, fail-open) injected into a
         context string so every agent anchors to the real company instead of
         hallucinating one from the price chart (#814). Both the propagate()
         path and the CLI call this so the resolved identity reaches the whole

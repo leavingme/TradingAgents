@@ -227,6 +227,17 @@ class TaskStore:
             history_store.request_cancel(run_id)
             return True
 
+    def delete(self, run_id: str) -> bool:
+        with self._lock:
+            self._runs.pop(run_id, None)
+            return history_store.delete_run(run_id)
+
+    def clear_all(self) -> None:
+        with self._lock:
+            self._runs.clear()
+            history_store.clear_all_runs()
+
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton used by the FastAPI app

@@ -26,7 +26,7 @@ CRYPTO_SUFFIXES = ("-USD", "-USDT", "-USDC", "-BTC", "-ETH")
 def is_valid_ticker_input(value: str) -> bool:
     """Whether a ticker entry is acceptable (charset + length).
 
-    Allows the characters Yahoo symbols use, including ``=`` for futures/forex
+    Allows the characters Westock symbols use, including ``=`` for futures/forex
     like ``GC=F`` and ``EURUSD=X`` (#980), and ``^`` for indices. Empty input is
     allowed (it defaults to SPY downstream).
     """
@@ -63,7 +63,7 @@ def get_ticker() -> str:
 
 
 def normalize_ticker_symbol(ticker: str) -> str:
-    """Resolve user input to its canonical Yahoo symbol (single source of truth).
+    """Resolve user input to its canonical Westock symbol (single source of truth).
 
     Delegates to the data layer's ``normalize_symbol`` so the symbol the CLI
     passes through the pipeline is exactly the one the data path will price

@@ -343,7 +343,12 @@ def get_stock_data(
         optional: start, end
     """
     from .config import get_config
-    from .ohlcv_cache import symbol_to_cache_key, read_cached_ohlcv, merge_and_write_ohlcv
+    from .ohlcv_cache import (
+        symbol_to_cache_key,
+        read_cached_ohlcv,
+        merge_and_write_ohlcv,
+        normalize_ohlcv_dates,
+    )
 
     sym = normalize_symbol(symbol)
     cache_key = symbol_to_cache_key(sym)
@@ -396,7 +401,10 @@ def get_stock_data(
     # --- cache write ---
     df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
     if not df.empty:
+        df = normalize_ohlcv_dates(df, cache_key)
         merge_and_write_ohlcv(cache_dir, cache_key, df)
+        df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
+        rows = list(df[["Date", "Open", "High", "Low", "Close", "Volume"]].itertuples(index=False, name=None))
 
     table = _format_text_table(("Date", "Open", "High", "Low", "Close", "Volume"), rows)
     return (

@@ -1,9 +1,7 @@
-"""yfinance alternative dataflow implementation using westock-data and Longbridge.
+"""Westock dataflow implementation with Longbridge fallback.
 
-This module maintains the same function interfaces as the original yfinance
-module, but routes under the hood to westock-data or Longbridge (which serves
-as the primary market data vendor), completely eliminating the yfinance/Yahoo Finance
-package dependency.
+This module exposes first-class Westock vendor functions. It uses westock-data
+when available and falls back to Longbridge MCP/CLI for coverage gaps.
 """
 from __future__ import annotations
 
@@ -19,14 +17,13 @@ from .stockstats_utils import (
     _assert_ohlcv_not_stale,
     filter_financials_by_date,
     load_ohlcv,
-    yf_retry,
 )
 from .symbol_utils import NoMarketDataError, normalize_symbol
 
 logger = logging.getLogger(__name__)
 
 
-def get_YFin_data_online(
+def get_westock_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
@@ -43,7 +40,7 @@ def get_YFin_data_online(
     # 1. Try westock-data
     if is_westock_available():
         w_code = to_westock_code(symbol)
-        logger.info("westock-data available; fetching OHLCV for %s (mapped to %s) in get_YFin_data_online", symbol, w_code)
+        logger.info("westock-data available; fetching OHLCV for %s (mapped to %s)", symbol, w_code)
         try:
             # We want to pull ~365 observations
             raw = run_westock(["kline", w_code, "--period", "day", "--limit", "365"], raw=True)
@@ -78,7 +75,7 @@ def get_YFin_data_online(
                     header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                     return header + csv_string
         except Exception as exc:
-            logger.warning("westock kline in get_YFin_data_online failed: %s; trying Longbridge fallback", exc)
+            logger.warning("westock kline failed: %s; trying Longbridge fallback", exc)
 
     # 2. Fall back to Longbridge
     try:

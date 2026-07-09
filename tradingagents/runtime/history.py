@@ -246,6 +246,22 @@ class RunHistoryStore:
                 )
                 return True
 
+    def delete_run(self, run_id: str) -> bool:
+        with self._lock:
+            with self._conn() as conn:
+                row = conn.execute("SELECT 1 FROM runs WHERE run_id=?", (run_id,)).fetchone()
+                if not row:
+                    return False
+                conn.execute("DELETE FROM events WHERE run_id=?", (run_id,))
+                conn.execute("DELETE FROM runs WHERE run_id=?", (run_id,))
+                return True
+
+    def clear_all_runs(self) -> None:
+        with self._lock:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM events")
+                conn.execute("DELETE FROM runs")
+
     def _recover_runs(self) -> None:
         with self._lock:
             with self._conn() as conn:

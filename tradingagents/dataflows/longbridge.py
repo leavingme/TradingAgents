@@ -60,7 +60,7 @@ def normalize_symbol(symbol: str) -> str:
     # Already qualified — strip HK leading zeros (Longbridge convention)
     if "." in s:
         code, _, market = s.partition(".")
-        if market.upper() in ("HK", "US", "SH", "SZ", "SG"):
+        if market.upper() == "HK":
             code = code.lstrip("0") or "0"
             return f"{code}.{market.upper()}"
         return s
@@ -166,7 +166,12 @@ def get_stock_data(
     High, Low, Close, Volume), prefixed with a # comment header for LLM context.
     """
     from .config import get_config
-    from .ohlcv_cache import symbol_to_cache_key, read_cached_ohlcv, merge_and_write_ohlcv
+    from .ohlcv_cache import (
+        symbol_to_cache_key,
+        read_cached_ohlcv,
+        merge_and_write_ohlcv,
+        normalize_ohlcv_dates,
+    )
 
     sym = normalize_symbol(symbol)
     cache_key = symbol_to_cache_key(sym)
@@ -207,7 +212,7 @@ def get_stock_data(
     for k in raw:
         ts = k.get("time", "")
         try:
-            d = datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
+            d = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         except (ValueError, AttributeError):
             continue
         rows.append({
@@ -223,7 +228,7 @@ def get_stock_data(
     if df.empty:
         return f"No data found for symbol '{sym}' between {start_date} and {end_date}"
 
-    df["Date"] = pd.to_datetime(df["Date"])
+    df = normalize_ohlcv_dates(df, cache_key)
     df = df[(df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))]
     df = df.sort_values("Date")
     if df.empty:
@@ -417,7 +422,7 @@ def get_indicators(
     ending at `curr_date`, by running a PineScript via `longbridge quant run`.
 
     Returned as a structured text report that mirrors what the legacy
-    longbridge.py / alpha_vantage / yfinance paths produce, so downstream agents
+    longbridge.py / alpha_vantage / westock paths produce, so downstream agents
     don't need to know which vendor answered.
     """
     sym = normalize_symbol(symbol)

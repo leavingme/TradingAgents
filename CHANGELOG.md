@@ -35,7 +35,7 @@ structured output.
   (identity, returns, CLI, news); the configured vendor list is the exact
   resolution chain with no silent fallback to unselected vendors; a typed
   `VendorError` taxonomy; look-ahead-safe news windows; stale-OHLCV rejection;
-  inclusive yfinance date ranges.
+  inclusive westock date ranges.
 - **Config precedence.** An explicit `TRADINGAGENTS_*` value or CLI flag now wins
   over interactive defaults for debate and risk round counts,
   `--checkpoint / --no-checkpoint`, and the Docker provider profile; invalid
@@ -77,7 +77,7 @@ Thanks to everyone who shaped this release through code, design, and reports:
 ### Added
 
 - **Grounded Sentiment Analyst.** The renamed `sentiment_analyst` now reads
-  real Yahoo News, StockTwits, and Reddit data before generating its report,
+  real Westock News, StockTwits, and Reddit data before generating its report,
   replacing the prior flow that could fabricate social posts under prompt
   pressure. (#557, #607)
 - **MiniMax provider** with the full M2.x catalog (M2.7 / M2.5 / M2.1 / M2
@@ -229,7 +229,7 @@ Thanks to everyone who shaped this release through code, design, and reports:
 - [@uppb](https://github.com/uppb) — OpenRouter dynamic model selection (#482)
 - [@guoz14](https://github.com/guoz14) — OpenRouter limited-model report (#337)
 - [@samchenku](https://github.com/samchenku) — indicator name normalization (#490)
-- [@JasonOA888](https://github.com/JasonOA888) — y_finance pandas import fix (#488)
+- [@JasonOA888](https://github.com/JasonOA888) — legacy dataflow pandas import fix (#488)
 - [@tiffanychum](https://github.com/tiffanychum) — stale import cleanup (#499)
 - [@zaizou](https://github.com/zaizou) — Docker permission issue (#519)
 - [@Stosman123](https://github.com/Stosman123), [@mauropuga](https://github.com/mauropuga), [@hotwind2015](https://github.com/hotwind2015) — Windows encoding bug reports (#543, #550, #576)
@@ -257,7 +257,7 @@ Thanks to everyone who shaped this release through code, design, and reports:
   the middle of a fetched window. (#475)
 - Invalid indicator names from the LLM are caught at the tool boundary instead
   of crashing the run. (#429)
-- yfinance news fetchers respect the same exponential-backoff retry as price
+- westock news fetchers respect the same exponential-backoff retry as price
   fetchers. (#445)
 
 ### Contributors
@@ -265,7 +265,7 @@ Thanks to everyone who shaped this release through code, design, and reports:
 - [@ahmedk20](https://github.com/ahmedk20) — multi-language output (#472)
 - [@CadeYu](https://github.com/CadeYu) — model catalog typing (#464)
 - [@javierdejesusda](https://github.com/javierdejesusda) — unified Google API key parameter (#453)
-- [@voidborne-d](https://github.com/voidborne-d) — yfinance news retry (#445)
+- [@voidborne-d](https://github.com/voidborne-d) — westock news retry (#445)
 - [@kostakost2](https://github.com/kostakost2) — look-ahead bias report (#475)
 - [@lu-zhengda](https://github.com/lu-zhengda) — proxy/base_url support request (#427)
 - [@VamsiKrishna2021](https://github.com/VamsiKrishna2021) — invalid indicator crash report (#429)
@@ -291,7 +291,7 @@ Thanks to everyone who shaped this release through code, design, and reports:
 
 ### Fixed
 
-- yfinance rate-limit errors are retried with exponential backoff. (#426)
+- westock rate-limit errors are retried with exponential backoff. (#426)
 - HTTP client SSL customisation is supported for environments that need
   custom certificate bundles. (#379)
 - Report-section writes handle list-of-string content gracefully.
@@ -344,7 +344,7 @@ production-ready surfaces.
 - **Multi-provider LLM support** (OpenAI, Google, Anthropic, xAI, OpenRouter,
   Ollama) via a factory pattern, with provider-specific thinking configurations.
 - **Alpha Vantage** integration as a configurable primary data provider, with
-  yfinance as a community-stability fallback.
+  westock as a community-stability fallback.
 - **Footer statistics** in the CLI: real-time tracking of LLM calls, tool
   calls, and token usage via LangChain callbacks.
 - **Post-analysis report saving** — the framework writes per-section markdown
@@ -374,7 +374,7 @@ This release is the first with substantial outside contributions; many community
 PRs from late 2025 also landed here.
 
 - [@luohy15](https://github.com/luohy15) — Alpha Vantage data-vendor integration (#235)
-- [@EdwardoSunny](https://github.com/EdwardoSunny) — yfinance fetching optimisations (#245)
+- [@EdwardoSunny](https://github.com/EdwardoSunny) — westock fetching optimisations (#245)
 - [@Mirza-Samad-Ahmed-Baig](https://github.com/Mirza-Samad-Ahmed-Baig) — infinite-loop guard, reflection, and logging fixes (#89)
 - [@ZeroAct](https://github.com/ZeroAct) — saved results path support (#29)
 - [@Zhongyi-Lu](https://github.com/Zhongyi-Lu) — `.env` gitignore (#49)
@@ -395,7 +395,7 @@ PRs from late 2025 also landed here.
 - **Initial public release** of the TradingAgents multi-agent trading
   framework: market / sentiment / news / fundamentals analysts; bull and bear
   researchers; trader; aggressive, conservative, and neutral risk debaters;
-  portfolio manager. LangGraph orchestration, yfinance data, per-agent
+  portfolio manager. LangGraph orchestration, westock data, per-agent
   BM25 memory, single-provider OpenAI integration, interactive CLI.
 
 [0.2.4]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.3...v0.2.4

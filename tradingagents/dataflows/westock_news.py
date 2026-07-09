@@ -1,8 +1,6 @@
-"""News data fetching functions using westock-data and DuckDuckGo search.
+"""Westock news data fetching functions with DuckDuckGo fallback.
 
-This module provides the same functions for news retrieval, but completely
-replaces the yfinance/Yahoo Finance package dependency with westock-data and keyless
-DuckDuckGo search fallback.
+This module exposes first-class Westock vendor functions for news retrieval.
 """
 from __future__ import annotations
 
@@ -36,7 +34,7 @@ def _ddg_news_fallback(query: str, start_date: str, end_date: str, limit: int) -
     return f"## News Fallback for query '{query}', from {start_date} to {end_date}:\n\n{news_str}"
 
 
-def get_news_yfinance(
+def get_news_westock(
     ticker: str,
     start_date: str,
     end_date: str,
@@ -89,7 +87,7 @@ def get_news_yfinance(
     return _ddg_news_fallback(query, start_date, end_date, article_limit)
 
 
-def get_global_news_yfinance(
+def get_global_news_westock(
     curr_date: str,
     look_back_days: int | None = None,
     limit: int | None = None,

@@ -1,7 +1,7 @@
 """CLI symbol validation/classification must agree with the data path.
 
 Regressions for #980 (validation rejected GC=F), #981 (BTCUSD misclassified as
-stock), #982 (BTC-USDT accepted but unpriceable on Yahoo).
+stock), #982 (BTC-USDT accepted but unpriceable on Westock).
 """
 import pytest
 
@@ -10,7 +10,7 @@ from cli.utils import detect_asset_type, is_valid_ticker_input, normalize_ticker
 from tradingagents.dataflows.symbol_utils import normalize_symbol
 
 
-# --- #982: stablecoin-quoted crypto normalizes to Yahoo's -USD pair ---
+# --- #982: stablecoin-quoted crypto normalizes to Westock's -USD pair ---
 @pytest.mark.parametrize("raw,expected", [
     ("BTCUSD", "BTC-USD"),
     ("BTCUSDT", "BTC-USD"),
@@ -27,7 +27,7 @@ def test_normalize_symbol_crypto_and_passthrough(raw, expected):
     assert normalize_symbol(raw) == expected
 
 
-# --- #980: validation accepts Yahoo futures/forex symbols ---
+# --- #980: validation accepts Westock futures/forex symbols ---
 @pytest.mark.parametrize("value,ok", [
     ("GC=F", True),
     ("EURUSD=X", True),

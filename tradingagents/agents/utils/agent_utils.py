@@ -239,7 +239,7 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
     stored on the state (see ``TradingAgentsGraph.resolve_instrument_context``).
     Falls back to a ticker-only context — with no network lookup — when the
     state was constructed without it (bare programmatic states, tests), so a
-    consumer is never forced to make a yfinance call mid-graph.
+    consumer is never forced to make a westock call mid-graph.
     """
     context = state.get("instrument_context")
     if isinstance(context, str) and context.strip():

@@ -25,7 +25,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 - `venv/bin/tradingagents` — Typer CLI（交互式 questionary 菜单）
 - `python -m cli.main` — 替代入口
 - `run_smoke.py` — 非交互 smoke runner（批处理/自动化优先使用）
-- `venv/bin/uvicorn web.backend.main:app --host 127.0.0.1 --port 8765` — 最小 FastAPI Web API 开发服务
+- `venv/bin/uvicorn web.backend.main:app --host 127.0.0.1 --port 8765 --reload` — 最小 FastAPI Web API 开发服务（默认热加载）
 - 执行 `pip install -e .` 后，入口脚本会根据 `pyproject.toml` 的
   `[project.scripts]` 自动重新生成；当前指向
   `tradingagents._cli_entry:app`（不是直接指向 `cli.main:app` —
@@ -73,6 +73,9 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 
 ### Web 服务和布局验证
 
+- 启动 Web 服务时不要先在托管沙箱内运行 uvicorn；本环境的沙箱通常无法
+  bind 本地端口。直接使用受批准的沙箱外命令启动，并且默认开启热加载，例如：
+  `venv/bin/uvicorn web.backend.main:app --host 127.0.0.1 --port 8765 --reload`。
 - 托管沙箱内可能无法 bind 本地端口，或 8765 被外部命名空间占用。`curl`
   失败不一定表示代码坏了；先看 uvicorn 日志是否是 `could not bind`。
 - 如果 8765 不可用，不要杀未知进程。优先用临时端口（如 8766/8877/8878）
@@ -100,7 +103,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 | `MINIMAX_CN_API_KEY` | minimax（中国区） | `~/.zshrc` export |
 | `MINIMAX_API_KEY` | minimax（Global） | `~/.zshrc` export |
 | `.longbridge_mcp_token.json` | Longbridge API token（数据 vendor） | `tradingagents/.longbridge_mcp_token.json`（gitignored） |
-| `data_vendors.core_stock_apis` | 默认 `"longbridge_mcp, longbridge"`（Yahoo Finance 仅作 fallback） | `default_config.py` |
+| `data_vendors.core_stock_apis` | 默认 `"westock, longbridge_mcp, longbridge"` | `default_config.py` |
 | `llm_provider` | 默认 `"minimax-cn"` | `default_config.py` |
 | `quick_think_llm` / `deep_think_llm` | 默认都是 `"MiniMax-M3"` | `default_config.py` |
 
@@ -123,10 +126,10 @@ shebang。
 `data_vendors` 是**路由层 fallback 链**，不是单个 vendor。顺序很重要：
 
 ```
-core_stock_apis    : "longbridge_mcp, longbridge"        # then yfinance fallback
-technical_indicators: "longbridge_mcp, longbridge"
-fundamental_data   : "longbridge_mcp, longbridge"
-news_data          : "web_search, duckduckgo, alpha_vantage, yfinance"
+core_stock_apis    : "westock, longbridge_mcp, longbridge"
+technical_indicators: "westock, longbridge_mcp, longbridge"
+fundamental_data   : "westock, longbridge_mcp, longbridge"
+news_data          : "web_search, duckduckgo, alpha_vantage, westock"
 ```
 
 `route_to_vendor()` 必须捕获 vendor-specific 异常
@@ -270,8 +273,8 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - **Longbridge token 过期时间**：token 位于
   `tradingagents/.longbridge_mcp_token.json`，签发后约 30 天过期。运行长
   smoke 前先检查 expiry 字段。截至 2026-07-05：过期时间为 2026-07-18。
-- **YFinance fallback**：仍然接在 fallback 链中。不要移除；Longbridge
-  不可用时，yfinance 是安全网。
+- **Westock first-level vendor**：Westock 是默认数据链路的第一顺位供应商。
+  Longbridge MCP/CLI 作为覆盖率、认证或 Westock 不可用时的 fallback。
 
 ## 不需要先问权限的操作
 

@@ -8,9 +8,8 @@ the analyst is told to treat as the source of truth for any exact numeric
 claim. Deterministic, no LLM involved.
 
 Data source: routes through ``data_vendors.core_stock_apis`` (default
-``longbridge_mcp, longbridge``), with a yfinance fallback if the configured
-vendor chain fails — so we honour user vendor configuration instead of
-hard-coding Yahoo Finance.
+``westock, longbridge_mcp, longbridge``), with a direct Westock loader fallback
+if the configured vendor chain fails.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.dataflows.stockstats_utils import (
-    load_ohlcv as _yfinance_load_ohlcv,
+    load_ohlcv as _westock_load_ohlcv,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,7 @@ def _parse_vendor_csv(raw: object) -> pd.DataFrame:
     Longbridge MCP returns a piped, box-drawn ASCII table (whitespace-separated,
     decorated headers — `Date                  Open ...`) with a leading comment
     block; Longbridge CLI returns a more conventional CSV after a comment header;
-    yfinance already returns a DataFrame.
+    Westock already returns a DataFrame.
     """
     if isinstance(raw, pd.DataFrame):
         return raw
@@ -88,7 +87,7 @@ def _load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     """OHLCV via the configured ``core_stock_apis`` vendor chain.
 
     Honours the user's ``data_vendors.core_stock_apis`` setting (typically
-    ``longbridge_mcp, longbridge``) and falls back to the yfinance loader if
+    ``westock, longbridge_mcp, longbridge``) and falls back to the Westock loader if
     the configured chain fails for any reason.
     """
     cfg = get_config()
@@ -109,21 +108,21 @@ def _load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
                 return df
             logger.warning(
                 "data_vendors chain %s returned empty/invalid for %s; "
-                "falling back to yfinance", explicit, symbol,
+                "falling back to westock", explicit, symbol,
             )
         except NoMarketDataError as exc:
             logger.warning(
                 "data_vendors chain %s raised NoMarketDataError for %s "
-                "(%s); falling back to yfinance",
+                "(%s); falling back to westock",
                 explicit, symbol, exc,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "data_vendors chain %s raised %s for %s; falling back to yfinance",
+                "data_vendors chain %s raised %s for %s; falling back to westock",
                 explicit, type(exc).__name__, symbol,
             )
 
-    return _yfinance_load_ohlcv(symbol, curr_date)
+    return _westock_load_ohlcv(symbol, curr_date)
 
 
 def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:

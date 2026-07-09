@@ -6,7 +6,7 @@ import pytest
 
 from tradingagents.dataflows.symbol_utils import (
     NoMarketDataError,
-    is_yahoo_safe,
+    is_westock_safe,
     normalize_symbol,
 )
 
@@ -67,14 +67,14 @@ class TestNoMarketDataError(unittest.TestCase):
 
 
 @pytest.mark.unit
-class TestIsYahooSafe(unittest.TestCase):
+class TestIsWestockSafe(unittest.TestCase):
     def test_accepts_structural_chars(self):
         for sym in ("AAPL", "GC=F", "^GSPC", "BRK.B", "BTC-USD"):
-            self.assertTrue(is_yahoo_safe(sym))
+            self.assertTrue(is_westock_safe(sym))
 
     def test_rejects_slash_and_space(self):
         for sym in ("a/b", "AA PL", ""):
-            self.assertFalse(is_yahoo_safe(sym))
+            self.assertFalse(is_westock_safe(sym))
 
 
 if __name__ == "__main__":

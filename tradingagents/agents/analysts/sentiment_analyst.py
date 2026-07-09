@@ -2,13 +2,13 @@
 
 Previously named ``social_media_analyst``. Renamed and redesigned because
 the old version had a prompt that demanded social-media analysis but the
-only tool available was Yahoo Finance news — which led LLMs to fabricate
+only tool available was Westock news — which led LLMs to fabricate
 Reddit/X/StockTwits content under prompt pressure (verified live).
 
 The redesigned agent pre-fetches three complementary data sources before
 the LLM is invoked and injects them into the prompt as structured blocks:
 
-  1. News headlines     — Yahoo Finance (institutional framing)
+  1. News headlines     — Westock (institutional framing)
   2. StockTwits messages — retail-trader posts indexed by cashtag, with
                            user-labeled Bullish/Bearish sentiment tags
   3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
@@ -139,7 +139,7 @@ def _build_system_message(
 
 ## Data sources (pre-fetched, in this prompt)
 
-### News headlines — Yahoo Finance, past 7 days
+### News headlines — Westock, past 7 days
 Institutional framing. Fact-driven, slower-moving signal.
 
 <start_of_news>

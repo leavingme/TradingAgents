@@ -48,16 +48,16 @@ except ImportError:
     get_longbridge_mcp_cashflow = _LBMCP_NONE
     get_longbridge_mcp_income_statement = _LBMCP_NONE
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
-from .y_finance import (
-    get_balance_sheet as get_yfinance_balance_sheet,
-    get_cashflow as get_yfinance_cashflow,
-    get_fundamentals as get_yfinance_fundamentals,
-    get_income_statement as get_yfinance_income_statement,
-    get_insider_transactions as get_yfinance_insider_transactions,
+from .westock import (
+    get_balance_sheet as get_westock_balance_sheet,
+    get_cashflow as get_westock_cashflow,
+    get_fundamentals as get_westock_fundamentals,
+    get_income_statement as get_westock_income_statement,
+    get_insider_transactions as get_westock_insider_transactions,
     get_stock_stats_indicators_window,
-    get_YFin_data_online,
+    get_westock_data_online,
 )
-from .yfinance_news import get_global_news_yfinance, get_news_yfinance
+from .westock_news import get_global_news_westock, get_news_westock
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ TOOLS_CATEGORIES = {
 }
 
 VENDOR_LIST = [
-    "yfinance",
+    "westock",
     "fred",
     "polymarket",
     "alpha_vantage",
@@ -127,54 +127,54 @@ VENDOR_METHODS = {
     # core_stock_apis
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
-        "yfinance": get_YFin_data_online,
+        "westock": get_westock_data_online,
         "longbridge": get_longbridge_stock,
         "longbridge_mcp": get_longbridge_mcp_stock,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
-        "yfinance": get_stock_stats_indicators_window,
+        "westock": get_stock_stats_indicators_window,
         "longbridge": get_longbridge_indicators,
         "longbridge_mcp": get_longbridge_mcp_indicators,
     },
     # fundamental_data
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
-        "yfinance": get_yfinance_fundamentals,
+        "westock": get_westock_fundamentals,
         "longbridge": get_longbridge_fundamentals,
         "longbridge_mcp": get_longbridge_mcp_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
-        "yfinance": get_yfinance_balance_sheet,
+        "westock": get_westock_balance_sheet,
         "longbridge": get_longbridge_balance_sheet,
         "longbridge_mcp": get_longbridge_mcp_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
-        "yfinance": get_yfinance_cashflow,
+        "westock": get_westock_cashflow,
         "longbridge": get_longbridge_cashflow,
         "longbridge_mcp": get_longbridge_mcp_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
-        "yfinance": get_yfinance_income_statement,
+        "westock": get_westock_income_statement,
         "longbridge": get_longbridge_income_statement,
         "longbridge_mcp": get_longbridge_mcp_income_statement,
     },
     # news_data
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
-        "yfinance": get_news_yfinance,
+        "westock": get_news_westock,
     },
     "get_global_news": {
-        "yfinance": get_global_news_yfinance,
+        "westock": get_global_news_westock,
         "alpha_vantage": get_alpha_vantage_global_news,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
-        "yfinance": get_yfinance_insider_transactions,
+        "westock": get_westock_insider_transactions,
     },
     # macro_data
     "get_macro_indicators": {
@@ -222,7 +222,7 @@ def route_to_vendor(method: str, *args, **kwargs):
     # The configured vendor list IS the chain: we do NOT silently fall back to
     # vendors the user did not choose (#988/#289) — that returned data from an
     # unexpected source and caused cross-vendor inconsistencies. For multi-vendor
-    # fallback, list them in order, e.g. data_vendors="yfinance,alpha_vantage".
+    # fallback, list them in order, e.g. data_vendors="westock,alpha_vantage".
     # The "default" sentinel (no explicit config) uses all available vendors.
     explicit = [v for v in primary_vendors if v and v != "default"]
     if explicit:

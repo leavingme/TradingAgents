@@ -32,18 +32,22 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
         os.rmdir(self._tmp)
 
     def test_empty_download_raises_and_does_not_cache(self):
-        empty = pd.DataFrame()
-        with mock.patch.object(stockstats_utils.yf, "download", return_value=empty), \
+        with mock.patch("tradingagents.dataflows.symbol_utils.is_westock_available", return_value=True), \
+                mock.patch("tradingagents.dataflows.symbol_utils.run_westock", return_value="[]") as run, \
+                mock.patch("tradingagents.dataflows.interface.route_to_vendor", side_effect=NoMarketDataError("FAKE")), \
                 self.assertRaises(NoMarketDataError):
             stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
         # Nothing should have been written to the cache.
         self.assertEqual(os.listdir(self._tmp), [])
 
         # A second call must re-attempt the fetch (no poisoned cache served).
-        with mock.patch.object(stockstats_utils.yf, "download", return_value=empty) as dl2:
+        with mock.patch("tradingagents.dataflows.symbol_utils.is_westock_available", return_value=True), \
+                mock.patch("tradingagents.dataflows.symbol_utils.run_westock", return_value="[]") as run2, \
+                mock.patch("tradingagents.dataflows.interface.route_to_vendor", side_effect=NoMarketDataError("FAKE")):
             with self.assertRaises(NoMarketDataError):
                 stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
-            self.assertTrue(dl2.called)
+            self.assertTrue(run.called)
+            self.assertTrue(run2.called)
 
 
 @pytest.mark.unit
@@ -55,9 +59,9 @@ class TestRouteToVendorSentinel(unittest.TestCase):
         # vendors ever run.
         set_config({
             "data_vendors": {
-                "core_stock_apis": "yfinance, alpha_vantage",
-                "technical_indicators": "yfinance, alpha_vantage",
-                "fundamental_data": "yfinance, alpha_vantage",
+                "core_stock_apis": "westock, alpha_vantage",
+                "technical_indicators": "westock, alpha_vantage",
+                "fundamental_data": "westock, alpha_vantage",
                 "news_data": "alpha_vantage",
             }
         })
@@ -66,7 +70,7 @@ class TestRouteToVendorSentinel(unittest.TestCase):
         def raises_no_data(symbol, *a, **k):
             raise NoMarketDataError(symbol, "GC=F", "no rows")
 
-        patched = {"yfinance": raises_no_data, "alpha_vantage": raises_no_data}
+        patched = {"westock": raises_no_data, "alpha_vantage": raises_no_data}
         with mock.patch.dict(
             interface.VENDOR_METHODS, {"get_stock_data": patched}, clear=False
         ):
@@ -88,7 +92,7 @@ class TestRouteToVendorSentinel(unittest.TestCase):
         def raises_unavailable(symbol, *a, **k):
             raise ValueError("ALPHA_VANTAGE_API_KEY environment variable is not set.")
 
-        patched = {"yfinance": raises_no_data, "alpha_vantage": raises_unavailable}
+        patched = {"westock": raises_no_data, "alpha_vantage": raises_unavailable}
         with mock.patch.dict(
             interface.VENDOR_METHODS, {"get_stock_data": patched}, clear=False
         ):

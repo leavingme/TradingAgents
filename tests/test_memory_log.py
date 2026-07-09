@@ -55,8 +55,15 @@ def _resolve_entry(log, ticker, date, decision, reflection="Good call."):
 
 
 def _price_df(prices):
-    """Minimal DataFrame matching yfinance .history() output shape."""
+    """Minimal price frame used by tests."""
     return pd.DataFrame({"Close": prices})
+
+
+def _price_csv(prices):
+    rows = ["Date,Close"]
+    for idx, price in enumerate(prices, start=1):
+        rows.append(f"2026-01-{idx:02d},{price}")
+    return "\n".join(rows)
 
 
 def _make_pm_state(past_context=""):
@@ -490,12 +497,8 @@ class TestDeferredReflection:
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        with patch("yfinance.Ticker") as mock_ticker_cls:
-            def _make_ticker(sym):
-                m = MagicMock()
-                m.history.return_value = _price_df(spy_prices if sym == "SPY" else stock_prices)
-                return m
-            mock_ticker_cls.side_effect = _make_ticker
+        with patch("tradingagents.dataflows.westock.get_westock_data_online") as fetch:
+            fetch.side_effect = lambda sym, *a: _price_csv(spy_prices if sym == "SPY" else stock_prices)
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-01-05")
         assert raw is not None and alpha is not None and days is not None
         assert isinstance(raw, float) and isinstance(alpha, float) and isinstance(days, int)
@@ -504,20 +507,16 @@ class TestDeferredReflection:
     def test_fetch_returns_too_recent(self):
         """Only 1 data point available → returns (None, None, None), no crash."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        with patch("yfinance.Ticker") as mock_ticker_cls:
-            m = MagicMock()
-            m.history.return_value = _price_df([100.0])
-            mock_ticker_cls.return_value = m
+        with patch("tradingagents.dataflows.westock.get_westock_data_online") as fetch:
+            fetch.return_value = _price_csv([100.0])
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-04-19")
         assert raw is None and alpha is None and days is None
 
     def test_fetch_returns_delisted(self):
         """Empty DataFrame → returns (None, None, None), no crash."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        with patch("yfinance.Ticker") as mock_ticker_cls:
-            m = MagicMock()
-            m.history.return_value = pd.DataFrame({"Close": []})
-            mock_ticker_cls.return_value = m
+        with patch("tradingagents.dataflows.westock.get_westock_data_online") as fetch:
+            fetch.return_value = "Date,Close\n"
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "XXXXXFAKE", "2026-01-10")
         assert raw is None and alpha is None and days is None
 
@@ -526,12 +525,8 @@ class TestDeferredReflection:
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 403.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        with patch("yfinance.Ticker") as mock_ticker_cls:
-            def _make_ticker(sym):
-                m = MagicMock()
-                m.history.return_value = _price_df(spy_prices if sym == "SPY" else stock_prices)
-                return m
-            mock_ticker_cls.side_effect = _make_ticker
+        with patch("tradingagents.dataflows.westock.get_westock_data_online") as fetch:
+            fetch.side_effect = lambda sym, *a: _price_csv(spy_prices if sym == "SPY" else stock_prices)
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-01-05")
         assert raw is not None and alpha is not None and days is not None
         assert days == 2

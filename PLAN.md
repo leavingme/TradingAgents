@@ -255,7 +255,7 @@ After this works, refactor the existing TUI to consume the same runtime stream.
   - `config_builder.py` wires the new fields into the graph config.
   - Wall-time tracker driven by `agent_status` events instead of raw chunks.
   - `StatsCallbackHandler` is injectable through runtime callbacks; CLI/TUI and WebUI consume live `stats` events.
-- Done: `TaskStore` upgraded from in-memory to SQLite persistence (`~/.tradingagents/webui_runs.db`).
+- Done: `TaskStore` upgraded from in-memory to SQLite persistence (`~/.tradingagents/runs.db`).
   - Runs and events persisted across server restarts.
   - Interrupted runs auto-recovered to `failed` on startup.
   - `list()` returns up to 100 runs from DB.
@@ -303,7 +303,7 @@ Known differences:
 
 ## Hardening Update (2026-07-06)
 
-- Added workspace-local DB fallback: if `~/.tradingagents/webui_runs.db` is not writable in a managed/sandboxed environment, the WebUI uses `.tradingagents/webui_runs.db` under the current workspace. `.tradingagents/` is gitignored.
+- Added workspace-local DB fallback: if `~/.tradingagents/runs.db` is not writable in a managed/sandboxed environment, the WebUI uses `.tradingagents/runs.db` under the current workspace. `.tradingagents/` is gitignored.
 - Added `run_cancelled` runtime/Web event so cancellation is not represented as a failure event.
 - Trimmed runtime-only `final_state` from Web API `run_completed` events before persistence/SSE so LangChain objects do not break JSON serialization and clients do not receive oversized graph state.
 - Added a regression test covering Web-safe persistence of `run_completed` events that contain non-JSON graph state.

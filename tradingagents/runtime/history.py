@@ -17,8 +17,8 @@ def _default_db_path() -> Path:
     if configured:
         return Path(configured)
 
-    home_path = Path.home() / ".tradingagents" / "webui_runs.db"
-    fallback_path = Path.cwd() / ".tradingagents" / "webui_runs.db"
+    home_path = Path.home() / ".tradingagents" / "runs.db"
+    fallback_path = Path.cwd() / ".tradingagents" / "runs.db"
 
     try:
         home_path.parent.mkdir(parents=True, exist_ok=True)

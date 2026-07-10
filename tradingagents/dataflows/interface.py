@@ -1,4 +1,6 @@
 import logging
+import time
+from datetime import datetime, timedelta, timezone
 
 from .alpha_vantage import (
     get_balance_sheet as get_alpha_vantage_balance_sheet,
@@ -16,6 +18,10 @@ from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
+)
+from .duckduckgo_search import (
+    get_global_news_duckduckgo,
+    get_news_duckduckgo,
 )
 from .fred import get_macro_data as get_fred_macro_data
 # Longbridge data vendor plugin: ships on top of v0.3.0 (added 2026-07-04).
@@ -108,6 +114,7 @@ TOOLS_CATEGORIES = {
 
 VENDOR_LIST = [
     "westock",
+    "duckduckgo",
     "fred",
     "polymarket",
     "alpha_vantage",
@@ -165,11 +172,13 @@ VENDOR_METHODS = {
     },
     # news_data
     "get_news": {
-        "alpha_vantage": get_alpha_vantage_news,
         "westock": get_news_westock,
+        "duckduckgo": get_news_duckduckgo,
+        "alpha_vantage": get_alpha_vantage_news,
     },
     "get_global_news": {
         "westock": get_global_news_westock,
+        "duckduckgo": get_global_news_duckduckgo,
         "alpha_vantage": get_alpha_vantage_global_news,
     },
     "get_insider_transactions": {
@@ -241,20 +250,27 @@ def route_to_vendor(method: str, *args, **kwargs):
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
+        started = time.monotonic()
         try:
-            return impl_func(*args, **kwargs)
-        except VendorRateLimitError:
+            result = impl_func(*args, **kwargs)
+            _record_vendor_verification(vendor, category, method, "available", "analysis", started)
+            return result
+        except VendorRateLimitError as e:
+            _record_vendor_verification(vendor, category, method, "rate_limited", "analysis", started, e)
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
             continue
         except VendorNotConfiguredError as e:
+            _record_vendor_verification(vendor, category, method, "not_configured", "analysis", started, e)
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
             if first_error is None:
                 first_error = e  # Surface it if no other vendor can serve the call.
             continue
         except NoMarketDataError as e:
+            _record_vendor_verification(vendor, category, method, "no_data", "analysis", started, e)
             last_no_data = e  # No data here; another configured vendor may have it
             continue
         except Exception as e:
+            _record_vendor_verification(vendor, category, method, "unavailable", "analysis", started, e)
             # Don't let one vendor's failure crash the call when another can
             # serve it, but never swallow silently: a broken primary must be
             # visible in the logs (#989), not hidden behind a fallback's verdict.
@@ -303,3 +319,58 @@ def route_to_vendor(method: str, *args, **kwargs):
         raise first_error
 
     raise RuntimeError(f"No available vendor for '{method}'")
+
+
+def _record_vendor_verification(vendor, category, method, status, source, started, error=None):
+    """Best-effort telemetry must never alter vendor routing behavior."""
+    try:
+        from .vendor_verification import vendor_verification_store
+
+        return vendor_verification_store.record(
+            vendor=vendor,
+            category=category,
+            method=method,
+            status=status,
+            source=source,
+            detail=str(error) if error else None,
+            latency_ms=round((time.monotonic() - started) * 1000),
+        )
+    except Exception as exc:
+        logger.debug("Could not persist vendor verification: %s", exc)
+        return None
+
+
+def verify_vendor(vendor: str, category: str):
+    """Run one direct, lightweight capability request without fallback."""
+    now = datetime.now(timezone.utc).date()
+    probes = {
+        "core_stock_apis": ("get_stock_data", ("AAPL", str(now - timedelta(days=10)), str(now))),
+        "technical_indicators": ("get_indicators", ("AAPL", "rsi", str(now), 30)),
+        "fundamental_data": ("get_fundamentals", ("AAPL",)),
+        "news_data": ("get_news", ("AAPL", str(now - timedelta(days=7)), str(now))),
+        "macro_data": ("get_macro_indicators", ("cpi", str(now), 365)),
+        "prediction_markets": ("get_prediction_markets", ("Federal Reserve interest rates", 3)),
+    }
+    if category not in probes:
+        raise ValueError(f"Unknown vendor category: {category}")
+    method, args = probes[category]
+    vendor_impl = VENDOR_METHODS.get(method, {}).get(vendor)
+    if vendor_impl is None:
+        raise ValueError(f"Vendor '{vendor}' does not support '{category}'")
+    impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
+    started = time.monotonic()
+    try:
+        result = impl_func(*args)
+        if result is None or (isinstance(result, str) and not result.strip()):
+            raise NoMarketDataError("verification probe", detail="vendor returned an empty result")
+    except VendorRateLimitError as exc:
+        record = _record_vendor_verification(vendor, category, method, "rate_limited", "manual", started, exc)
+    except VendorNotConfiguredError as exc:
+        record = _record_vendor_verification(vendor, category, method, "not_configured", "manual", started, exc)
+    except NoMarketDataError as exc:
+        record = _record_vendor_verification(vendor, category, method, "no_data", "manual", started, exc)
+    except Exception as exc:
+        record = _record_vendor_verification(vendor, category, method, "unavailable", "manual", started, exc)
+    else:
+        record = _record_vendor_verification(vendor, category, method, "available", "manual", started)
+    return record

@@ -16,7 +16,7 @@
     <!-- marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css?v=20260708-indicator-source-matrix" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260710-vendor-verification" />
   </head>
   <body>
     <!-- Ambient background orbs -->
@@ -129,6 +129,18 @@
               </select>
             </label>
 
+            <label class="form-field field-depth">
+              <span class="field-label" data-i18n="analysisDepth">Analysis Depth</span>
+              <select
+                id="researchDepth"
+                name="researchDepth"
+              >
+                <option value="1" selected data-i18n="depthShallow">Shallow · quick research</option>
+                <option value="3" data-i18n="depthMedium">Medium · moderate debate</option>
+                <option value="5" data-i18n="depthDeep">Deep · comprehensive research</option>
+              </select>
+            </label>
+
             <fieldset class="analysts-fieldset">
               <legend class="field-label" data-i18n="analysts">Analysts</legend>
               <label class="analyst-chip">
@@ -208,18 +220,6 @@
                   autocomplete="off"
                   hidden
                 />
-              </label>
-
-              <label class="form-field">
-                <span class="field-label" data-i18n="analysisDepth">Analysis Depth</span>
-                <select
-                  id="researchDepth"
-                  name="researchDepth"
-                >
-                  <option value="1" selected data-i18n="depthShallow">Shallow · quick research</option>
-                  <option value="3" data-i18n="depthMedium">Medium · moderate debate</option>
-                  <option value="5" data-i18n="depthDeep">Deep · comprehensive research</option>
-                </select>
               </label>
 
               <label class="form-field">
@@ -305,6 +305,14 @@
             <section class="env-status-panel" aria-label="API key status">
               <div class="panel-title" data-i18n="apiKeyStatus">API Key Status</div>
               <div id="apiKeyStatusList" class="env-status-list"></div>
+            </section>
+
+            <section class="analyst-prompts-panel" aria-label="Analyst prompts">
+              <div>
+                <div class="panel-title" data-i18n="analystPrompts">Analyst Prompts</div>
+                <p data-i18n="analystPromptsSubtitle">Review the read-only prompts used by each analyst.</p>
+              </div>
+              <div id="analystPromptList" class="analyst-prompt-list"></div>
             </section>
           </form>
         </section>
@@ -676,28 +684,20 @@
                       </thead>
                       <tbody>
                         <tr>
-                          <td><strong>Web Search</strong></td>
-                          <td><span class="badge speed-medium" data-i18n="badgeMedium">Medium</span></td>
-                          <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
-                          <td data-i18n="compNone">None</td>
-                          <td data-i18n="compHigh">High</td>
-                          <td data-i18n="compGlobal">Global</td>
-                        </tr>
-                        <tr>
                           <td><strong>DuckDuckGo</strong></td>
                           <td><span class="badge speed-medium" data-i18n="badgeMedium">Medium</span></td>
                           <td><span class="badge quality-medium" data-i18n="badgeStandard">Standard</span></td>
                           <td data-i18n="compNone">None</td>
                           <td data-i18n="compHigh">High</td>
-                          <td data-i18n="compGlobal">Global</td>
+                          <td data-i18n="compNewsFallbackCoverage">Ticker and global news fallback only</td>
                         </tr>
                         <tr>
-                          <td><strong>Westock / DuckDuckGo</strong></td>
+                          <td><strong>Westock</strong></td>
                           <td><span class="badge speed-fast" data-i18n="badgeFast">Fast</span></td>
                           <td><span class="badge quality-high" data-i18n="badgeHigh">High</span></td>
                           <td data-i18n="compNone">None</td>
                           <td data-i18n="compHigh">High</td>
-                          <td data-i18n="compGlobal">Global</td>
+                          <td data-i18n="compNewsFullCoverage">Ticker news / global news / insider transactions</td>
                         </tr>
                         <tr>
                           <td><strong>Alpha Vantage</strong></td>
@@ -887,6 +887,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260708-indicator-source-matrix" type="module"></script>
+    <script src="/static/app.js?v=20260710-vendor-verification" type="module"></script>
   </body>
 </html>

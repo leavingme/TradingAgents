@@ -24,6 +24,7 @@ const settingsForm  = document.querySelector('#settingsForm');
 const resetSettings = document.querySelector('#resetSettings');
 const resetProviders = document.querySelector('#resetProviders');
 const ohlcvSettingsBody = document.querySelector('#ohlcvSettingsBody');
+const analystPromptList = document.querySelector('#analystPromptList');
 const providersView = document.querySelector('#providersView');
 const statusEl      = document.querySelector('#runStatus');
 const statusDot     = document.querySelector('#statusDot');
@@ -67,6 +68,7 @@ const reportSections = new Map();
 let selectedReportSection = 'all';
 let configDefaults = null;
 let envStatus = null;
+let analystPrompts = [];
 const settingsStorageKey = 'tradingagents.web.settings';
 const uiLanguageStorageKey = 'tradingagents.web.uiLanguage';
 let activeLocale = 'en';
@@ -99,6 +101,10 @@ const translations = {
     apiKeyConfigured: 'configured',
     apiKeyMissing: 'missing',
     apiKeyNotRequired: 'not required',
+    analystPrompts: 'Analyst Prompts',
+    analystPromptsSubtitle: 'Review the read-only prompts used by each analyst.',
+    analystPromptTools: 'Tools',
+    analystPromptUnavailable: 'Analyst prompts are unavailable.',
     uiLanguage: 'UI Language',
     uiLanguageAuto: 'Auto',
     reportLanguage: 'Report Language',
@@ -199,6 +205,16 @@ const translations = {
     providerEnabled: 'enabled',
     providerDisabled: 'disabled',
     providerPriority: 'priority',
+    vendorVerify: 'Verify now',
+    vendorVerifying: 'Verifying',
+    vendorNeverVerified: 'Not verified yet',
+    vendorVerifiedAnalysis: 'Analysis run',
+    vendorVerifiedManual: 'Manual check',
+    vendorAvailable: 'Available',
+    vendorUnavailable: 'Unavailable',
+    vendorNoData: 'No data',
+    vendorRateLimited: 'Rate limited',
+    vendorNotConfigured: 'Not configured',
     compTokenRequired: 'Token Required',
     compKeyRequired: 'Key Required',
     compNone: 'None',
@@ -207,6 +223,8 @@ const translations = {
     compTight: 'Tight',
     compGlobal: 'Global',
     compNoLimit: 'No Limit',
+    compNewsFallbackCoverage: 'Ticker and global news fallback only',
+    compNewsFullCoverage: 'Ticker news / global news / insider transactions',
     catCoreStockTitle: 'Core Stock Price Data (OHLCV)',
     catCoreStockDesc: 'Provides historical and current price bar data for target tickers.',
     catTechIndTitle: 'Technical Indicators',
@@ -238,7 +256,7 @@ const translations = {
     catFundamentalsTitle: 'Company Fundamental Data',
     catFundamentalsDesc: 'Financial statements (income statements, balance sheets, cashflow statements).',
     catNewsTitle: 'News & Social Data',
-    catNewsDesc: 'Fetches news articles, insider transactions, and market news.',
+    catNewsDesc: 'Fetches ticker news, global market news, and insider transactions. DuckDuckGo is a configurable fallback for news search.',
     catMacroTitle: 'Macroeconomic Data',
     catMacroDesc: 'Economic metrics like inflation, GDP, central bank interest rates.',
     catPredictionTitle: 'Prediction Markets',
@@ -278,6 +296,10 @@ const translations = {
     apiKeyConfigured: '已配置',
     apiKeyMissing: '未配置',
     apiKeyNotRequired: '无需配置',
+    analystPrompts: '分析师提示词',
+    analystPromptsSubtitle: '查看每位分析师实际使用的只读提示词。',
+    analystPromptTools: '工具',
+    analystPromptUnavailable: '暂时无法加载分析师提示词。',
     uiLanguage: '界面语言',
     uiLanguageAuto: '自动',
     reportLanguage: '报告语言',
@@ -378,6 +400,16 @@ const translations = {
     providerEnabled: '已启用',
     providerDisabled: '未启用',
     providerPriority: '优先级',
+    vendorVerify: '立即验证',
+    vendorVerifying: '验证中',
+    vendorNeverVerified: '尚未验证',
+    vendorVerifiedAnalysis: '分析运行',
+    vendorVerifiedManual: '手动验证',
+    vendorAvailable: '可用',
+    vendorUnavailable: '不可用',
+    vendorNoData: '无数据',
+    vendorRateLimited: '达到频率限制',
+    vendorNotConfigured: '未配置',
     compTokenRequired: '需要 Token',
     compKeyRequired: '需要 API Key',
     compNone: '无需',
@@ -386,6 +418,8 @@ const translations = {
     compTight: '极其严格',
     compGlobal: '全球',
     compNoLimit: '无限制 (本地计算)',
+    compNewsFallbackCoverage: '仅个股新闻和全球新闻 fallback',
+    compNewsFullCoverage: '个股新闻 / 全球新闻 / 内幕交易',
     catCoreStockTitle: '核心 K 线股价数据 (OHLCV)',
     catCoreStockDesc: '提供个股的历史和实时K线数据。',
     catTechIndTitle: '技术分析指标',
@@ -417,7 +451,7 @@ const translations = {
     catFundamentalsTitle: '公司财务基本面数据',
     catFundamentalsDesc: '利润表、资产负债表、现金流量表等财务数据。',
     catNewsTitle: '新闻与社交动态舆情',
-    catNewsDesc: '获取个股新闻、全球宏观新闻和内幕交易信息。',
+    catNewsDesc: '获取个股新闻、全球宏观新闻和内幕交易信息。DuckDuckGo 是可配置的新闻搜索 fallback。',
     catMacroTitle: '宏观经济数据指标',
     catMacroDesc: '美国和全球通胀、GDP、美联储利率等数据。',
     catPredictionTitle: '预测事件概率市场',
@@ -569,10 +603,14 @@ initializeLocale();
 showReportPlaceholder();
 loadConfigDefaults();
 loadEnvStatus();
+loadAnalystPrompts();
 
 runViewButton.addEventListener('click', () => showView('run'));
 settingsViewButton.addEventListener('click', () => showView('settings'));
-providersViewButton.addEventListener('click', () => showView('providers'));
+providersViewButton.addEventListener('click', () => {
+  showView('providers');
+  loadEnvStatus();
+});
 resetProviders.addEventListener('click', () => {
   try {
     window.localStorage.removeItem(providersStorageKey);
@@ -584,6 +622,8 @@ handleHashRoute();
 
 settingsForm.addEventListener('input', saveSettings);
 settingsForm.addEventListener('change', saveSettings);
+researchDepth.addEventListener('input', saveSettings);
+researchDepth.addEventListener('change', saveSettings);
 
 tickerSelect.addEventListener('change', updateTickerMode);
 outputLanguage.addEventListener('change', updateOutputLanguageMode);
@@ -723,6 +763,20 @@ async function loadEnvStatus() {
   }
 }
 
+async function loadAnalystPrompts() {
+  if (!analystPromptList) return;
+  try {
+    const response = await fetch('/api/config/analyst-prompts');
+    if (!response.ok) throw new Error(await response.text());
+    const payload = await response.json();
+    analystPrompts = Array.isArray(payload.analysts) ? payload.analysts : [];
+    renderAnalystPrompts();
+  } catch {
+    analystPrompts = [];
+    renderAnalystPrompts(true);
+  }
+}
+
 function applyConfigDefaults(defaults) {
   setFieldValue(llmProvider, defaults.llm_provider);
   setFieldValue(quickThinkLlm, defaults.quick_think_llm);
@@ -812,6 +866,7 @@ function applyTranslations() {
   updateEventCount();
   updateStats(currentStats);
   renderApiKeyStatus();
+  renderAnalystPrompts();
   if (reportViewer.querySelector('.report-empty')) showReportPlaceholder();
 }
 
@@ -938,6 +993,67 @@ function renderApiKeyStatusItem(provider, status, active) {
 
   item.append(name, detail, badge);
   return item;
+}
+
+function renderAnalystPrompts(loadFailed = false) {
+  if (!analystPromptList) return;
+  if (!analystPrompts.length) {
+    const empty = document.createElement('div');
+    empty.className = 'analyst-prompt-empty';
+    empty.textContent = loadFailed ? t('analystPromptUnavailable') : '';
+    analystPromptList.replaceChildren(empty);
+    return;
+  }
+
+  const items = analystPrompts.map(promptInfo => {
+    const item = document.createElement('details');
+    item.className = 'analyst-prompt-item';
+
+    const summary = document.createElement('summary');
+    summary.className = 'analyst-prompt-summary';
+
+    const titleWrap = document.createElement('span');
+    titleWrap.className = 'analyst-prompt-heading';
+
+    const title = document.createElement('span');
+    title.className = 'analyst-prompt-title';
+    title.textContent = analystPromptTitle(promptInfo);
+
+    const description = document.createElement('span');
+    description.className = 'analyst-prompt-description';
+    description.textContent = String(promptInfo.description || '');
+
+    titleWrap.append(title, description);
+    summary.append(titleWrap);
+
+    const body = document.createElement('div');
+    body.className = 'analyst-prompt-body';
+
+    const tools = document.createElement('div');
+    tools.className = 'analyst-prompt-tools';
+    const toolList = Array.isArray(promptInfo.tools) ? promptInfo.tools : [];
+    tools.textContent = `${t('analystPromptTools')}: ${toolList.join(', ') || '--'}`;
+
+    const pre = document.createElement('pre');
+    pre.className = 'analyst-prompt-text';
+    pre.textContent = String(promptInfo.prompt || '');
+
+    body.append(tools, pre);
+    item.append(summary, body);
+    return item;
+  });
+  analystPromptList.replaceChildren(...items);
+}
+
+function analystPromptTitle(promptInfo) {
+  const titleMap = {
+    market: 'Market Analyst',
+    social: 'Sentiment Analyst',
+    news: 'News Analyst',
+    fundamentals: 'Fundamentals Analyst',
+  };
+  const title = titleMap[promptInfo.key] || promptInfo.title;
+  return agentDisplayNames[activeLocale]?.[title] ?? title;
 }
 
 function saveSettings() {
@@ -1151,6 +1267,7 @@ function handleRuntimeEvent(type, event) {
     appendEvent(type, event.agent, event.content?.decision ?? t('runCompleted'));
     loadRunReport(currentRunId);
     refreshRunHistory();
+    loadEnvStatus();
     closeStream();
     return;
   }
@@ -1562,7 +1679,7 @@ const availableCategoryVendors = {
   core_stock_apis: ["westock", "longbridge_mcp", "longbridge", "alpha_vantage"],
   technical_indicators: ["westock", "longbridge_mcp", "longbridge", "alpha_vantage"],
   fundamental_data: ["westock", "longbridge_mcp", "longbridge", "alpha_vantage"],
-  news_data: ["web_search", "duckduckgo", "alpha_vantage", "westock"],
+  news_data: ["westock", "duckduckgo", "alpha_vantage"],
   macro_data: ["fred"],
   prediction_markets: ["polymarket"],
 };
@@ -1572,7 +1689,6 @@ const providerMeta = {
   longbridge_mcp: { name: "Longbridge MCP" },
   longbridge: { name: "Longbridge CLI" },
   alpha_vantage: { name: "Alpha Vantage" },
-  web_search: { name: "Web Search" },
   duckduckgo: { name: "DuckDuckGo" },
   fred: { name: "FRED" },
   polymarket: { name: "Polymarket" },
@@ -1605,6 +1721,25 @@ function parseCategoryDefault(category, defaultStr) {
   return result;
 }
 
+function normalizeCategoryProviders(category, rows) {
+  const allowed = availableCategoryVendors[category] || [];
+  const normalized = [];
+  const seen = new Set();
+
+  (Array.isArray(rows) ? rows : []).forEach(row => {
+    const id = row?.id;
+    if (!allowed.includes(id) || seen.has(id)) return;
+    normalized.push({ id, enabled: row.enabled !== false });
+    seen.add(id);
+  });
+
+  allowed.forEach(id => {
+    if (!seen.has(id)) normalized.push({ id, enabled: false });
+  });
+
+  return normalized;
+}
+
 function loadProviders() {
   let saved = null;
   try {
@@ -1612,14 +1747,17 @@ function loadProviders() {
   } catch {}
   
   if (saved && typeof saved === 'object') {
-    providersState = saved;
+    providersState = {};
+    Object.keys(availableCategoryVendors).forEach(cat => {
+      providersState[cat] = normalizeCategoryProviders(cat, saved[cat]);
+    });
   } else {
     providersState = {};
     const defaultDataVendors = configDefaults?.data_vendors || {
       core_stock_apis: "westock, longbridge_mcp, longbridge",
       technical_indicators: "westock, longbridge_mcp, longbridge",
       fundamental_data: "westock, longbridge_mcp, longbridge",
-      news_data: "web_search, duckduckgo, alpha_vantage, westock",
+      news_data: "westock, duckduckgo, alpha_vantage",
       macro_data: "fred",
       prediction_markets: "polymarket"
     };
@@ -1649,6 +1787,8 @@ function renderCategoryProviders(category) {
     li.dataset.index = index;
     
     const meta = providerMeta[v.id] || { name: v.id };
+    const verification = envStatus?.vendor_verifications?.[category]?.[v.id];
+    const verificationState = verification?.status || 'unverified';
     let badgeText = '';
     let badgeClass = '';
     
@@ -1670,10 +1810,15 @@ function renderCategoryProviders(category) {
     li.innerHTML = `
       <div class="provider-item-left">
         <input type="checkbox" class="provider-enable-checkbox" ${v.enabled ? 'checked' : ''} />
-        <span class="provider-name">${meta.name}</span>
+        <span class="provider-identity">
+          <span class="provider-name">${meta.name}</span>
+          <span class="provider-verification-detail" title="${escapeHtml(verification?.detail || '')}">${escapeHtml(formatVendorVerification(verification))}</span>
+        </span>
       </div>
       <div class="provider-item-right">
+        <span class="vendor-health-badge ${verificationState}">${escapeHtml(formatVendorHealth(verificationState))}</span>
         <span class="env-status-badge ${badgeClass}">${badgeText}</span>
+        <button type="button" class="btn-verify-vendor" title="${t('vendorVerify')}" aria-label="${t('vendorVerify')}">↻</button>
         <div class="provider-order-buttons">
           <button type="button" class="btn-order btn-order-up" title="Move Up" ${index === 0 ? 'disabled' : ''}>▲</button>
           <button type="button" class="btn-order btn-order-down" title="Move Down" ${index === vendors.length - 1 ? 'disabled' : ''}>▼</button>
@@ -1686,6 +1831,28 @@ function renderCategoryProviders(category) {
       v.enabled = checkbox.checked;
       li.classList.toggle('disabled', !v.enabled);
       saveProviders();
+    });
+
+    const verifyButton = li.querySelector('.btn-verify-vendor');
+    verifyButton.addEventListener('click', async () => {
+      verifyButton.disabled = true;
+      verifyButton.classList.add('loading');
+      verifyButton.title = t('vendorVerifying');
+      try {
+        const response = await fetch(`/api/config/data-vendors/${encodeURIComponent(category)}/${encodeURIComponent(v.id)}/verify`, {
+          method: 'POST',
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const result = await response.json();
+        envStatus = envStatus || {};
+        envStatus.vendor_verifications = envStatus.vendor_verifications || {};
+        envStatus.vendor_verifications[category] = envStatus.vendor_verifications[category] || {};
+        envStatus.vendor_verifications[category][v.id] = result;
+      } catch (error) {
+        console.error('Vendor verification failed', error);
+      } finally {
+        renderCategoryProviders(category);
+      }
     });
     
     const upBtn = li.querySelector('.btn-order-up');
@@ -1716,6 +1883,30 @@ function renderCategoryProviders(category) {
   if (category === 'core_stock_apis') {
     renderOhlcvSettingsTable();
   }
+}
+
+function formatVendorHealth(status) {
+  return {
+    available: t('vendorAvailable'),
+    unavailable: t('vendorUnavailable'),
+    no_data: t('vendorNoData'),
+    rate_limited: t('vendorRateLimited'),
+    not_configured: t('vendorNotConfigured'),
+    unverified: t('vendorNeverVerified'),
+  }[status] || t('vendorUnavailable');
+}
+
+function formatVendorVerification(verification) {
+  if (!verification?.verified_at) return t('vendorNeverVerified');
+  const source = verification.source === 'manual'
+    ? t('vendorVerifiedManual')
+    : t('vendorVerifiedAnalysis');
+  const time = new Intl.DateTimeFormat(activeLocale === 'zh' ? 'zh-CN' : 'en', {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  }).format(new Date(verification.verified_at));
+  const latency = Number.isFinite(verification.latency_ms) ? ` · ${verification.latency_ms} ms` : '';
+  return `${source} · ${time}${latency}`;
 }
 
 function renderOhlcvSettingsTable() {

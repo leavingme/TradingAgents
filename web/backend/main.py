@@ -14,7 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients.api_key_env import PROVIDER_API_KEY_ENV
 from tradingagents.llm_clients.openai_client import OPENAI_COMPATIBLE_PROVIDERS
+from tradingagents.dataflows.vendor_verification import vendor_verification_store
 
+from .analyst_prompts import analyst_prompt_payload
 from .models import RunCreateRequest, RunRecordResponse
 from .runner_worker import start_background_run
 from .task_store import store
@@ -81,15 +83,37 @@ async def get_env_status():
         "configured": shutil.which("longbridge") is not None,
         "required": True,
     }
-    # 5. Polymarket, web_search, duckduckgo, westock do not require credentials
-    for v in ["polymarket", "web_search", "duckduckgo", "westock"]:
+    # 5. Polymarket, DuckDuckGo, and Westock do not require credentials
+    for v in ["polymarket", "duckduckgo", "westock"]:
         data_vendors[v] = {
             "env_var": None,
             "configured": True,
             "required": False,
         }
 
-    return {"providers": providers, "data_vendors": data_vendors}
+    return {
+        "providers": providers,
+        "data_vendors": data_vendors,
+        "vendor_verifications": vendor_verification_store.list_latest(),
+    }
+
+
+@app.post("/api/config/data-vendors/{category}/{vendor}/verify")
+async def verify_data_vendor(category: str, vendor: str):
+    from tradingagents.dataflows.interface import verify_vendor
+
+    try:
+        result = await asyncio.to_thread(verify_vendor, vendor, category)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result:
+        raise HTTPException(status_code=500, detail="verification result could not be persisted")
+    return result
+
+
+@app.get("/api/config/analyst-prompts")
+async def get_analyst_prompts():
+    return analyst_prompt_payload()
 
 
 @app.post("/api/runs", response_model=RunRecordResponse)

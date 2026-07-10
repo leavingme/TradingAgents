@@ -68,6 +68,27 @@ def test_get_config_defaults_matches_webui_defaults():
     assert defaults["research_depth"] == 1
 
 
+def test_get_analyst_prompts_exposes_prompt_catalog():
+    from web.backend import main
+    from tradingagents.agents.analysts.prompts import (
+        TOOL_CALLING_COLLABORATION_PROMPT,
+        build_market_analyst_system_message,
+        render_full_prompt,
+    )
+
+    payload = asyncio.run(main.get_analyst_prompts())
+
+    keys = {item["key"] for item in payload["analysts"]}
+    assert keys == {"market", "social", "news", "fundamentals"}
+    market = next(item for item in payload["analysts"] if item["key"] == "market")
+    assert "get_verified_market_snapshot" in market["tools"]
+    assert market["prompt"] == render_full_prompt(
+        TOOL_CALLING_COLLABORATION_PROMPT,
+        build_market_analyst_system_message(),
+        ["get_stock_data", "get_indicators", "get_verified_market_snapshot"],
+    )
+
+
 def test_get_env_status_reports_provider_key_presence(monkeypatch):
     from web.backend import main
 
@@ -315,5 +336,25 @@ def test_build_runtime_config_merges_nested_overrides():
 
     assert config["data_vendors"]["core_stock_apis"] == "westock"
     # Ensure other default values in data_vendors are NOT lost
-    assert config["data_vendors"]["news_data"] == "web_search, duckduckgo, alpha_vantage, westock"
+    assert config["data_vendors"]["news_data"] == "westock, duckduckgo, alpha_vantage"
 
+
+def test_manual_vendor_verification_endpoint(monkeypatch):
+    from tradingagents.dataflows import interface
+    from web.backend import main
+
+    expected = {
+        "vendor": "westock",
+        "category": "news_data",
+        "method": "get_news",
+        "status": "available",
+        "source": "manual",
+        "detail": None,
+        "latency_ms": 25,
+        "verified_at": "2026-07-10T01:02:03+00:00",
+    }
+    monkeypatch.setattr(interface, "verify_vendor", lambda vendor, category: expected)
+
+    result = asyncio.run(main.verify_data_vendor("news_data", "westock"))
+
+    assert result == expected

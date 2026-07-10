@@ -2,6 +2,12 @@ import { createProviderManager } from './components/provider-manager.js';
 import { createAgentTimeline, formatAgentName } from './components/agent-timeline.js';
 import { createReportViewer } from './components/report-viewer.js';
 import { createRunHistory } from './components/run-history.js';
+import { createEventLog } from './components/event-log.js';
+import { api } from './api-client.js';
+import { createEventStream } from './event-stream.js';
+import { createRouter } from './router.js';
+import { createSettingsController } from './components/settings-controller.js';
+import { createI18n } from './i18n.js';
 
 /**
  * TradingAgents Web UI — Enhanced Application Script
@@ -64,16 +70,12 @@ const anthropicEffort = document.querySelector('#anthropicEffort');
 
 // ── State ───────────────────────────────────────────────────────────────────
 let currentRunId = null;
-let source       = null;
 let eventCount   = 0;
 let currentStatus = 'ready';
 let currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
 let configDefaults = null;
 let envStatus = null;
 let analystPrompts = [];
-const settingsStorageKey = 'tradingagents.web.settings';
-const uiLanguageStorageKey = 'tradingagents.web.uiLanguage';
-let activeLocale = 'en';
 const translations = {
   en: {
     pageTitle: 'TradingAgents — AI Market Intelligence',
@@ -466,6 +468,8 @@ const translations = {
     badgePremium: '优质',
   },
 };
+const i18n = createI18n({ catalog: translations, languageField: uiLanguage });
+const t = key => i18n.t(key);
 const modelPresets = {
   'minimax-cn': {
     quick: 'MiniMax-M3',
@@ -501,8 +505,9 @@ const modelPresets = {
   },
 };
 const providerManager = createProviderManager({
+  api,
   t,
-  locale: () => activeLocale,
+  locale: i18n.locale,
   configDefaults: () => configDefaults,
   envStatus: () => envStatus,
   setEnvStatus: value => { envStatus = value; },
@@ -511,20 +516,22 @@ const providerManager = createProviderManager({
 const agentTimeline = createAgentTimeline({
   element: agentList,
   t,
-  locale: () => activeLocale,
+  locale: i18n.locale,
   formatStatus,
   statusClassName,
 });
 const reportView = createReportViewer({
+  api,
   element: reportViewer,
   sectionSelect: reportSectionSelect,
   t,
-  locale: () => activeLocale,
+  locale: i18n.locale,
   formatAgentName,
 });
 const runHistory = createRunHistory({
+  api,
   element: historyList,
-  locale: () => activeLocale,
+  locale: i18n.locale,
   formatStatus,
   formatEventCount,
   onSelect: runId => selectHistoryRun(runId),
@@ -537,64 +544,81 @@ const runHistory = createRunHistory({
     resetToInitialState();
   },
 });
+const runtimeLog = createEventLog({
+  element: eventLog,
+  t,
+  locale: i18n.locale,
+  formatAgentName,
+  formatStatus,
+  formatStats,
+});
+const eventStream = createEventStream({
+  onEvent: handleRuntimeEvent,
+  onReconnect: () => runtimeLog.append('error', null, 'Event stream reconnecting'),
+});
+const router = createRouter({
+  elements: {
+    runControls,
+    runView,
+    settingsView,
+    providersView,
+    runButton: runViewButton,
+    settingsButton: settingsViewButton,
+    providersButton: providersViewButton,
+  },
+  getCurrentRunId: () => currentRunId,
+  onSelectRun: runId => selectHistoryRun(runId, { updateHash: false }),
+});
+const settings = createSettingsController({
+  form: settingsForm,
+  fields: {
+    llmProvider,
+    quickThinkLlm,
+    deepThinkLlm,
+    backendUrl,
+    outputLanguage,
+    customOutputLanguage,
+    researchDepth,
+    googleThinkingLevel,
+    openaiReasoningEffort,
+    anthropicEffort,
+  },
+  modelPresets,
+  onProviderChange: renderApiKeyStatus,
+});
 
 // ── Initialise date field ────────────────────────────────────────────────────
 document.querySelector('#analysisDate').value = new Date().toISOString().slice(0, 10);
 
 // Show empty-state placeholder in the report panel on load
-initializeLocale();
+i18n.initialize();
+refreshLocalizedUi();
 reportView.placeholder();
 loadConfigDefaults();
 loadEnvStatus();
 loadAnalystPrompts();
 
-runViewButton.addEventListener('click', () => showView('run'));
-settingsViewButton.addEventListener('click', () => showView('settings'));
+runViewButton.addEventListener('click', () => router.show('run'));
+settingsViewButton.addEventListener('click', () => router.show('settings'));
 providersViewButton.addEventListener('click', () => {
-  showView('providers');
+  router.show('providers');
   loadEnvStatus();
 });
 resetProviders.addEventListener('click', () => {
   providerManager.reset();
 });
-window.addEventListener('hashchange', handleHashRoute);
-handleHashRoute();
-
-settingsForm.addEventListener('input', saveSettings);
-settingsForm.addEventListener('change', saveSettings);
-researchDepth.addEventListener('input', saveSettings);
-researchDepth.addEventListener('change', saveSettings);
+router.handleHash();
 
 tickerSelect.addEventListener('change', updateTickerMode);
-outputLanguage.addEventListener('change', updateOutputLanguageMode);
 
 uiLanguage.addEventListener('change', () => {
-  saveUiLanguage(uiLanguage.value);
-  initializeLocale();
+  i18n.setLanguage(uiLanguage.value);
+  refreshLocalizedUi();
   renderDynamicLabels();
 });
 
 resetSettings.addEventListener('click', () => {
-  try {
-    window.localStorage.removeItem(settingsStorageKey);
-  } catch {
-    // Ignore storage failures; resetting the visible form is still useful.
-  }
-  if (configDefaults) {
-    applyConfigDefaults(configDefaults);
-    saveSettings();
-  }
-});
-
-llmProvider.addEventListener('change', () => {
-  const preset = modelPresets[llmProvider.value];
-  if (preset) {
-    quickThinkLlm.value = preset.quick;
-    deepThinkLlm.value = preset.deep;
-  }
-  updateProviderOptions();
-  renderApiKeyStatus();
-  saveSettings();
+  settings.reset(configDefaults);
 });
 
 // ── Form submit ──────────────────────────────────────────────────────────────
@@ -607,24 +631,17 @@ form.addEventListener('submit', async event => {
   setStatus('starting', 'running');
 
   try {
-    const response = await fetch('/api/runs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) throw new Error(await response.text());
-
-    const run      = await response.json();
+    const run = await api.startRun(payload);
     currentRunId   = run.run_id;
     runIdEl.textContent = shortId(run.run_id);
     setStatus(run.status, 'running');
     cancelButton.disabled = false;
-    setRunHash(run.run_id, true);
+    router.setRun(run.run_id, true);
     runHistory.refresh();
-    connectEvents(run.run_id);
+    eventStream.connect(run.run_id);
   } catch (error) {
     setStatus('failed_to_start', 'error');
-    appendEvent('error', null, error.message);
+    runtimeLog.append('error', null, error.message);
     setBusy(false);
   }
 });
@@ -632,27 +649,29 @@ form.addEventListener('submit', async event => {
 // ── Cancel button ────────────────────────────────────────────────────────────
 cancelButton.addEventListener('click', async () => {
   if (!currentRunId) return;
-  await fetch(`/api/runs/${currentRunId}/cancel`, { method: 'POST' });
+  await api.cancelRun(currentRunId);
   setStatus('cancel_requested', 'running');
   cancelButton.disabled = true;
 });
 
 // ── Clear log ────────────────────────────────────────────────────────────────
 clearLog.addEventListener('click', () => {
-  eventLog.replaceChildren();
+  runtimeLog.clear();
 });
 
 // ── Refresh history ──────────────────────────────────────────────────────────
 refreshHistory.addEventListener('click', () => runHistory.refresh());
 
 clearHistory.addEventListener('click', async () => {
-  const confirmMsg = activeLocale === 'zh' ? '您确定要清空所有运行历史数据吗？' : 'Are you sure you want to clear all history?';
+  const confirmMsg = i18n.locale() === 'zh' ? '您确定要清空所有运行历史数据吗？' : 'Are you sure you want to clear all history?';
   if (!confirm(confirmMsg)) return;
-  const res = await fetch('/api/runs', { method: 'DELETE' });
-  if (res.ok) {
+  try {
+    await api.clearRuns();
     window.location.hash = '';
     runHistory.refresh();
     resetToInitialState();
+  } catch {
+    // Keep the existing history visible when the request fails.
   }
 });
 
@@ -669,24 +688,20 @@ runHistory.refresh();
 
 async function loadConfigDefaults() {
   try {
-    const response = await fetch('/api/config/defaults');
-    if (!response.ok) return;
-    configDefaults = await response.json();
-    applyConfigDefaults(configDefaults);
-    applySavedSettings();
+    configDefaults = await api.getConfigDefaults();
+    settings.applyDefaults(configDefaults);
+    settings.applySaved();
     providerManager.load();
   } catch {
     // Keep the static HTML defaults when the API is unavailable.
-    applySavedSettings();
+    settings.applySaved();
     providerManager.load();
   }
 }
 
 async function loadEnvStatus() {
   try {
-    const response = await fetch('/api/config/env-status');
-    if (!response.ok) return;
-    envStatus = await response.json();
+    envStatus = await api.getEnvStatus();
     renderApiKeyStatus();
     providerManager.refresh();
   } catch {
@@ -697,9 +712,7 @@ async function loadEnvStatus() {
 async function loadAnalystPrompts() {
   if (!analystPromptList) return;
   try {
-    const response = await fetch('/api/config/analyst-prompts');
-    if (!response.ok) throw new Error(await response.text());
-    const payload = await response.json();
+    const payload = await api.getAnalystPrompts();
     analystPrompts = Array.isArray(payload.analysts) ? payload.analysts : [];
     renderAnalystPrompts();
   } catch {
@@ -708,90 +721,7 @@ async function loadAnalystPrompts() {
   }
 }
 
-function applyConfigDefaults(defaults) {
-  setFieldValue(llmProvider, defaults.llm_provider);
-  setFieldValue(quickThinkLlm, defaults.quick_think_llm);
-  setFieldValue(deepThinkLlm, defaults.deep_think_llm);
-  setFieldValue(backendUrl, defaults.backend_url);
-  setFieldValue(researchDepth, defaults.research_depth);
-  setFieldValue(googleThinkingLevel, defaults.google_thinking_level);
-  setFieldValue(openaiReasoningEffort, defaults.openai_reasoning_effort);
-  setFieldValue(anthropicEffort, defaults.anthropic_effort);
-  setOutputLanguageValue(defaults.output_language);
-  updateProviderOptions();
-}
-
-function setFieldValue(field, value) {
-  if (!field || value === undefined || value === null || value === '') return;
-  field.value = String(value);
-}
-
-function applySavedSettings() {
-  let saved;
-  try {
-    saved = JSON.parse(window.localStorage.getItem(settingsStorageKey) || 'null');
-  } catch {
-    return;
-  }
-  if (!saved) return;
-  setFieldValue(llmProvider, saved.llm_provider);
-  setFieldValue(quickThinkLlm, saved.quick_think_llm);
-  setFieldValue(deepThinkLlm, saved.deep_think_llm);
-  setFieldValue(backendUrl, saved.backend_url);
-  setOutputLanguageValue(saved.output_language);
-  setFieldValue(researchDepth, saved.research_depth);
-  setFieldValue(googleThinkingLevel, saved.google_thinking_level);
-  setFieldValue(openaiReasoningEffort, saved.openai_reasoning_effort);
-  setFieldValue(anthropicEffort, saved.anthropic_effort);
-  updateProviderOptions();
-}
-
-function initializeLocale() {
-  const selected = savedUiLanguage();
-  setFieldValue(uiLanguage, selected);
-  activeLocale = resolveLocale(selected);
-  applyTranslations();
-}
-
-function savedUiLanguage() {
-  try {
-    return window.localStorage.getItem(uiLanguageStorageKey) || 'auto';
-  } catch {
-    return 'auto';
-  }
-}
-
-function saveUiLanguage(value) {
-  try {
-    window.localStorage.setItem(uiLanguageStorageKey, value);
-  } catch {
-    // UI language persistence is optional.
-  }
-}
-
-function resolveLocale(value) {
-  if (value === 'zh' || value === 'en') return value;
-  return navigator.language?.toLowerCase().startsWith('zh') ? 'zh' : 'en';
-}
-
-function t(key) {
-  return translations[activeLocale]?.[key] ?? translations.en[key] ?? key;
-}
-
-function applyTranslations() {
-  document.documentElement.lang = activeLocale === 'zh' ? 'zh-CN' : 'en';
-  document.title = t('pageTitle');
-
-  document.querySelectorAll('[data-i18n]').forEach(element => {
-    element.textContent = t(element.dataset.i18n);
-  });
-  document.querySelectorAll('[data-i18n-title]').forEach(element => {
-    element.title = t(element.dataset.i18nTitle);
-  });
-  document.querySelectorAll('[data-i18n-placeholder]').forEach(element => {
-    element.placeholder = t(element.dataset.i18nPlaceholder);
-  });
-
+function refreshLocalizedUi() {
   if (!currentRunId) runIdEl.textContent = t('noRun');
   statusEl.textContent = formatStatus(currentStatus);
   updateEventCount();
@@ -814,7 +744,6 @@ function updateEventCount() {
 }
 
 function formatEventCount(count) {
-  if (activeLocale === 'zh') return `${count} ${t(count === 1 ? 'event' : 'events')}`;
   return `${count} ${t(count === 1 ? 'event' : 'events')}`;
 }
 
@@ -834,59 +763,12 @@ function formatStatus(status) {
   return status;
 }
 
-function formatEventType(type) {
-  const key = {
-    run_started: 'eventRunStarted',
-    message: 'eventMessage',
-    tool_call: 'eventToolCall',
-    agent_status: 'eventAgentStatus',
-    report_section: 'eventReportSection',
-    stats: 'eventStats',
-    run_completed: 'eventRunCompleted',
-    run_cancelled: 'eventRunCancelled',
-    error: 'eventError',
-  }[type];
-  return key ? t(key) : type.replace(/_/g, ' ');
-}
-
 function statusClassName(status) {
   return String(status || 'pending')
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, '_')
     .replace(/[^a-z0-9_]/g, '');
-}
-
-function currentSettings() {
-  return {
-    research_depth: Number.isFinite(Number(researchDepth.value)) && Number(researchDepth.value) > 0
-      ? Number(researchDepth.value)
-      : null,
-    llm_provider: llmProvider.value,
-    quick_think_llm: quickThinkLlm.value.trim() || null,
-    deep_think_llm: deepThinkLlm.value.trim() || null,
-    backend_url: backendUrl.value.trim() || null,
-    output_language: selectedOutputLanguage(),
-    google_thinking_level: googleThinkingLevel.value || null,
-    openai_reasoning_effort: openaiReasoningEffort.value || null,
-    anthropic_effort: anthropicEffort.value || null,
-  };
-}
-
-function updateProviderOptions() {
-  const provider = llmProvider.value;
-  document.querySelectorAll('.provider-option').forEach(element => {
-    element.hidden = true;
-  });
-  const activeClass = {
-    google: '.provider-google',
-    openai: '.provider-openai',
-    anthropic: '.provider-anthropic',
-  }[provider];
-  if (!activeClass) return;
-  document.querySelectorAll(activeClass).forEach(element => {
-    element.hidden = false;
-  });
 }
 
 function renderApiKeyStatus() {
@@ -984,92 +866,19 @@ function analystPromptTitle(promptInfo) {
     fundamentals: 'Fundamentals Analyst',
   };
   const title = titleMap[promptInfo.key] || promptInfo.title;
-  return formatAgentName(title, activeLocale);
-}
-
-function saveSettings() {
-  try {
-    window.localStorage.setItem(settingsStorageKey, JSON.stringify(currentSettings()));
-  } catch {
-    // Local persistence is optional; the visible form remains the source for this run.
-  }
-}
-
-function showView(view, updateHash = true) {
-  const settingsActive = view === 'settings';
-  const providersActive = view === 'providers';
-  const runActive = view === 'run';
-  
-  runControls.classList.toggle('hidden', settingsActive || providersActive);
-  runView.classList.toggle('hidden', settingsActive || providersActive);
-  settingsView.classList.toggle('hidden', !settingsActive);
-  providersView.classList.toggle('hidden', !providersActive);
-  
-  runControls.hidden = settingsActive || providersActive;
-  runView.hidden = settingsActive || providersActive;
-  settingsView.hidden = !settingsActive;
-  providersView.hidden = !providersActive;
-  
-  runViewButton.classList.toggle('active', runActive);
-  settingsViewButton.classList.toggle('active', settingsActive);
-  providersViewButton.classList.toggle('active', providersActive);
-
-  if (updateHash) {
-    if (settingsActive) {
-      window.location.hash = 'settings';
-    } else if (providersActive) {
-      window.location.hash = 'providers';
-    } else if (currentRunId) {
-      setRunHash(currentRunId);
-    } else {
-      window.history.replaceState(null, '', window.location.pathname);
-    }
-  }
-}
-
-function handleHashRoute() {
-  const hash = window.location.hash.slice(1);
-  if (hash === 'settings') {
-    showView('settings', false);
-    return;
-  }
-  if (hash === 'providers') {
-    showView('providers', false);
-    return;
-  }
-
-  if (hash.startsWith('run=')) {
-    const runId = decodeURIComponent(hash.slice(4));
-    showView('run', false);
-    if (runId && runId !== currentRunId) {
-      selectHistoryRun(runId, { updateHash: false });
-    }
-    return;
-  }
-
-  showView('run', false);
-}
-
-function setRunHash(runId, replace = false) {
-  const target = `#run=${encodeURIComponent(runId)}`;
-  if (window.location.hash === target) return;
-  if (replace) {
-    window.history.replaceState(null, '', target);
-  } else {
-    window.location.hash = target;
-  }
+  return formatAgentName(title, i18n.locale());
 }
 
 function buildPayload(data) {
   const selectedAnalysts = data.getAll('analysts');
-  const settings = currentSettings();
+  const runSettings = settings.current();
   const activeVendors = providerManager.current();
   return {
     ticker: selectedTicker(data),
     analysis_date: data.get('analysisDate'),
     asset_type: data.get('assetType'),
     selected_analysts: selectedAnalysts.length ? selectedAnalysts : ['market'],
-    ...settings,
+    ...runSettings,
     config_overrides: {
       data_vendors: activeVendors
     }
@@ -1091,32 +900,6 @@ function updateTickerMode() {
   if (custom) customTicker.focus();
 }
 
-function selectedOutputLanguage() {
-  const selected = outputLanguage.value;
-  if (selected !== '__custom') return selected;
-  return customOutputLanguage.value.trim() || 'Chinese';
-}
-
-function setOutputLanguageValue(value) {
-  if (!value) return;
-  const known = Array.from(outputLanguage.options).some(option => option.value === value);
-  if (known) {
-    outputLanguage.value = value;
-    customOutputLanguage.value = '';
-  } else {
-    outputLanguage.value = '__custom';
-    customOutputLanguage.value = value;
-  }
-  updateOutputLanguageMode();
-}
-
-function updateOutputLanguageMode() {
-  const custom = outputLanguage.value === '__custom';
-  customOutputLanguage.hidden = !custom;
-  customOutputLanguage.required = custom;
-  if (custom) customOutputLanguage.focus();
-}
-
 /** Return a short, displayable run ID (last 8 chars). */
 function shortId(id) {
   if (!id || id === t('noRun')) return id;
@@ -1124,50 +907,17 @@ function shortId(id) {
 }
 
 function resetRun() {
-  if (source) source.close();
-  source       = null;
+  eventStream.close();
   currentRunId = null;
   eventCount   = 0;
   currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
   agentTimeline.clear();
-  eventLog.replaceChildren();
+  runtimeLog.clear();
   reportView.reset();
   runIdEl.textContent       = t('noRun');
   updateEventCount();
   updateStats(currentStats);
   loadReport.disabled       = true;
-}
-
-// ── SSE connection ────────────────────────────────────────────────────────────
-function connectEvents(runId) {
-  if (source) source.close();
-  source = new EventSource(`/api/runs/${runId}/events`);
-  let streamErrorLogged = false;
-
-  const eventTypes = [
-    'run_started',
-    'message',
-    'tool_call',
-    'agent_status',
-    'report_section',
-    'stats',
-    'run_completed',
-    'run_cancelled',
-    'error',
-  ];
-
-  for (const type of eventTypes) {
-    source.addEventListener(type, ev =>
-      handleRuntimeEvent(type, JSON.parse(ev.data))
-    );
-  }
-
-  source.onerror = () => {
-    if (!streamErrorLogged) {
-      appendEvent('error', null, 'Event stream reconnecting');
-      streamErrorLogged = true;
-    }
-  };
 }
 
 function handleRuntimeEvent(type, event) {
@@ -1191,7 +941,7 @@ function handleRuntimeEvent(type, event) {
     setStatus('completed', 'done');
     loadReport.disabled = false;
     cancelButton.disabled = true;
-    appendEvent(type, event.agent, event.content?.decision ?? t('runCompleted'));
+    runtimeLog.append(type, event.agent, event.content?.decision ?? t('runCompleted'));
     reportView.load(currentRunId);
     runHistory.refresh();
     loadEnvStatus();
@@ -1202,7 +952,7 @@ function handleRuntimeEvent(type, event) {
   if (type === 'run_cancelled') {
     setStatus('cancelled', 'error');
     cancelButton.disabled = true;
-    appendEvent(type, event.agent, event.content?.message ?? t('runCancelled'));
+    runtimeLog.append(type, event.agent, event.content?.message ?? t('runCancelled'));
     runHistory.refresh();
     closeStream();
     return;
@@ -1211,25 +961,22 @@ function handleRuntimeEvent(type, event) {
   if (type === 'error') {
     setStatus('failed', 'error');
     cancelButton.disabled = true;
-    appendEvent(type, event.agent, event.content?.error ?? t('runFailed'));
+    runtimeLog.append(type, event.agent, event.content?.error ?? t('runFailed'));
     runHistory.refresh();
     closeStream();
     return;
   }
 
   if (type === 'run_started') setStatus('running', 'running');
-  appendEvent(type, event.agent, eventText(type, event.content));
+  runtimeLog.append(type, event.agent, runtimeLog.text(type, event.content));
 }
 
 function resetToInitialState() {
   currentRunId = null;
-  if (source) {
-    source.close();
-    source = null;
-  }
+  eventStream.close();
   setStatus('ready', 'ready');
   setBusy(false);
-  eventLog.replaceChildren();
+  runtimeLog.clear();
   reportView.reset({ showPlaceholder: false });
   agentTimeline.clear();
   llmCountEl.textContent = '--';
@@ -1241,16 +988,18 @@ function resetToInitialState() {
 
 async function selectHistoryRun(runId, options = {}) {
   if (options.updateHash !== false) {
-    setRunHash(runId);
+    router.setRun(runId);
     return;
   }
 
-  if (source) source.close();
-  source = null;
+  eventStream.close();
 
-  const response = await fetch(`/api/runs/${runId}`);
-  if (!response.ok) return;
-  const run = await response.json();
+  let run;
+  try {
+    run = await api.getRun(runId);
+  } catch {
+    return;
+  }
 
   currentRunId   = run.run_id;
   runIdEl.textContent      = shortId(run.run_id);
@@ -1262,52 +1011,10 @@ async function selectHistoryRun(runId, options = {}) {
   reportView.reset();
   loadReport.disabled      = !run.report_path;
   cancelButton.disabled    = !['pending', 'running'].includes(run.status);
-  eventLog.replaceChildren();
+  runtimeLog.clear();
 
-  connectEvents(run.run_id);
+  eventStream.connect(run.run_id);
   if (run.report_path) await reportView.load(run.run_id);
-}
-
-// ── Event log ─────────────────────────────────────────────────────────────────
-function appendEvent(type, agent, text) {
-  const item = document.createElement('article');
-  item.className = 'event';
-
-  const head = document.createElement('div');
-  head.className = 'event-head';
-
-  const badge = document.createElement('span');
-  badge.className = `event-type event-type-${type}`;
-  badge.textContent = formatEventType(type);
-
-  const agentSpan = document.createElement('span');
-  agentSpan.className = 'event-agent';
-  agentSpan.textContent = agent ? formatAgentName(agent, activeLocale) : t('system');
-
-  const time = document.createElement('span');
-  time.className = 'event-time';
-  time.textContent = new Date().toLocaleTimeString();
-
-  const body = document.createElement('div');
-  body.className = 'event-text';
-  body.textContent = text || '';
-
-  head.append(badge, agentSpan, time);
-  item.append(head, body);
-  eventLog.append(item);
-  eventLog.scrollTop = eventLog.scrollHeight;
-}
-
-function eventText(type, content) {
-  if (!content) return '';
-  if (typeof content === 'string') return content;
-  if (type === 'message')        return content.text || '';
-  if (type === 'tool_call')      return `${content.name || 'tool'}  ${JSON.stringify(content.args || {})}`;
-  if (type === 'report_section') return `${content.section || 'report'} ${t('reportUpdated')}`;
-  if (type === 'agent_status')   return formatStatus(content.status || '');
-  if (type === 'run_started')    return `${content.ticker} · ${content.analysis_date}`;
-  if (type === 'stats')          return formatStats(content);
-  return JSON.stringify(content);
 }
 
 function updateStats(stats = {}) {
@@ -1341,8 +1048,7 @@ function formatCompactNumber(value) {
 
 // ── Stream management ─────────────────────────────────────────────────────────
 function closeStream() {
-  if (source) source.close();
-  source = null;
+  eventStream.close();
   setBusy(false);
 }
 

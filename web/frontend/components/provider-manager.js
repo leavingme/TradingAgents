@@ -28,7 +28,7 @@ const FALLBACK_DEFAULTS = {
   prediction_markets: 'polymarket',
 };
 
-export function createProviderManager({ t, locale, configDefaults, envStatus, setEnvStatus, ohlcvSettingsBody }) {
+export function createProviderManager({ api, t, locale, configDefaults, envStatus, setEnvStatus, ohlcvSettingsBody }) {
   let state = {};
 
   function save() {
@@ -165,9 +165,7 @@ export function createProviderManager({ t, locale, configDefaults, envStatus, se
     button.classList.add('loading');
     button.title = t('vendorVerifying');
     try {
-      const response = await fetch(`/api/config/data-vendors/${encodeURIComponent(category)}/${encodeURIComponent(vendor)}/verify`, { method: 'POST' });
-      if (!response.ok) throw new Error(await response.text());
-      const result = await response.json();
+      const result = await api.verifyVendor(category, vendor);
       const environment = envStatus() || {};
       environment.vendor_verifications ||= {};
       environment.vendor_verifications[category] ||= {};

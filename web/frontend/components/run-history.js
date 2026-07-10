@@ -1,8 +1,11 @@
-export function createRunHistory({ element, locale, formatStatus, formatEventCount, onSelect, onDeleted }) {
+export function createRunHistory({ api, element, locale, formatStatus, formatEventCount, onSelect, onDeleted }) {
   async function refresh() {
-    const response = await fetch('/api/runs');
-    if (!response.ok) return;
-    const runs = await response.json();
+    let runs;
+    try {
+      runs = await api.listRuns();
+    } catch {
+      return;
+    }
     element.replaceChildren(...runs.slice(0, 20).map(renderItem));
   }
 
@@ -38,8 +41,11 @@ export function createRunHistory({ element, locale, formatStatus, formatEventCou
       event.stopPropagation();
       const message = locale() === 'zh' ? '您确定要删除此条运行记录吗？' : 'Are you sure you want to delete this run?';
       if (!confirm(message)) return;
-      const response = await fetch(`/api/runs/${run.run_id}`, { method: 'DELETE' });
-      if (!response.ok) return;
+      try {
+        await api.deleteRun(run.run_id);
+      } catch {
+        return;
+      }
       onDeleted(run.run_id);
       await refresh();
     });

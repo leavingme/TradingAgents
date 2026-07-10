@@ -23,7 +23,7 @@ const SECTION_TITLES = {
   },
 };
 
-export function createReportViewer({ element, sectionSelect, t, locale, formatAgentName }) {
+export function createReportViewer({ api, element, sectionSelect, t, locale, formatAgentName }) {
   const sections = new Map();
   let selected = 'all';
 
@@ -72,12 +72,11 @@ export function createReportViewer({ element, sectionSelect, t, locale, formatAg
 
   async function load(runId) {
     if (!runId) return;
-    const response = await fetch(`/api/runs/${runId}/report`);
-    if (!response.ok) {
+    try {
+      renderMarkdown(await api.getReport(runId));
+    } catch {
       placeholder(t('reportUnavailable'));
-      return;
     }
-    renderMarkdown(await response.text());
   }
 
   function renderMarkdown(text) {

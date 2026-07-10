@@ -1,3 +1,8 @@
+import { createProviderManager } from './components/provider-manager.js';
+import { createAgentTimeline, formatAgentName } from './components/agent-timeline.js';
+import { createReportViewer } from './components/report-viewer.js';
+import { createRunHistory } from './components/run-history.js';
+
 /**
  * TradingAgents Web UI — Enhanced Application Script
  *
@@ -63,9 +68,6 @@ let source       = null;
 let eventCount   = 0;
 let currentStatus = 'ready';
 let currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
-const agents     = new Map();
-const reportSections = new Map();
-let selectedReportSection = 'all';
 let configDefaults = null;
 let envStatus = null;
 let analystPrompts = [];
@@ -498,109 +500,50 @@ const modelPresets = {
     deep: 'MiniMax-M3',
   },
 };
-const agentTeams = [
-  {
-    key: 'analystTeam',
-    agents: ['Market Analyst', 'Sentiment Analyst', 'News Analyst', 'Fundamentals Analyst'],
+const providerManager = createProviderManager({
+  t,
+  locale: () => activeLocale,
+  configDefaults: () => configDefaults,
+  envStatus: () => envStatus,
+  setEnvStatus: value => { envStatus = value; },
+  ohlcvSettingsBody,
+});
+const agentTimeline = createAgentTimeline({
+  element: agentList,
+  t,
+  locale: () => activeLocale,
+  formatStatus,
+  statusClassName,
+});
+const reportView = createReportViewer({
+  element: reportViewer,
+  sectionSelect: reportSectionSelect,
+  t,
+  locale: () => activeLocale,
+  formatAgentName,
+});
+const runHistory = createRunHistory({
+  element: historyList,
+  locale: () => activeLocale,
+  formatStatus,
+  formatEventCount,
+  onSelect: runId => selectHistoryRun(runId),
+  onDeleted: runId => {
+    const hashRunId = window.location.hash.slice(1).startsWith('run=')
+      ? decodeURIComponent(window.location.hash.slice(5))
+      : null;
+    if (hashRunId !== runId) return;
+    window.location.hash = '';
+    resetToInitialState();
   },
-  {
-    key: 'researchTeam',
-    agents: ['Bull Researcher', 'Bear Researcher', 'Research Manager'],
-  },
-  {
-    key: 'tradingTeam',
-    agents: ['Trader'],
-  },
-  {
-    key: 'riskManagement',
-    agents: ['Aggressive Analyst', 'Neutral Analyst', 'Conservative Analyst'],
-  },
-  {
-    key: 'portfolioManagement',
-    agents: ['Portfolio Manager'],
-  },
-];
-const reportSectionOrder = [
-  'market_report',
-  'sentiment_report',
-  'news_report',
-  'fundamentals_report',
-  'bull_researcher',
-  'bear_researcher',
-  'investment_plan',
-  'trader_investment_plan',
-  'aggressive_analyst',
-  'conservative_analyst',
-  'neutral_analyst',
-  'final_trade_decision',
-];
-const reportSectionTitles = {
-  en: {
-    market_report: 'Market Analyst',
-    sentiment_report: 'Sentiment Analyst',
-    news_report: 'News Analyst',
-    fundamentals_report: 'Fundamentals Analyst',
-    bull_researcher: 'Bull Researcher',
-    bear_researcher: 'Bear Researcher',
-    investment_plan: 'Research Team Decision',
-    trader_investment_plan: 'Trader',
-    aggressive_analyst: 'Aggressive Analyst',
-    conservative_analyst: 'Conservative Analyst',
-    neutral_analyst: 'Neutral Analyst',
-    final_trade_decision: 'Portfolio Manager',
-  },
-  zh: {
-    market_report: '市场分析师',
-    sentiment_report: '情绪分析师',
-    news_report: '新闻分析师',
-    fundamentals_report: '基本面分析师',
-    bull_researcher: '看多研究员',
-    bear_researcher: '看空研究员',
-    investment_plan: '研究团队决策',
-    trader_investment_plan: '交易员计划',
-    aggressive_analyst: '激进风险分析师',
-    conservative_analyst: '保守风险分析师',
-    neutral_analyst: '中性风险分析师',
-    final_trade_decision: '组合经理决策',
-  },
-};
-const agentDisplayNames = {
-  en: {
-    'Market Analyst': 'Market Analyst',
-    'Sentiment Analyst': 'Sentiment Analyst',
-    'News Analyst': 'News Analyst',
-    'Fundamentals Analyst': 'Fundamentals Analyst',
-    'Bull Researcher': 'Bull Researcher',
-    'Bear Researcher': 'Bear Researcher',
-    'Research Manager': 'Research Manager',
-    Trader: 'Trader',
-    'Aggressive Analyst': 'Aggressive Analyst',
-    'Neutral Analyst': 'Neutral Analyst',
-    'Conservative Analyst': 'Conservative Analyst',
-    'Portfolio Manager': 'Portfolio Manager',
-  },
-  zh: {
-    'Market Analyst': '市场分析师',
-    'Sentiment Analyst': '情绪分析师',
-    'News Analyst': '新闻分析师',
-    'Fundamentals Analyst': '基本面分析师',
-    'Bull Researcher': '看多研究员',
-    'Bear Researcher': '看空研究员',
-    'Research Manager': '研究经理',
-    Trader: '交易员',
-    'Aggressive Analyst': '激进风险分析师',
-    'Neutral Analyst': '中性风险分析师',
-    'Conservative Analyst': '保守风险分析师',
-    'Portfolio Manager': '组合经理',
-  },
-};
+});
 
 // ── Initialise date field ────────────────────────────────────────────────────
 document.querySelector('#analysisDate').value = new Date().toISOString().slice(0, 10);
 
 // Show empty-state placeholder in the report panel on load
 initializeLocale();
-showReportPlaceholder();
+reportView.placeholder();
 loadConfigDefaults();
 loadEnvStatus();
 loadAnalystPrompts();
@@ -612,10 +555,7 @@ providersViewButton.addEventListener('click', () => {
   loadEnvStatus();
 });
 resetProviders.addEventListener('click', () => {
-  try {
-    window.localStorage.removeItem(providersStorageKey);
-  } catch {}
-  loadProviders();
+  providerManager.reset();
 });
 window.addEventListener('hashchange', handleHashRoute);
 handleHashRoute();
@@ -680,7 +620,7 @@ form.addEventListener('submit', async event => {
     setStatus(run.status, 'running');
     cancelButton.disabled = false;
     setRunHash(run.run_id, true);
-    refreshRunHistory();
+    runHistory.refresh();
     connectEvents(run.run_id);
   } catch (error) {
     setStatus('failed_to_start', 'error');
@@ -703,7 +643,7 @@ clearLog.addEventListener('click', () => {
 });
 
 // ── Refresh history ──────────────────────────────────────────────────────────
-refreshHistory.addEventListener('click', refreshRunHistory);
+refreshHistory.addEventListener('click', () => runHistory.refresh());
 
 clearHistory.addEventListener('click', async () => {
   const confirmMsg = activeLocale === 'zh' ? '您确定要清空所有运行历史数据吗？' : 'Are you sure you want to clear all history?';
@@ -711,7 +651,7 @@ clearHistory.addEventListener('click', async () => {
   const res = await fetch('/api/runs', { method: 'DELETE' });
   if (res.ok) {
     window.location.hash = '';
-    refreshRunHistory();
+    runHistory.refresh();
     resetToInitialState();
   }
 });
@@ -719,16 +659,11 @@ clearHistory.addEventListener('click', async () => {
 // ── Load report ──────────────────────────────────────────────────────────────
 loadReport.addEventListener('click', async () => {
   if (!currentRunId) return;
-  await loadRunReport(currentRunId);
-});
-
-reportSectionSelect.addEventListener('change', () => {
-  selectedReportSection = reportSectionSelect.value;
-  renderLiveReport();
+  await reportView.load(currentRunId);
 });
 
 // Load run history on startup
-refreshRunHistory();
+runHistory.refresh();
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -739,11 +674,11 @@ async function loadConfigDefaults() {
     configDefaults = await response.json();
     applyConfigDefaults(configDefaults);
     applySavedSettings();
-    loadProviders();
+    providerManager.load();
   } catch {
     // Keep the static HTML defaults when the API is unavailable.
     applySavedSettings();
-    loadProviders();
+    providerManager.load();
   }
 }
 
@@ -753,11 +688,7 @@ async function loadEnvStatus() {
     if (!response.ok) return;
     envStatus = await response.json();
     renderApiKeyStatus();
-    if (providersState && typeof providersState === 'object' && Object.keys(providersState).length > 0) {
-      Object.keys(availableCategoryVendors).forEach(cat => {
-        renderCategoryProviders(cat);
-      });
-    }
+    providerManager.refresh();
   } catch {
     // API key status is informational; runs still use server-side env config.
   }
@@ -867,15 +798,15 @@ function applyTranslations() {
   updateStats(currentStats);
   renderApiKeyStatus();
   renderAnalystPrompts();
-  if (reportViewer.querySelector('.report-empty')) showReportPlaceholder();
+  providerManager.refresh();
+  reportView.refresh();
 }
 
 function renderDynamicLabels() {
   updateEventCount();
-  updateAgentList();
-  updateReportSectionOptions();
-  if (reportSections.size) renderLiveReport();
-  refreshRunHistory();
+  agentTimeline.render();
+  reportView.refresh();
+  runHistory.refresh();
 }
 
 function updateEventCount() {
@@ -1053,7 +984,7 @@ function analystPromptTitle(promptInfo) {
     fundamentals: 'Fundamentals Analyst',
   };
   const title = titleMap[promptInfo.key] || promptInfo.title;
-  return agentDisplayNames[activeLocale]?.[title] ?? title;
+  return formatAgentName(title, activeLocale);
 }
 
 function saveSettings() {
@@ -1132,7 +1063,7 @@ function setRunHash(runId, replace = false) {
 function buildPayload(data) {
   const selectedAnalysts = data.getAll('analysts');
   const settings = currentSettings();
-  const activeVendors = currentProviders();
+  const activeVendors = providerManager.current();
   return {
     ticker: selectedTicker(data),
     analysis_date: data.get('analysisDate'),
@@ -1198,13 +1129,9 @@ function resetRun() {
   currentRunId = null;
   eventCount   = 0;
   currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
-  agents.clear();
-  reportSections.clear();
-  selectedReportSection = 'all';
+  agentTimeline.clear();
   eventLog.replaceChildren();
-  agentList.replaceChildren();
-  updateReportSectionOptions();
-  showReportPlaceholder();
+  reportView.reset();
   runIdEl.textContent       = t('noRun');
   updateEventCount();
   updateStats(currentStats);
@@ -1248,11 +1175,11 @@ function handleRuntimeEvent(type, event) {
   updateEventCount();
 
   if (type === 'agent_status' && event.agent) {
-    updateAgent(event.agent, event.content?.status ?? 'pending');
+    agentTimeline.update(event.agent, event.content?.status ?? 'pending');
   }
 
   if (type === 'report_section') {
-    updateReportSection(event.content);
+    reportView.updateSection(event.content);
   }
 
   if (type === 'stats') {
@@ -1265,8 +1192,8 @@ function handleRuntimeEvent(type, event) {
     loadReport.disabled = false;
     cancelButton.disabled = true;
     appendEvent(type, event.agent, event.content?.decision ?? t('runCompleted'));
-    loadRunReport(currentRunId);
-    refreshRunHistory();
+    reportView.load(currentRunId);
+    runHistory.refresh();
     loadEnvStatus();
     closeStream();
     return;
@@ -1276,7 +1203,7 @@ function handleRuntimeEvent(type, event) {
     setStatus('cancelled', 'error');
     cancelButton.disabled = true;
     appendEvent(type, event.agent, event.content?.message ?? t('runCancelled'));
-    refreshRunHistory();
+    runHistory.refresh();
     closeStream();
     return;
   }
@@ -1285,140 +1212,13 @@ function handleRuntimeEvent(type, event) {
     setStatus('failed', 'error');
     cancelButton.disabled = true;
     appendEvent(type, event.agent, event.content?.error ?? t('runFailed'));
-    refreshRunHistory();
+    runHistory.refresh();
     closeStream();
     return;
   }
 
   if (type === 'run_started') setStatus('running', 'running');
   appendEvent(type, event.agent, eventText(type, event.content));
-}
-
-// ── Agent timeline ────────────────────────────────────────────────────────────
-function updateAgent(name, status) {
-  agents.set(name, status);
-  updateAgentList();
-}
-
-function updateAgentList() {
-  const rows = [renderAgentHeader()];
-  const rendered = new Set();
-
-  for (const team of agentTeams) {
-    const activeAgents = team.agents.filter(agent => agents.has(agent));
-    activeAgents.forEach((agent, index) => {
-      rendered.add(agent);
-      rows.push(renderAgentRow(index === 0 ? t(team.key) : '', agent, agents.get(agent)));
-    });
-  }
-
-  const otherAgents = Array.from(agents.keys()).filter(agent => !rendered.has(agent));
-  otherAgents.forEach((agent, index) => {
-    rows.push(renderAgentRow(index === 0 ? t('otherTeam') : '', agent, agents.get(agent)));
-  });
-
-  agentList.replaceChildren(...rows);
-}
-
-function renderAgentHeader() {
-  const item = document.createElement('li');
-  item.className = 'agent-row agent-row-header';
-  item.append(
-    agentCell(t('teamColumn'), 'agent-team'),
-    agentCell(t('agentColumn'), 'agent-name'),
-    agentCell(t('statusColumn'), 'agent-status'),
-  );
-  return item;
-}
-
-function renderAgentRow(teamName, agent, status) {
-  const item = document.createElement('li');
-  item.className = `agent-row status-${statusClassName(status)}`;
-
-  const team = agentCell(teamName, 'agent-team');
-  const name = agentCell('', 'agent-name');
-  const dot = document.createElement('span');
-  dot.className = 'dot';
-  const label = document.createElement('span');
-  label.textContent = formatAgentName(agent);
-  name.append(dot, label);
-
-  const state = agentCell(formatStatus(status), 'agent-status');
-  item.append(team, name, state);
-  return item;
-}
-
-function agentCell(text, className) {
-  const cell = document.createElement('span');
-  cell.className = className;
-  cell.textContent = text;
-  return cell;
-}
-
-/** Convert snake_case agent names to Title Case for display. */
-function formatAgentName(name) {
-  const displayName = agentDisplayNames[activeLocale]?.[name] ?? agentDisplayNames.en[name];
-  if (displayName) return displayName;
-  return name
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
-}
-
-// ── Run history ───────────────────────────────────────────────────────────────
-async function refreshRunHistory() {
-  const response = await fetch('/api/runs');
-  if (!response.ok) return;
-  const runs = await response.json();
-  historyList.replaceChildren(...runs.slice(0, 20).map(renderHistoryItem));
-}
-
-function renderHistoryItem(run) {
-  const item = document.createElement('li');
-
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.textContent = `${run.ticker}  ·  ${run.analysis_date}`;
-  button.addEventListener('click', () => selectHistoryRun(run.run_id));
-
-  const meta = document.createElement('div');
-  meta.className = 'history-meta';
-
-  const statusBadge = document.createElement('span');
-  statusBadge.className = `history-status ${run.status}`;
-  statusBadge.textContent = formatStatus(run.status);
-
-  const count = document.createElement('span');
-  count.textContent = formatEventCount(run.event_count);
-
-  const deleteBtn = document.createElement('button');
-  deleteBtn.type = 'button';
-  deleteBtn.className = 'btn-icon delete-run-btn';
-  deleteBtn.title = activeLocale === 'zh' ? '删除运行记录' : 'Delete run';
-  deleteBtn.innerHTML = `
-    <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-      <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5Zm-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5ZM4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06Zm6.53-.06a.5.5 0 0 0-.51.49l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.488-.55ZM1.962 3.5l.847 10.59a1 1 0 0 0 .997.91h6.23a1 1 0 0 0 .997-.91L11.892 3.5H1.962Z"/>
-    </svg>
-  `;
-  deleteBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const confirmMsg = activeLocale === 'zh' ? '您确定要删除此条运行记录吗？' : 'Are you sure you want to delete this run?';
-    if (!confirm(confirmMsg)) return;
-    const res = await fetch(`/api/runs/${run.run_id}`, { method: 'DELETE' });
-    if (res.ok) {
-      const currentHashRunId = window.location.hash.slice(1).startsWith('run=')
-        ? decodeURIComponent(window.location.hash.slice(5))
-        : null;
-      if (currentHashRunId === run.run_id) {
-        window.location.hash = '';
-        resetToInitialState();
-      }
-      refreshRunHistory();
-    }
-  });
-
-  meta.append(statusBadge, count, deleteBtn);
-  item.append(button, meta);
-  return item;
 }
 
 function resetToInitialState() {
@@ -1430,9 +1230,8 @@ function resetToInitialState() {
   setStatus('ready', 'ready');
   setBusy(false);
   eventLog.replaceChildren();
-  reportViewer.replaceChildren();
-  reportSectionSelect.innerHTML = '';
-  agentList.replaceChildren();
+  reportView.reset({ showPlaceholder: false });
+  agentTimeline.clear();
   llmCountEl.textContent = '--';
   toolCountEl.textContent = '--';
   tokenCountEl.textContent = '--';
@@ -1460,15 +1259,13 @@ async function selectHistoryRun(runId, options = {}) {
   currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
   updateEventCount();
   updateStats(currentStats);
-  reportSections.clear();
-  selectedReportSection = 'all';
-  updateReportSectionOptions();
+  reportView.reset();
   loadReport.disabled      = !run.report_path;
   cancelButton.disabled    = !['pending', 'running'].includes(run.status);
   eventLog.replaceChildren();
 
   connectEvents(run.run_id);
-  if (run.report_path) await loadRunReport(run.run_id);
+  if (run.report_path) await reportView.load(run.run_id);
 }
 
 // ── Event log ─────────────────────────────────────────────────────────────────
@@ -1485,7 +1282,7 @@ function appendEvent(type, agent, text) {
 
   const agentSpan = document.createElement('span');
   agentSpan.className = 'event-agent';
-  agentSpan.textContent = agent ? formatAgentName(agent) : t('system');
+  agentSpan.textContent = agent ? formatAgentName(agent, activeLocale) : t('system');
 
   const time = document.createElement('span');
   time.className = 'event-time';
@@ -1542,109 +1339,6 @@ function formatCompactNumber(value) {
   return String(value);
 }
 
-// ── Report viewer ─────────────────────────────────────────────────────────────
-function updateReportSection(content) {
-  if (!content || typeof content !== 'object') return;
-  const section = content.section;
-  const text = content.text;
-  if (!section || !text) return;
-  reportSections.set(section, text);
-  selectedReportSection = section;
-  updateReportSectionOptions();
-  renderLiveReport();
-}
-
-function renderLiveReport() {
-  const sections = orderedReportSections();
-  if (!sections.length) {
-    showReportPlaceholder();
-    return;
-  }
-
-  const selectedSections = selectedReportSection === 'all'
-    ? sections
-    : sections.filter(([section]) => section === selectedReportSection);
-  const markdown = selectedReportSection === 'all'
-    ? [
-        `# ${t('liveReportTitle')}`,
-        ...selectedSections.map(([section, text]) => `\n\n## ${reportSectionTitle(section)}\n\n${text}`),
-      ].join('')
-    : selectedSections.map(([section, text]) => `# ${reportSectionTitle(section)}\n\n${text}`).join('');
-  renderMarkdown(markdown);
-}
-
-function updateReportSectionOptions() {
-  const current = selectedReportSection;
-  const options = [
-    optionElement('all', t('reportAll')),
-    ...orderedReportSections().map(([section]) => optionElement(section, reportSectionTitle(section))),
-  ];
-  reportSectionSelect.replaceChildren(...options);
-  reportSectionSelect.disabled = reportSections.size === 0;
-  reportSectionSelect.value = reportSections.has(current) || current === 'all' ? current : 'all';
-}
-
-function optionElement(value, label) {
-  const option = document.createElement('option');
-  option.value = value;
-  option.textContent = label;
-  return option;
-}
-
-function orderedReportSections() {
-  const ordered = reportSectionOrder
-    .filter(section => reportSections.has(section))
-    .map(section => [section, reportSections.get(section)]);
-  const known = new Set(reportSectionOrder);
-  const extra = Array.from(reportSections.entries()).filter(([section]) => !known.has(section));
-  return ordered.concat(extra);
-}
-
-function reportSectionTitle(section) {
-  return reportSectionTitles[activeLocale]?.[section]
-    ?? reportSectionTitles.en[section]
-    ?? formatAgentName(section);
-}
-
-async function loadRunReport(runId) {
-  if (!runId) return;
-  const response = await fetch(`/api/runs/${runId}/report`);
-  if (!response.ok) {
-    reportViewer.innerHTML = '';
-    showReportPlaceholder(t('reportUnavailable'));
-    return;
-  }
-  const text = await response.text();
-  renderMarkdown(text);
-}
-
-function renderMarkdown(text) {
-  // Render Markdown if marked.js is available, otherwise fall back to pre-text
-  if (typeof marked !== 'undefined') {
-    reportViewer.innerHTML = marked.parse(text);
-  } else {
-    const pre = document.createElement('pre');
-    pre.textContent = text;
-    reportViewer.innerHTML = '';
-    reportViewer.appendChild(pre);
-  }
-}
-
-function showReportPlaceholder(message = t('reportPlaceholder')) {
-  reportViewer.innerHTML = `
-    <div class="report-empty">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-        <line x1="16" y1="13" x2="8" y2="13"></line>
-        <line x1="16" y1="17" x2="8" y2="17"></line>
-        <polyline points="10 9 9 9 8 9"></polyline>
-      </svg>
-      <p>${message}</p>
-    </div>
-  `;
-}
-
 // ── Stream management ─────────────────────────────────────────────────────────
 function closeStream() {
   if (source) source.close();
@@ -1669,289 +1363,4 @@ function statusClass(status) {
   if (status === 'running')   return 'running';
   if (status === 'failed' || status === 'cancelled') return 'error';
   return 'ready';
-}
-
-// ── Capability Providers Management ──────────────────────────────────────────
-const providersStorageKey = 'tradingagents.web.providers';
-let providersState = {};
-
-const availableCategoryVendors = {
-  core_stock_apis: ["westock", "longbridge_mcp", "longbridge", "alpha_vantage"],
-  technical_indicators: ["westock", "longbridge_mcp", "longbridge", "alpha_vantage"],
-  fundamental_data: ["westock", "longbridge_mcp", "longbridge", "alpha_vantage"],
-  news_data: ["westock", "duckduckgo", "alpha_vantage"],
-  macro_data: ["fred"],
-  prediction_markets: ["polymarket"],
-};
-
-const providerMeta = {
-  westock: { name: "Westock" },
-  longbridge_mcp: { name: "Longbridge MCP" },
-  longbridge: { name: "Longbridge CLI" },
-  alpha_vantage: { name: "Alpha Vantage" },
-  duckduckgo: { name: "DuckDuckGo" },
-  fred: { name: "FRED" },
-  polymarket: { name: "Polymarket" },
-};
-
-function saveProviders() {
-  try {
-    window.localStorage.setItem(providersStorageKey, JSON.stringify(providersState));
-  } catch {
-    // Local persistence is optional
-  }
-}
-
-function parseCategoryDefault(category, defaultStr) {
-  const defaultsList = defaultStr ? defaultStr.split(',').map(s => s.trim()).filter(Boolean) : [];
-  const result = [];
-  
-  defaultsList.forEach(v => {
-    if (availableCategoryVendors[category].includes(v)) {
-      result.push({ id: v, enabled: true });
-    }
-  });
-  
-  availableCategoryVendors[category].forEach(v => {
-    if (!defaultsList.includes(v)) {
-      result.push({ id: v, enabled: false });
-    }
-  });
-  
-  return result;
-}
-
-function normalizeCategoryProviders(category, rows) {
-  const allowed = availableCategoryVendors[category] || [];
-  const normalized = [];
-  const seen = new Set();
-
-  (Array.isArray(rows) ? rows : []).forEach(row => {
-    const id = row?.id;
-    if (!allowed.includes(id) || seen.has(id)) return;
-    normalized.push({ id, enabled: row.enabled !== false });
-    seen.add(id);
-  });
-
-  allowed.forEach(id => {
-    if (!seen.has(id)) normalized.push({ id, enabled: false });
-  });
-
-  return normalized;
-}
-
-function loadProviders() {
-  let saved = null;
-  try {
-    saved = JSON.parse(window.localStorage.getItem(providersStorageKey) || 'null');
-  } catch {}
-  
-  if (saved && typeof saved === 'object') {
-    providersState = {};
-    Object.keys(availableCategoryVendors).forEach(cat => {
-      providersState[cat] = normalizeCategoryProviders(cat, saved[cat]);
-    });
-  } else {
-    providersState = {};
-    const defaultDataVendors = configDefaults?.data_vendors || {
-      core_stock_apis: "westock, longbridge_mcp, longbridge",
-      technical_indicators: "westock, longbridge_mcp, longbridge",
-      fundamental_data: "westock, longbridge_mcp, longbridge",
-      news_data: "westock, duckduckgo, alpha_vantage",
-      macro_data: "fred",
-      prediction_markets: "polymarket"
-    };
-    
-    Object.keys(availableCategoryVendors).forEach(cat => {
-      providersState[cat] = parseCategoryDefault(cat, defaultDataVendors[cat]);
-    });
-  }
-  
-  Object.keys(availableCategoryVendors).forEach(cat => {
-    renderCategoryProviders(cat);
-  });
-  renderOhlcvSettingsTable();
-}
-
-function renderCategoryProviders(category) {
-  const container = document.querySelector(`#list_${category}`);
-  if (!container) return;
-  
-  const vendors = providersState[category];
-  container.innerHTML = '';
-  
-  vendors.forEach((v, index) => {
-    const li = document.createElement('li');
-    li.className = `provider-item${v.enabled ? '' : ' disabled'}`;
-    li.dataset.vendor = v.id;
-    li.dataset.index = index;
-    
-    const meta = providerMeta[v.id] || { name: v.id };
-    const verification = envStatus?.vendor_verifications?.[category]?.[v.id];
-    const verificationState = verification?.status || 'unverified';
-    let badgeText = '';
-    let badgeClass = '';
-    
-    if (envStatus && envStatus.data_vendors && envStatus.data_vendors[v.id]) {
-      const status = envStatus.data_vendors[v.id];
-      const isConfigured = status.configured;
-      if (status.required) {
-        badgeText = isConfigured ? t('apiKeyConfigured') : t('apiKeyMissing');
-        badgeClass = isConfigured ? 'configured' : 'missing';
-      } else {
-        badgeText = t('apiKeyNotRequired');
-        badgeClass = 'optional';
-      }
-    } else {
-      badgeText = t('apiKeyNotRequired');
-      badgeClass = 'optional';
-    }
-    
-    li.innerHTML = `
-      <div class="provider-item-left">
-        <input type="checkbox" class="provider-enable-checkbox" ${v.enabled ? 'checked' : ''} />
-        <span class="provider-identity">
-          <span class="provider-name">${meta.name}</span>
-          <span class="provider-verification-detail" title="${escapeHtml(verification?.detail || '')}">${escapeHtml(formatVendorVerification(verification))}</span>
-        </span>
-      </div>
-      <div class="provider-item-right">
-        <span class="vendor-health-badge ${verificationState}">${escapeHtml(formatVendorHealth(verificationState))}</span>
-        <span class="env-status-badge ${badgeClass}">${badgeText}</span>
-        <button type="button" class="btn-verify-vendor" title="${t('vendorVerify')}" aria-label="${t('vendorVerify')}">↻</button>
-        <div class="provider-order-buttons">
-          <button type="button" class="btn-order btn-order-up" title="Move Up" ${index === 0 ? 'disabled' : ''}>▲</button>
-          <button type="button" class="btn-order btn-order-down" title="Move Down" ${index === vendors.length - 1 ? 'disabled' : ''}>▼</button>
-        </div>
-      </div>
-    `;
-    
-    const checkbox = li.querySelector('.provider-enable-checkbox');
-    checkbox.addEventListener('change', () => {
-      v.enabled = checkbox.checked;
-      li.classList.toggle('disabled', !v.enabled);
-      saveProviders();
-    });
-
-    const verifyButton = li.querySelector('.btn-verify-vendor');
-    verifyButton.addEventListener('click', async () => {
-      verifyButton.disabled = true;
-      verifyButton.classList.add('loading');
-      verifyButton.title = t('vendorVerifying');
-      try {
-        const response = await fetch(`/api/config/data-vendors/${encodeURIComponent(category)}/${encodeURIComponent(v.id)}/verify`, {
-          method: 'POST',
-        });
-        if (!response.ok) throw new Error(await response.text());
-        const result = await response.json();
-        envStatus = envStatus || {};
-        envStatus.vendor_verifications = envStatus.vendor_verifications || {};
-        envStatus.vendor_verifications[category] = envStatus.vendor_verifications[category] || {};
-        envStatus.vendor_verifications[category][v.id] = result;
-      } catch (error) {
-        console.error('Vendor verification failed', error);
-      } finally {
-        renderCategoryProviders(category);
-      }
-    });
-    
-    const upBtn = li.querySelector('.btn-order-up');
-    upBtn.addEventListener('click', () => {
-      if (index > 0) {
-        const temp = vendors[index];
-        vendors[index] = vendors[index - 1];
-        vendors[index - 1] = temp;
-        saveProviders();
-        renderCategoryProviders(category);
-      }
-    });
-    
-    const downBtn = li.querySelector('.btn-order-down');
-    downBtn.addEventListener('click', () => {
-      if (index < vendors.length - 1) {
-        const temp = vendors[index];
-        vendors[index] = vendors[index + 1];
-        vendors[index + 1] = temp;
-        saveProviders();
-        renderCategoryProviders(category);
-      }
-    });
-    
-    container.appendChild(li);
-  });
-
-  if (category === 'core_stock_apis') {
-    renderOhlcvSettingsTable();
-  }
-}
-
-function formatVendorHealth(status) {
-  return {
-    available: t('vendorAvailable'),
-    unavailable: t('vendorUnavailable'),
-    no_data: t('vendorNoData'),
-    rate_limited: t('vendorRateLimited'),
-    not_configured: t('vendorNotConfigured'),
-    unverified: t('vendorNeverVerified'),
-  }[status] || t('vendorUnavailable');
-}
-
-function formatVendorVerification(verification) {
-  if (!verification?.verified_at) return t('vendorNeverVerified');
-  const source = verification.source === 'manual'
-    ? t('vendorVerifiedManual')
-    : t('vendorVerifiedAnalysis');
-  const time = new Intl.DateTimeFormat(activeLocale === 'zh' ? 'zh-CN' : 'en', {
-    dateStyle: 'short',
-    timeStyle: 'medium',
-  }).format(new Date(verification.verified_at));
-  const latency = Number.isFinite(verification.latency_ms) ? ` · ${verification.latency_ms} ms` : '';
-  return `${source} · ${time}${latency}`;
-}
-
-function renderOhlcvSettingsTable() {
-  if (!ohlcvSettingsBody) return;
-  const configuredRows = providersState.core_stock_apis || availableCategoryVendors.core_stock_apis.map(id => ({ id, enabled: false }));
-  if (!configuredRows.length) {
-    ohlcvSettingsBody.innerHTML = '';
-    return;
-  }
-
-  ohlcvSettingsBody.innerHTML = configuredRows.map((setting, index) => {
-    const meta = providerMeta[setting.id] || { name: setting.id };
-    const status = envStatus?.data_vendors?.[setting.id];
-    const credential = status
-      ? (status.required
-        ? (status.configured ? t('apiKeyConfigured') : t('apiKeyMissing'))
-        : t('apiKeyNotRequired'))
-      : t('apiKeyNotRequired');
-    return `
-      <tr>
-        <td><strong>${escapeHtml(meta.name)}</strong></td>
-        <td>${escapeHtml(index + 1)}</td>
-        <td><span class="badge ${setting.enabled ? 'quality-high' : 'quality-neutral'}">${escapeHtml(setting.enabled ? t('providerEnabled') : t('providerDisabled'))}</span></td>
-        <td>${escapeHtml(credential)}</td>
-      </tr>
-    `;
-  }).join('');
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function currentProviders() {
-  const result = {};
-  Object.keys(providersState).forEach(cat => {
-    const enabledVendors = providersState[cat]
-      .filter(v => v.enabled)
-      .map(v => v.id);
-    result[cat] = enabledVendors.join(', ');
-  });
-  return result;
 }

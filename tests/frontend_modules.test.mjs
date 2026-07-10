@@ -98,3 +98,57 @@ test('router restores settings deep links without native anchor scrolling', { co
   assert.deepEqual(scrollCalls, [[0, 0], [0, 0]]);
   assert.equal(typeof listeners.get('hashchange'), 'function');
 });
+
+test('report reading mode preserves content until the user resumes live updates', { concurrency: false }, async () => {
+  class FakeControl {
+    constructor() {
+      this.listeners = new Map();
+      this.classList = { toggle() {} };
+      this.hidden = false;
+      this.value = 'all';
+    }
+    addEventListener(type, callback) { this.listeners.set(type, callback); }
+    setAttribute(name, value) { this[name] = value; }
+    replaceChildren(...children) { this.children = children; }
+    click() { this.listeners.get('click')?.(); }
+  }
+  const reportElement = {
+    innerHTML: '',
+    replaceChildren() {},
+    querySelector() { return null; },
+  };
+  const sectionSelect = new FakeControl();
+  const readingModeToggle = new FakeControl();
+  const newReportsNotice = new FakeControl();
+  globalThis.document = {
+    createElement() { return { value: '', textContent: '' }; },
+  };
+  globalThis.marked = { parse: markdown => markdown };
+  const labels = {
+    reportAll: 'All', liveReportTitle: 'Live report', reportPlaceholder: 'Empty',
+    reportUnavailable: 'Unavailable', readingMode: 'Reading mode', readingModeOn: 'On',
+    readingModeOff: 'Off', newReportsLabel: '{count} new reports',
+  };
+  const { createReportViewer } = await importSource('components/report-viewer.js');
+  const viewer = createReportViewer({
+    api: { getReport: async () => '# final' },
+    element: reportElement,
+    sectionSelect,
+    readingModeToggle,
+    newReportsNotice,
+    t: key => labels[key] || key,
+    locale: () => 'en',
+    formatAgentName: name => name,
+  });
+  viewer.updateSection({ section: 'market_report', text: 'first report' });
+  assert.match(reportElement.innerHTML, /first report/);
+  readingModeToggle.click();
+  viewer.updateSection({ section: 'news_report', text: 'new report' });
+  assert.match(reportElement.innerHTML, /first report/);
+  assert.doesNotMatch(reportElement.innerHTML, /new report/);
+  assert.equal(newReportsNotice.hidden, false);
+  assert.equal(newReportsNotice.textContent, '1 new reports');
+  newReportsNotice.click();
+  assert.match(reportElement.innerHTML, /new report/);
+  assert.equal(newReportsNotice.hidden, true);
+});

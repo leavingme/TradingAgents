@@ -22,6 +22,7 @@ export function createRunHistory({ api, element, locale, formatStatus, formatEve
     status.className = `history-status ${run.status}`;
     status.textContent = formatStatus(run.status);
     const count = document.createElement('span');
+    count.className = 'history-event-count';
     count.textContent = formatEventCount(run.event_count);
     meta.append(status, count, deleteButton(run));
     item.append(button, meta);

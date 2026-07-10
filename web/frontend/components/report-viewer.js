@@ -23,18 +23,33 @@ const SECTION_TITLES = {
   },
 };
 
-export function createReportViewer({ api, element, sectionSelect, t, locale, formatAgentName }) {
+export function createReportViewer({
+  api, element, sectionSelect, readingModeToggle, newReportsNotice, t, locale, formatAgentName,
+}) {
   const sections = new Map();
   let selected = 'all';
+  let latestSection = null;
+  let readingMode = false;
+  let unreadCount = 0;
+  let pendingReportRunId = null;
 
   sectionSelect.addEventListener('change', () => {
     selected = sectionSelect.value;
     renderLive();
   });
+  readingModeToggle.addEventListener('click', () => { void setReadingMode(!readingMode); });
+  newReportsNotice.addEventListener('click', () => { void setReadingMode(false); });
 
   function updateSection(content) {
     if (!content || typeof content !== 'object' || !content.section || !content.text) return;
     sections.set(content.section, content.text);
+    latestSection = content.section;
+    if (readingMode) {
+      unreadCount += 1;
+      renderOptions();
+      renderReadingControls();
+      return;
+    }
     selected = content.section;
     renderOptions();
     renderLive();
@@ -72,6 +87,11 @@ export function createReportViewer({ api, element, sectionSelect, t, locale, for
 
   async function load(runId) {
     if (!runId) return;
+    if (readingMode) {
+      pendingReportRunId = runId;
+      renderReadingControls();
+      return;
+    }
     try {
       renderMarkdown(await api.getReport(runId));
     } catch {
@@ -104,16 +124,50 @@ export function createReportViewer({ api, element, sectionSelect, t, locale, for
   function reset({ showPlaceholder = true } = {}) {
     sections.clear();
     selected = 'all';
+    latestSection = null;
+    readingMode = false;
+    unreadCount = 0;
+    pendingReportRunId = null;
     renderOptions();
+    renderReadingControls();
     if (showPlaceholder) placeholder(); else element.replaceChildren();
   }
 
   function refresh() {
     renderOptions();
+    renderReadingControls();
     if (sections.size) renderLive();
     else if (element.querySelector('.report-empty')) placeholder();
   }
 
+  async function setReadingMode(enabled) {
+    if (readingMode === enabled) return;
+    readingMode = enabled;
+    if (!readingMode) {
+      const pendingRunId = pendingReportRunId;
+      pendingReportRunId = null;
+      unreadCount = 0;
+      if (pendingRunId) {
+        renderReadingControls();
+        await load(pendingRunId);
+        return;
+      }
+      if (latestSection) selected = latestSection;
+      renderOptions();
+      renderLive();
+    }
+    renderReadingControls();
+  }
+
+  function renderReadingControls() {
+    readingModeToggle.classList.toggle('active', readingMode);
+    readingModeToggle.setAttribute('aria-pressed', String(readingMode));
+    readingModeToggle.title = t(readingMode ? 'readingModeOn' : 'readingModeOff');
+    newReportsNotice.hidden = unreadCount === 0;
+    newReportsNotice.textContent = t('newReportsLabel').replace('{count}', String(unreadCount));
+  }
+
+  renderReadingControls();
   return { updateSection, load, reset, refresh, placeholder };
 }
 

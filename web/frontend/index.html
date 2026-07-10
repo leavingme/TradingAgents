@@ -16,7 +16,7 @@
     <!-- marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css?v=20260710-frontend-optimization" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260710-unified-delete-button" />
   </head>
   <body>
     <!-- Ambient background orbs -->
@@ -141,25 +141,28 @@
               </select>
             </label>
 
-            <fieldset class="analysts-fieldset">
-              <legend class="field-label" data-i18n="analysts">Analysts</legend>
-              <label class="analyst-chip">
-                <input type="checkbox" name="analysts" value="market" checked />
-                <span data-i18n="analystMarket">Market</span>
-              </label>
-              <label class="analyst-chip">
-                <input type="checkbox" name="analysts" value="social" checked />
-                <span data-i18n="analystSocial">Social</span>
-              </label>
-              <label class="analyst-chip">
-                <input type="checkbox" name="analysts" value="news" checked />
-                <span data-i18n="analystNews">News</span>
-              </label>
-              <label class="analyst-chip">
-                <input type="checkbox" name="analysts" value="fundamentals" checked />
-                <span data-i18n="analystFundamentals">Fundamentals</span>
-              </label>
-            </fieldset>
+            <div class="analysts-field">
+              <span class="field-label" aria-hidden="true" data-i18n="analysts">Analysts</span>
+              <fieldset class="analysts-fieldset">
+                <legend class="visually-hidden" data-i18n="analysts">Analysts</legend>
+                <label class="analyst-chip">
+                  <input type="checkbox" name="analysts" value="market" checked />
+                  <span data-i18n="analystMarket">Market</span>
+                </label>
+                <label class="analyst-chip">
+                  <input type="checkbox" name="analysts" value="social" checked />
+                  <span data-i18n="analystSocial">Social</span>
+                </label>
+                <label class="analyst-chip">
+                  <input type="checkbox" name="analysts" value="news" checked />
+                  <span data-i18n="analystNews">News</span>
+                </label>
+                <label class="analyst-chip">
+                  <input type="checkbox" name="analysts" value="fundamentals" checked />
+                  <span data-i18n="analystFundamentals">Fundamentals</span>
+                </label>
+              </fieldset>
+            </div>
 
             <div class="form-actions">
               <button id="startButton" type="submit" class="btn-primary">
@@ -802,6 +805,8 @@
         <!-- Main dashboard -->
         <section id="runView" class="dashboard">
 
+          <div class="dashboard-left">
+
           <!-- Left panel: Agents + History -->
           <section class="panel agents-panel" aria-label="Agent timeline">
             <div class="panel-header">
@@ -832,7 +837,7 @@
                   <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
                 </svg>
               </button>
-              <button id="clearHistory" type="button" class="btn-icon delete-all-history" title="Clear all history" data-i18n-title="clearHistory">
+              <button id="clearHistory" type="button" class="btn-icon" title="Clear all history" data-i18n-title="clearHistory">
                 <svg viewBox="0 0 16 16" fill="currentColor">
                   <path d="M11 1.5v1h3.5a.5.5 0 0 1 0 1h-.538l-.853 10.66A2 2 0 0 1 11.115 16h-6.23a2 2 0 0 1-1.994-1.84L2.038 3.5H1.5a.5.5 0 0 1 0-1H5v-1A1.5 1.5 0 0 1 6.5 0h3A1.5 1.5 0 0 1 11 1.5Zm-5 0v1h4v-1a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5ZM4.5 5.029l.5 8.5a.5.5 0 1 0 .998-.06l-.5-8.5a.5.5 0 1 0-.998.06Zm6.53-.06a.5.5 0 0 0-.51.49l-.5 8.5a.5.5 0 1 0 .998.06l.5-8.5a.5.5 0 0 0-.488-.55ZM1.962 3.5l.847 10.59a1 1 0 0 0 .997.91h6.23a1 1 0 0 0 .997-.91L11.892 3.5H1.962Z"/>
                 </svg>
@@ -859,6 +864,8 @@
             <div id="eventLog" class="event-log"></div>
           </section>
 
+          </div>
+
           <!-- Right panel: Report viewer -->
           <section class="panel report-panel" aria-label="Report viewer">
             <div class="panel-header">
@@ -869,6 +876,11 @@
                 <span data-i18n="analysisReport">Analysis Report</span>
               </div>
               <div class="report-tools">
+                <button id="readingModeToggle" type="button" class="report-reading-toggle" aria-pressed="false">
+                  <span class="reading-mode-dot" aria-hidden="true"></span>
+                  <span data-i18n="readingMode">Reading mode</span>
+                </button>
+                <button id="newReportsNotice" type="button" class="new-reports-notice" hidden></button>
                 <select id="reportSectionSelect" class="report-section-select" disabled title="Report section" data-i18n-title="reportSection">
                   <option value="all" data-i18n="reportAll">All</option>
                 </select>
@@ -887,6 +899,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260710-frontend-optimization" type="module"></script>
+    <script src="/static/app.js?v=20260710-unified-delete-button" type="module"></script>
   </body>
 </html>

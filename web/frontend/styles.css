@@ -376,8 +376,14 @@ select option {
 }
 
 /* Analyst pill toggles */
-.analysts-fieldset {
+.analysts-field {
   grid-column: span 6;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.analysts-fieldset {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -391,12 +397,16 @@ select option {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.analysts-fieldset legend.field-label {
-  padding: 0 4px;
-  float: left;
-  /* reflow inside fieldset */
-  width: 100%;
-  margin-bottom: 6px;
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
 }
 
 .analyst-chip {
@@ -755,10 +765,22 @@ select option {
 /* ── Dashboard grid ──────────────────────────────────────────── */
 .dashboard {
   display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.05fr) minmax(520px, 1.8fr);
+  grid-template-columns: minmax(300px, 0.72fr) minmax(0, 2.28fr);
   gap: 16px;
   padding-top: 16px;
   align-items: start;
+}
+
+.dashboard-left {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  align-content: start;
+}
+
+.dashboard-left .event-log {
+  height: 300px;
+  min-height: 240px;
 }
 
 /* ── Glass panels ────────────────────────────────────────────── */
@@ -833,12 +855,14 @@ h2, .panel-title {
 #agentList li {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(82px, 0.8fr) minmax(128px, 1.2fr) minmax(78px, auto);
+  grid-template-columns: minmax(70px, 0.8fr) minmax(0, 1.35fr) minmax(68px, auto);
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 10px;
   border-radius: var(--radius-md);
   font-size: 12.5px;
+  line-height: 1.45;
   overflow: hidden;
   transition: background var(--t-fast), border-color var(--t-fast);
 }
@@ -853,6 +877,9 @@ h2, .panel-title {
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+  min-height: 34px;
+  padding-top: 7px;
+  padding-bottom: 7px;
 }
 
 #agentList li:hover {
@@ -870,6 +897,7 @@ h2, .panel-title {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  line-height: 1.45;
 }
 
 .agent-name span:last-child,
@@ -937,6 +965,7 @@ h2, .panel-title {
 .agent-status {
   font-size: 10.5px;
   font-weight: 500;
+  line-height: 1.4;
   color: var(--text-muted);
   white-space: nowrap;
   text-align: right;
@@ -995,21 +1024,32 @@ h2, .panel-title {
 
 .history-meta {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   font-size: 10.5px;
   color: var(--text-muted);
 }
 
+.history-event-count {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 /* History status badges */
 .history-status {
-  display: inline-block;
-  padding: 1px 7px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 8px;
   border-radius: 999px;
   font-size: 10px;
   font-weight: 600;
+  line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.4px;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .history-status.completed { color: var(--accent-green); background: rgba(16,185,129,0.12); }
@@ -1104,6 +1144,60 @@ h2, .panel-title {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.report-reading-toggle,
+.new-reports-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+
+.reading-mode-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.report-reading-toggle:hover,
+.report-reading-toggle.active {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.report-reading-toggle.active .reading-mode-dot {
+  background: var(--accent-blue);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.7);
+}
+
+.new-reports-notice {
+  border-color: rgba(245, 158, 11, 0.35);
+  color: var(--accent-amber);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.new-reports-notice[hidden] {
+  display: none;
+}
+
+.new-reports-notice:hover {
+  border-color: var(--accent-amber);
+  background: rgba(245, 158, 11, 0.16);
 }
 
 .report-section-select {
@@ -1266,19 +1360,11 @@ h2, .panel-title {
   .field-date,
   .field-asset,
   .field-depth { grid-column: span 1; }
-  .analysts-fieldset { grid-column: 1 / -1; }
+  .analysts-field { grid-column: 1 / -1; }
   .form-actions { grid-column: 1 / -1; }
 
   .dashboard {
-    grid-template-columns: minmax(280px, 0.9fr) minmax(460px, 1.4fr);
-  }
-  .stream-panel {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-  .report-panel {
-    grid-column: 2;
-    grid-row: 1;
+    grid-template-columns: minmax(280px, 0.8fr) minmax(460px, 1.7fr);
   }
 }
 
@@ -1302,14 +1388,13 @@ h2, .panel-title {
   .dashboard {
     grid-template-columns: 1fr;
   }
-  .stream-panel,
-  .report-panel {
-    grid-column: auto;
-    grid-row: auto;
-  }
-
   .event-log,
   .report-viewer {
+    height: 380px;
+    min-height: 300px;
+  }
+
+  .dashboard-left .event-log {
     height: 380px;
     min-height: 300px;
   }
@@ -1368,7 +1453,7 @@ h2, .panel-title {
   .field-date,
   .field-asset,
   .field-depth,
-  .analysts-fieldset,
+  .analysts-field,
   .form-actions {
     grid-column: 1 / -1;
   }
@@ -1808,13 +1893,5 @@ h2, .panel-title {
 }
 
 .delete-run-btn:hover {
-  color: #ef4444 !important;
-}
-
-.delete-all-history {
-  transition: color var(--t-fast);
-}
-
-.delete-all-history:hover {
   color: #ef4444 !important;
 }

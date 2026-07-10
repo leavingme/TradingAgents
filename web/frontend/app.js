@@ -52,6 +52,8 @@ const cancelButton  = document.querySelector('#cancelButton');
 const clearLog      = document.querySelector('#clearLog');
 const loadReport    = document.querySelector('#loadReport');
 const reportSectionSelect = document.querySelector('#reportSectionSelect');
+const readingModeToggle = document.querySelector('#readingModeToggle');
+const newReportsNotice = document.querySelector('#newReportsNotice');
 const refreshHistory= document.querySelector('#refreshHistory');
 const clearHistory  = document.querySelector('#clearHistory');
 const historyList   = document.querySelector('#historyList');
@@ -141,6 +143,10 @@ const translations = {
     analysisReport: 'Analysis Report',
     reportSection: 'Report section',
     reportAll: 'All',
+    readingMode: 'Reading mode',
+    readingModeOn: 'Reading mode on: new reports will not interrupt you',
+    readingModeOff: 'Reading mode off: automatically follow new reports',
+    newReportsLabel: '{count} new reports',
     refreshHistory: 'Refresh history',
     clearLog: 'Clear log',
     loadReport: 'Load report',
@@ -336,6 +342,10 @@ const translations = {
     analysisReport: '分析报告',
     reportSection: '报告章节',
     reportAll: '全部',
+    readingMode: '阅读模式',
+    readingModeOn: '阅读模式已开启：新报告不会打断当前阅读',
+    readingModeOff: '阅读模式已关闭：自动跟随新报告',
+    newReportsLabel: '{count} 份新报告',
     refreshHistory: '刷新历史',
     clearLog: '清空日志',
     loadReport: '加载报告',
@@ -524,6 +534,8 @@ const reportView = createReportViewer({
   api,
   element: reportViewer,
   sectionSelect: reportSectionSelect,
+  readingModeToggle,
+  newReportsNotice,
   t,
   locale: i18n.locale,
   formatAgentName,

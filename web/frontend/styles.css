@@ -1513,6 +1513,8 @@ h2, .panel-title {
 .providers-view {
   padding: 20px 0;
   border-bottom: 1px solid var(--border-subtle);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .providers-grid {
@@ -1532,6 +1534,8 @@ h2, .panel-title {
   box-shadow: var(--shadow-md);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .provider-summary-table .badge {
@@ -1542,6 +1546,32 @@ h2, .panel-title {
   margin-top: 14px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.provider-known-issue {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(245, 158, 11, 0.34);
+  border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.provider-known-issue-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+
+.provider-known-issue p + p {
+  margin-top: 5px;
 }
 
 .provider-indicator-source-area {
@@ -1799,6 +1829,8 @@ h2, .panel-title {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.01);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .comparison-table {

@@ -1,7 +1,8 @@
 const STORAGE_KEY = 'tradingagents.web.providers';
+const LEGACY_CORE_DEFAULT = ['westock', 'longbridge_mcp', 'longbridge', 'alpha_vantage'];
 
 const CATEGORY_VENDORS = {
-  core_stock_apis: ['westock', 'longbridge_mcp', 'longbridge', 'alpha_vantage'],
+  core_stock_apis: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   technical_indicators: ['westock', 'longbridge_mcp', 'longbridge', 'alpha_vantage'],
   fundamental_data: ['westock', 'longbridge_mcp', 'longbridge', 'alpha_vantage'],
   news_data: ['westock', 'duckduckgo', 'alpha_vantage'],
@@ -20,7 +21,7 @@ const PROVIDER_META = {
 };
 
 const FALLBACK_DEFAULTS = {
-  core_stock_apis: 'westock, longbridge_mcp, longbridge',
+  core_stock_apis: 'longbridge_mcp, longbridge, westock',
   technical_indicators: 'westock, longbridge_mcp, longbridge',
   fundamental_data: 'westock, longbridge_mcp, longbridge',
   news_data: 'westock, duckduckgo, alpha_vantage',
@@ -69,6 +70,15 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
       saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || 'null');
     } catch {
       // Invalid local data falls back to server defaults.
+    }
+    if (Array.isArray(saved?.core_stock_apis)) {
+      const savedIds = saved.core_stock_apis.map(row => row?.id);
+      const isLegacyDefault = savedIds.length === LEGACY_CORE_DEFAULT.length
+        && savedIds.every((id, index) => id === LEGACY_CORE_DEFAULT[index]);
+      if (isLegacyDefault) {
+        const byId = new Map(saved.core_stock_apis.map(row => [row.id, row]));
+        saved.core_stock_apis = CATEGORY_VENDORS.core_stock_apis.map(id => byId.get(id));
+      }
     }
     const defaults = configDefaults()?.data_vendors || FALLBACK_DEFAULTS;
     state = {};

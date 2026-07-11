@@ -8,7 +8,7 @@ the analyst is told to treat as the source of truth for any exact numeric
 claim. Deterministic, no LLM involved.
 
 Data source: routes through ``data_vendors.core_stock_apis`` (default
-``westock, longbridge_mcp, longbridge``), with a direct Westock loader fallback
+``longbridge_mcp, longbridge, westock``), with a direct Westock loader fallback
 if the configured vendor chain fails.
 """
 
@@ -70,7 +70,7 @@ def _parse_vendor_csv(raw: object) -> pd.DataFrame:
          if ln.lstrip().lower().startswith("date")),
         None,
     )
-    if header_line:
+    if header_line and "," not in header_line:
         try:
             return pd.read_csv(
                 StringIO(cleaned),
@@ -87,7 +87,7 @@ def _load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     """OHLCV via the configured ``core_stock_apis`` vendor chain.
 
     Honours the user's ``data_vendors.core_stock_apis`` setting (typically
-    ``westock, longbridge_mcp, longbridge``) and falls back to the Westock loader if
+    ``longbridge_mcp, longbridge, westock``) and falls back to the Westock loader if
     the configured chain fails for any reason.
     """
     cfg = get_config()

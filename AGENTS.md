@@ -103,7 +103,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 | `MINIMAX_CN_API_KEY` | minimax（中国区） | `~/.zshrc` export |
 | `MINIMAX_API_KEY` | minimax（Global） | `~/.zshrc` export |
 | `.longbridge_mcp_token.json` | Longbridge API token（数据 vendor） | `tradingagents/.longbridge_mcp_token.json`（gitignored） |
-| `data_vendors.core_stock_apis` | 默认 `"westock, longbridge_mcp, longbridge"` | `default_config.py` |
+| `data_vendors.core_stock_apis` | 默认 `"longbridge_mcp, longbridge, westock"` | `default_config.py` |
 | `llm_provider` | 默认 `"minimax-cn"` | `default_config.py` |
 | `quick_think_llm` / `deep_think_llm` | 默认都是 `"MiniMax-M3"` | `default_config.py` |
 
@@ -126,7 +126,7 @@ shebang。
 `data_vendors` 是**路由层 fallback 链**，不是单个 vendor。顺序很重要：
 
 ```
-core_stock_apis    : "westock, longbridge_mcp, longbridge"
+core_stock_apis    : "longbridge_mcp, longbridge, westock"
 technical_indicators: "westock, longbridge_mcp, longbridge"
 fundamental_data   : "westock, longbridge_mcp, longbridge"
 news_data          : "web_search, duckduckgo, alpha_vantage, westock"
@@ -273,8 +273,11 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - **Longbridge token 过期时间**：token 位于
   `tradingagents/.longbridge_mcp_token.json`，签发后约 30 天过期。运行长
   smoke 前先检查 expiry 字段。截至 2026-07-05：过期时间为 2026-07-18。
-- **Westock first-level vendor**：Westock 是默认数据链路的第一顺位供应商。
-  Longbridge MCP/CLI 作为覆盖率、认证或 Westock 不可用时的 fallback。
+- **Longbridge-first OHLCV**：原始 OHLCV 默认优先使用 Longbridge MCP/CLI，
+  Westock 作为覆盖率或 Longbridge 不可用时的 fallback。技术指标和基本面仍按
+  各自配置链路。当分析日为当前交易日时，收盘缓冲期结束前不得把当日日 K
+  视为完整数据；共享 OHLCV 缓存只保留规范的 Date/Open/High/Low/Close/Volume
+  列，新获取的同日完整 K 线必须覆盖盘中残缺记录。
 
 ## 不需要先问权限的操作
 

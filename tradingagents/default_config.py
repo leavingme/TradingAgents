@@ -125,10 +125,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # The configured value is the exact vendor chain — requests are NOT silently
     # routed to vendors you didn't choose. For ordered fallback, list several,
     # e.g. "westock,alpha_vantage". "default" uses all available vendors.
-    # Westock is the first-level vendor for prices/indicators/fundamentals.
-    # Longbridge MCP/CLI remain fallbacks for coverage and auth gaps.
+    # Longbridge is authoritative for raw OHLCV. Westock remains the first-level
+    # source for indicators/fundamentals and an OHLCV fallback for coverage gaps.
     "data_vendors": {
-        "core_stock_apis": "westock, longbridge_mcp, longbridge",
+        "core_stock_apis": "longbridge_mcp, longbridge, westock",
         "technical_indicators": "westock, longbridge_mcp, longbridge",
         "fundamental_data": "westock, longbridge_mcp, longbridge",
         "news_data": "westock, duckduckgo, alpha_vantage",

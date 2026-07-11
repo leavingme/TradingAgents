@@ -21,6 +21,9 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime, time
+from io import StringIO
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -32,7 +35,51 @@ _MARKET_TIMEZONES = {
     "_SZ": "Asia/Shanghai",
     "_BJ": "Asia/Shanghai",
     "_US": "America/New_York",
+    "_SG": "Asia/Singapore",
 }
+
+# Conservative daily-bar completion cutoffs. The buffer avoids accepting a
+# closing-auction/in-flight daily candle as final immediately at the nominal
+# market close. Symbols without a market suffix use the US session because
+# TradingAgents' bare ticker convention (NVDA, AAPL, ...) denotes US stocks.
+_MARKET_CLOSES = {
+    "_HK": time(16, 15),
+    "_SH": time(15, 15),
+    "_SZ": time(15, 15),
+    "_BJ": time(15, 15),
+    "_US": time(16, 15),
+    "_SG": time(17, 15),
+}
+_DEFAULT_MARKET_TIMEZONE = "America/New_York"
+_DEFAULT_MARKET_CLOSE = time(16, 15)
+CANONICAL_OHLCV_COLUMNS = ["Date", "Open", "High", "Low", "Close", "Volume"]
+
+
+def parse_ohlcv_payload(raw: object) -> pd.DataFrame:
+    """Parse the CSV or text-table shapes returned by configured OHLCV vendors."""
+    if isinstance(raw, pd.DataFrame):
+        return raw.copy()
+    if not raw:
+        return pd.DataFrame(columns=CANONICAL_OHLCV_COLUMNS)
+
+    lines = []
+    for line in str(raw).strip().splitlines():
+        if line.startswith("#"):
+            continue
+        if line and all(character in "─-= \t" for character in line):
+            continue
+        lines.append(line)
+    cleaned = "\n".join(lines)
+    header_line = next(
+        (line for line in cleaned.splitlines() if line.lstrip().lower().startswith("date")),
+        None,
+    )
+    if header_line and "," not in header_line:
+        try:
+            return pd.read_csv(StringIO(cleaned), sep=r"\s+", engine="python")
+        except Exception:
+            pass
+    return pd.read_csv(StringIO(cleaned))
 
 
 def symbol_to_cache_key(symbol: str) -> str:
@@ -84,7 +131,74 @@ def _timezone_for_cache_key(cache_key: str) -> str | None:
     for suffix, timezone in _MARKET_TIMEZONES.items():
         if upper.endswith(suffix):
             return timezone
-    return None
+    return _DEFAULT_MARKET_TIMEZONE
+
+
+def _market_close_for_cache_key(cache_key: str) -> time:
+    upper = cache_key.upper()
+    for suffix, close_at in _MARKET_CLOSES.items():
+        if upper.endswith(suffix):
+            return close_at
+    return _DEFAULT_MARKET_CLOSE
+
+
+def _local_now(cache_key: str, now: datetime | None = None) -> datetime:
+    timezone = ZoneInfo(_timezone_for_cache_key(cache_key) or "UTC")
+    if now is None:
+        return datetime.now(timezone)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=timezone)
+    return now.astimezone(timezone)
+
+
+def latest_completed_daily_bar_date(
+    cache_key: str,
+    now: datetime | None = None,
+) -> pd.Timestamp:
+    """Return the latest date whose daily candle can safely be treated as final.
+
+    On a trading day, today's bar is excluded until a short post-close buffer
+    has elapsed. Weekends roll back to Friday. Exchange holidays are handled by
+    the provider returning no bar for that date.
+    """
+    local_now = _local_now(cache_key, now)
+    candidate = pd.Timestamp(local_now.date())
+    if local_now.time() < _market_close_for_cache_key(cache_key):
+        candidate -= pd.Timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate -= pd.Timedelta(days=1)
+    return candidate.normalize()
+
+
+def filter_completed_daily_bars(
+    data: pd.DataFrame,
+    cache_key: str,
+    now: datetime | None = None,
+) -> pd.DataFrame:
+    """Remove future and still-forming current-session daily candles."""
+    if data.empty or "Date" not in data.columns:
+        return data
+    out = normalize_ohlcv_dates(data, cache_key)
+    cutoff = latest_completed_daily_bar_date(cache_key, now)
+    return out[out["Date"] <= cutoff].copy()
+
+
+def request_includes_live_session(
+    cache_key: str,
+    end_date: str,
+    now: datetime | None = None,
+) -> bool:
+    """Whether a cache read must refresh because the requested window reaches today.
+
+    A same-day request always refreshes. Before close this prevents a partial
+    candle from entering analysis; after close it ensures a partial candle
+    cached earlier is replaced by the final daily bar.
+    """
+    local_today = pd.Timestamp(_local_now(cache_key, now).date())
+    requested_end = pd.to_datetime(end_date)
+    if getattr(requested_end, "tz", None) is not None:
+        requested_end = requested_end.tz_localize(None)
+    return requested_end.normalize() >= local_today
 
 
 def normalize_ohlcv_dates(data: pd.DataFrame, cache_key: str) -> pd.DataFrame:
@@ -137,6 +251,9 @@ def read_cached_ohlcv(
     end_date.  Historical queries (end_date well in the past) are served from
     cache indefinitely.
     """
+    if request_includes_live_session(cache_key, end_date):
+        return None
+
     paths = [path for path in _cache_filepaths(cache_dir, cache_key) if os.path.exists(path)]
     if not paths:
         return None
@@ -206,10 +323,12 @@ def merge_and_write_ohlcv(
 
     frames.append(new_df.copy())
     combined = pd.concat(frames, ignore_index=True)
-    combined = normalize_ohlcv_dates(combined, cache_key)
+    combined = filter_completed_daily_bars(combined, cache_key)
+    available_columns = [column for column in CANONICAL_OHLCV_COLUMNS if column in combined.columns]
+    combined = combined[available_columns]
     combined = (
         combined.dropna(subset=["Date"])
-        .drop_duplicates(subset=["Date"])
+        .drop_duplicates(subset=["Date"], keep="last")
         .sort_values("Date")
         .reset_index(drop=True)
     )

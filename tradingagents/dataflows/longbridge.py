@@ -171,6 +171,7 @@ def get_stock_data(
         read_cached_ohlcv,
         merge_and_write_ohlcv,
         normalize_ohlcv_dates,
+        filter_completed_daily_bars,
     )
 
     sym = normalize_symbol(symbol)
@@ -230,6 +231,7 @@ def get_stock_data(
 
     df = normalize_ohlcv_dates(df, cache_key)
     df = df[(df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))]
+    df = filter_completed_daily_bars(df, cache_key)
     df = df.sort_values("Date")
     if df.empty:
         return f"No data found for symbol '{sym}' between {start_date} and {end_date}"

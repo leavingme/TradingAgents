@@ -66,6 +66,8 @@ def get_westock_data_online(
                 
                 df = df.sort_values("Date").reset_index(drop=True)
                 df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
+                from .ohlcv_cache import filter_completed_daily_bars, symbol_to_cache_key
+                df = filter_completed_daily_bars(df, symbol_to_cache_key(canonical))
                 
                 if not df.empty:
                     df = df.set_index("Date")

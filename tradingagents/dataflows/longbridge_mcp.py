@@ -348,6 +348,7 @@ def get_stock_data(
         read_cached_ohlcv,
         merge_and_write_ohlcv,
         normalize_ohlcv_dates,
+        filter_completed_daily_bars,
     )
 
     sym = normalize_symbol(symbol)
@@ -402,6 +403,7 @@ def get_stock_data(
     df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
     if not df.empty:
         df = normalize_ohlcv_dates(df, cache_key)
+        df = filter_completed_daily_bars(df, cache_key)
         merge_and_write_ohlcv(cache_dir, cache_key, df)
         df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
         rows = list(df[["Date", "Open", "High", "Low", "Close", "Volume"]].itertuples(index=False, name=None))

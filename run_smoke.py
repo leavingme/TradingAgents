@@ -26,7 +26,7 @@ config["max_debate_rounds"] = 1
 config["max_risk_discuss_rounds"] = 1
 config["llm_timeout"] = 120
 config["data_vendors"] = {
-    "core_stock_apis": "westock, longbridge_mcp, longbridge",
+    "core_stock_apis": "longbridge_mcp, longbridge, westock",
     "technical_indicators": "westock, longbridge_mcp, longbridge",
     "fundamental_data": "westock, longbridge_mcp, longbridge",
     "news_data": "web_search, duckduckgo, alpha_vantage, westock",

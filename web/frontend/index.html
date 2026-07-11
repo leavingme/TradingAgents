@@ -16,7 +16,7 @@
     <!-- marked.js for Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css?v=20260710-unified-delete-button" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260711-longbridge-ohlcv-primary" />
   </head>
   <body>
     <!-- Ambient background orbs -->
@@ -352,14 +352,14 @@
                     <td data-i18n="summaryMarketsAll">US stocks / China A-shares / Hong Kong stocks</td>
                     <td data-i18n="summaryWestockLatest">Observed latest rows: US stocks 2026-07-07, China A-shares 2026-07-08, Hong Kong stocks 2026-07-08</td>
                     <td><span class="badge quality-medium" data-i18n="summaryWestockGranularity">1-minute K-line for China A-shares only</span></td>
-                    <td data-i18n="summaryWestockNote">Works well as the default OHLCV source. Its minute-level K-line data is limited to China A-share stocks.</td>
+                    <td data-i18n="summaryWestockNote">OHLCV fallback with broad coverage. Its minute-level K-line data is limited to China A-share stocks, and turnover amount requires validation.</td>
                   </tr>
                   <tr>
                     <td><strong>Longbridge CLI</strong></td>
                     <td data-i18n="summaryMarketsAll">US stocks / China A-shares / Hong Kong stocks</td>
                     <td data-i18n="summaryLongbridgeCliLatest">Observed current data for US stocks, China A-shares, and Hong Kong stocks</td>
                     <td><span class="badge quality-high" data-i18n="summaryLongbridgeGranularity">1-minute K-line supported</span></td>
-                    <td data-i18n="summaryLongbridgeCliNote">Useful when Westock data is stale, unavailable, or when minute-level data is needed outside China A-shares.</td>
+                    <td data-i18n="summaryLongbridgeCliNote">Preferred raw OHLCV source and CLI fallback when Longbridge MCP is unavailable.</td>
                   </tr>
                   <tr>
                     <td><strong>Longbridge MCP</strong></td>
@@ -371,7 +371,15 @@
                 </tbody>
               </table>
             </div>
-            <p class="provider-summary-footnote" data-i18n="providersSummaryFootnote">Last real provider verification: 2026-07-08.</p>
+            <aside class="provider-known-issue" role="note" aria-labelledby="westockKnownIssueTitle">
+              <div class="provider-known-issue-heading">
+                <span class="badge quality-medium" data-i18n="knownIssueBadge">Known issue</span>
+                <strong id="westockKnownIssueTitle" data-i18n="westockKnownIssueTitle">Westock turnover amount may be scaled incorrectly</strong>
+              </div>
+              <p data-i18n="westockKnownIssueBody">Observed on 0700.HK daily bars on 2026-07-10: Westock amount was 10,000 times the Longbridge turnover value. The issue is intermittent and can affect individual rows rather than the vendor's fixed unit convention.</p>
+              <p><strong data-i18n="knownIssueImpactLabel">Impact:</strong> <span data-i18n="westockKnownIssueImpact">OHLC and volume may remain usable, but Westock amount must not be used for turnover analysis until it passes an implied-price check or is verified by another provider.</span></p>
+            </aside>
+            <p class="provider-summary-footnote" data-i18n="providersSummaryFootnote">Last real provider verification: 2026-07-11.</p>
           </section>
 
           <div class="providers-grid">
@@ -899,6 +907,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260710-unified-delete-button" type="module"></script>
+    <script src="/static/app.js?v=20260711-longbridge-ohlcv-primary" type="module"></script>
   </body>
 </html>

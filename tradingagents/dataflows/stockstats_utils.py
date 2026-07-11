@@ -115,6 +115,8 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
         read_cached_ohlcv,
         merge_and_write_ohlcv,
         normalize_ohlcv_dates,
+        filter_completed_daily_bars,
+        parse_ohlcv_payload,
     )
 
     # Resolve broker/forex symbols (XAUUSD+ -> GC=F) to Westock's convention,
@@ -143,56 +145,21 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
         _assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
         return data
 
-    # --- fetch from westock-data or Longbridge ---
-    from .symbol_utils import is_westock_available, to_westock_code, run_westock
-    downloaded = None
-    if is_westock_available():
-        w_code = to_westock_code(symbol)
-        logger.info("westock-data available; downloading OHLCV for %s (mapped to %s)", symbol, w_code)
-        try:
-            # We want to pull ~365 observations
-            raw = run_westock(["kline", w_code, "--period", "day", "--limit", "365"], raw=True)
-            import json
-            klines = json.loads(raw)
-            if klines and isinstance(klines, list):
-                df = pd.DataFrame(klines)
-                df = df.rename(columns={
-                    "last": "Close",
-                    "open": "Open",
-                    "high": "High",
-                    "low": "Low",
-                    "volume": "Volume"
-                })
-                if "date" in df.columns:
-                    df = df.rename(columns={"date": "Date"})
-                df["Date"] = pd.to_datetime(df["Date"])
-                for col in ["Open", "High", "Low", "Close"]:
-                    if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors="coerce")
-                if "Volume" in df.columns:
-                    df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
-                downloaded = df.sort_values("Date").reset_index(drop=True)
-        except Exception as exc:
-            logger.warning("westock kline failed: %s; trying Longbridge fallback", exc)
-
-    if downloaded is None or downloaded.empty:
-        logger.info("westock-data unavailable or failed; downloading OHLCV via Longbridge")
-        try:
-            from .interface import route_to_vendor
-            # Force routing to longbridge vendors for core_stock_apis to prevent recursion
-            csv_str = route_to_vendor("get_stock_data", symbol, start_str, curr_date)
-            import io
-            # Parse CSV string, stripping commented lines
-            cleaned_lines = "\n".join([line for line in csv_str.splitlines() if not line.startswith("#")])
-            downloaded = pd.read_csv(io.StringIO(cleaned_lines))
-            downloaded["Date"] = pd.to_datetime(downloaded["Date"])
-        except Exception as exc:
-            logger.error("Longbridge OHLCV fetch failed: %s", exc)
-            raise NoMarketDataError(symbol, canonical, f"no market data available: {exc}")
+    # Fetch through the configured core-stock chain. The default order is
+    # Longbridge MCP, Longbridge CLI, then Westock; indicator computation must
+    # consume the same canonical OHLCV source as the market analyst.
+    try:
+        from .interface import route_to_vendor
+        raw = route_to_vendor("get_stock_data", symbol, start_str, curr_date)
+        downloaded = parse_ohlcv_payload(raw)
+    except Exception as exc:
+        logger.error("Configured OHLCV chain failed: %s", exc)
+        raise NoMarketDataError(symbol, canonical, f"no market data available: {exc}") from exc
 
     # Ensure Date column standard layout
     downloaded = _ensure_date_column(downloaded)
     downloaded = normalize_ohlcv_dates(downloaded, cache_key)
+    downloaded = filter_completed_daily_bars(downloaded, cache_key)
     if downloaded.empty or "Close" not in downloaded.columns:
         raise NoMarketDataError(
             symbol, canonical, "No market data returned"

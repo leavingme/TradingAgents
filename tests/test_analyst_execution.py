@@ -86,5 +86,5 @@ class AnalystWallTimeTrackerTests(unittest.TestCase):
         )
         self.assertEqual(
             tracker.get_wall_times(),
-            {"market": 3.0, "news": 5.0},
+            {"market": 3.0, "news": 8.0},
         )

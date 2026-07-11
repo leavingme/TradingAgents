@@ -134,8 +134,9 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
                 str(request.analysis_date),
             )
 
+        initial_analysts = {ANALYST_AGENT_NAMES[key] for key in selected_analysts}
         for agent in _initial_agents(selected_analysts):
-            status = "in_progress" if not agent_status else "pending"
+            status = "in_progress" if agent in initial_analysts else "pending"
             agent_status[agent] = status
             yield AnalysisEvent(
                 type="agent_status",
@@ -321,11 +322,7 @@ def _analyst_events(
     report_sections: dict[str, Any],
     agent_status: dict[str, str],
 ) -> Iterator[AnalysisEvent]:
-    found_active = False
-    for analyst_key in ANALYST_ORDER:
-        if analyst_key not in selected_analysts:
-            continue
-
+    for analyst_key in selected_analysts:
         agent = ANALYST_AGENT_NAMES[analyst_key]
         report_key = ANALYST_REPORT_MAP[analyst_key]
         if chunk.get(report_key):
@@ -339,11 +336,8 @@ def _analyst_events(
 
         if report_sections.get(report_key):
             status = "completed"
-        elif not found_active:
-            status = "in_progress"
-            found_active = True
         else:
-            status = "pending"
+            status = "in_progress"
 
         if agent_status.get(agent) != status:
             agent_status[agent] = status
@@ -354,7 +348,11 @@ def _analyst_events(
                 content={"status": status},
             )
 
-    if not found_active and selected_analysts:
+    all_completed = all(
+        report_sections.get(ANALYST_REPORT_MAP[key]) is not None
+        for key in selected_analysts
+    )
+    if all_completed and selected_analysts:
         yield from _set_status(run_id, agent_status, "Bull Researcher", "in_progress")
 
 

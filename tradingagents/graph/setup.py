@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -26,6 +27,45 @@ from .analyst_execution import build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
 
 
+def make_analyst_node(spec, factory_func, tool_node, conditional_logic):
+    """Wrap an analyst, their tool node, and clear node into a private sandbox subgraph
+    to prevent parallel message pollution on the shared parent state.
+    """
+    def node_func(state: AgentState, config: RunnableConfig):
+        # 1. Build a local subgraph for this analyst
+        sub_workflow = StateGraph(AgentState)
+        
+        # Add the original nodes
+        sub_workflow.add_node(spec.agent_node, factory_func())
+        sub_workflow.add_node(spec.clear_node, create_msg_delete())
+        sub_workflow.add_node(spec.tool_node, tool_node)
+        
+        # Build local edges
+        sub_workflow.add_edge(START, spec.agent_node)
+        sub_workflow.add_conditional_edges(
+            spec.agent_node,
+            getattr(conditional_logic, f"should_continue_{spec.key}"),
+            [spec.tool_node, spec.clear_node],
+        )
+        sub_workflow.add_edge(spec.tool_node, spec.agent_node)
+        sub_workflow.add_edge(spec.clear_node, END)
+        
+        compiled_sub = sub_workflow.compile()
+        
+        # 2. Shallow copy state and deep copy messages to isolate history
+        sub_state = state.copy()
+        sub_state["messages"] = list(state.get("messages", []))
+        
+        # 3. Invoke the local subgraph
+        final_sub_state = compiled_sub.invoke(sub_state, config)
+        
+        # 4. Only return the report to parent state, discarding intermediate tool messages
+        return {
+            spec.report_key: final_sub_state.get(spec.report_key, "")
+        }
+    return node_func
+
+
 class GraphSetup:
     """Handles the setup and configuration of the agent graph."""
 
@@ -46,7 +86,6 @@ class GraphSetup:
         self, selected_analysts=("market", "social", "news", "fundamentals")
     ):
         """Set up and compile the agent workflow graph.
-
         Args:
             selected_analysts (list): List of analyst types to include. Options are:
                 - "market": Market analyst
@@ -78,11 +117,15 @@ class GraphSetup:
         # Create workflow
         workflow = StateGraph(AgentState)
 
-        # Add analyst nodes to the graph
+        # Add analyst sandboxed nodes to the graph
         for spec in plan.specs:
-            workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
-            workflow.add_node(spec.clear_node, create_msg_delete())
-            workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
+            wrapped_node = make_analyst_node(
+                spec,
+                analyst_factories[spec.key],
+                self.tool_nodes[spec.key],
+                self.conditional_logic
+            )
+            workflow.add_node(spec.agent_node, wrapped_node)
 
         # Add other nodes
         workflow.add_node("Bull Researcher", bull_researcher_node)
@@ -95,28 +138,11 @@ class GraphSetup:
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
         # Define edges
-        # Start with the first analyst
-        workflow.add_edge(START, plan.specs[0].agent_node)
-
-        # Connect analysts in sequence
-        for i, spec in enumerate(plan.specs):
-            current_analyst = spec.agent_node
-            current_tools = spec.tool_node
-            current_clear = spec.clear_node
-
-            # Add conditional edges for current analyst
-            workflow.add_conditional_edges(
-                current_analyst,
-                getattr(self.conditional_logic, f"should_continue_{spec.key}"),
-                [current_tools, current_clear],
-            )
-            workflow.add_edge(current_tools, current_analyst)
-
-            # Connect to next analyst or to Bull Researcher if this is the last analyst
-            if i < len(plan.specs) - 1:
-                workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
-            else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+        # Concurrently launch all selected analysts from START (Fan-out)
+        for spec in plan.specs:
+            workflow.add_edge(START, spec.agent_node)
+            # Each parallel analyst branch merges at Bull Researcher (Fan-in)
+            workflow.add_edge(spec.agent_node, "Bull Researcher")
 
         # Add remaining edges
         workflow.add_conditional_edges(

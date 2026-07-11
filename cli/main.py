@@ -1046,16 +1046,15 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
     - Store new report content from the current chunk if present
     - Check accumulated report_sections (not just current chunk) for status
     - Analysts with reports = completed
-    - First analyst without report = in_progress
-    - Remaining analysts without reports = pending
+    - Analysts without reports = in_progress (since they run in parallel)
     - When all analysts done, set Bull Researcher to in_progress
     """
     selected = message_buffer.selected_analysts
-    found_active = False
 
     if wall_time_tracker is not None:
         sync_analyst_tracker_from_chunk(wall_time_tracker, chunk)
 
+    all_completed = True
     for analyst_key in ANALYST_ORDER:
         if analyst_key not in selected:
             continue
@@ -1072,15 +1071,13 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
 
         if has_report:
             message_buffer.update_agent_status(agent_name, "completed")
-        elif not found_active:
-            message_buffer.update_agent_status(agent_name, "in_progress")
-            found_active = True
         else:
-            message_buffer.update_agent_status(agent_name, "pending")
+            message_buffer.update_agent_status(agent_name, "in_progress")
+            all_completed = False
 
     # When all analysts complete, transition research team to in_progress
     if (
-        not found_active
+        all_completed
         and selected
         and message_buffer.agent_status.get("Bull Researcher") == "pending"
     ):

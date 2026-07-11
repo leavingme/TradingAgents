@@ -120,16 +120,12 @@ def sync_analyst_tracker_from_chunk(
     now: float | None = None,
 ) -> None:
     current_time = monotonic() if now is None else now
-    active_found = False
 
+    # In parallel mode, all analysts start at the same time (at the stream onset)
     for spec in tracker.plan.specs:
+        tracker.mark_started(spec.key, started_at=current_time)
+
+        # Mark completed as soon as their report becomes available
         has_report = bool(chunk.get(spec.report_key))
-
         if has_report:
-            tracker.mark_started(spec.key, started_at=current_time)
             tracker.mark_completed(spec.key, completed_at=current_time)
-            continue
-
-        if not active_found:
-            tracker.mark_started(spec.key, started_at=current_time)
-            active_found = True

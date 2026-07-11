@@ -34,7 +34,16 @@ from .financial_validation import (
     normalize_financial_result,
     render_financial_data,
     validate_financial_result,
+    reconcile_financials,
+    compute_derived_metrics,
+    log_financial_audit,
+    extract_metric,
 )
+import threading
+import re
+
+_local_state = threading.local()
+
 from .duckduckgo_search import (
     get_global_news_duckduckgo,
     get_news_duckduckgo,
@@ -251,11 +260,6 @@ def route_to_vendor(method: str, *args, **kwargs):
 
     all_available_vendors = list(VENDOR_METHODS[method].keys())
 
-    # The configured vendor list IS the chain: we do NOT silently fall back to
-    # vendors the user did not choose (#988/#289) — that returned data from an
-    # unexpected source and caused cross-vendor inconsistencies. For multi-vendor
-    # fallback, list them in order, e.g. data_vendors="westock,alpha_vantage".
-    # The "default" sentinel (no explicit config) uses all available vendors.
     explicit = [v for v in primary_vendors if v and v != "default"]
     if explicit:
         vendor_chain = [v for v in explicit if v in VENDOR_METHODS[method]]
@@ -267,6 +271,272 @@ def route_to_vendor(method: str, *args, **kwargs):
     else:
         vendor_chain = all_available_vendors
 
+    # --- Financial Reconciliation Interception ---
+    if method in FINANCIAL_METHODS:
+        if getattr(_local_state, "in_reconciliation", False):
+            # Inner call (sub-fetch), bypass reconciliation and cache, return raw NormalizedFinancialData
+            last_no_data = None
+            first_error = None
+            for vendor in vendor_chain:
+                vendor_impl = VENDOR_METHODS[method][vendor]
+                impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
+                try:
+                    result = impl_func(*args, **kwargs)
+                    if not isinstance(result, NormalizedFinancialData):
+                        result = normalize_financial_result(result, source=vendor)
+                    return result
+                except (VendorRateLimitError, VendorNotConfiguredError, NoMarketDataError) as e:
+                    if first_error is None and isinstance(e, VendorNotConfiguredError):
+                        first_error = e
+                    if isinstance(e, NoMarketDataError):
+                        last_no_data = e
+                    continue
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
+                    continue
+            if last_no_data is not None:
+                raise last_no_data
+            if first_error is not None:
+                raise first_error
+            raise NoUsableFinancialDataError(str(args[0]), method.removeprefix("get_"), "All vendors failed in sub-fetch")
+
+        # Outer call, perform reconciliation and caching
+        ticker = args[0]
+        freq = args[1] if len(args) > 1 else "quarterly"
+        curr_date = args[2] if len(args) > 2 and args[2] else None
+
+        impl_ids = tuple(
+            id(VENDOR_METHODS[m][v])
+            for m in FINANCIAL_METHODS
+            for v in vendor_chain
+            if m in VENDOR_METHODS and v in VENDOR_METHODS[m]
+        )
+        cache_key = (ticker, freq, curr_date, impl_ids)
+        if not hasattr(_local_state, "financial_cache"):
+            _local_state.financial_cache = {}
+
+        if cache_key in _local_state.financial_cache:
+            cached_vendor, cached_data_dict = _local_state.financial_cache[cache_key]
+            if method in cached_data_dict:
+                return cached_data_dict[method]
+            raise NoUsableFinancialDataError(
+                ticker,
+                method.removeprefix("get_"),
+                f"Method {method} not available in reconciled cache for vendor {cached_vendor}"
+            )
+
+        _local_state.in_reconciliation = True
+        last_no_data = None
+        first_error = None
+        reconciled = False
+
+        try:
+            # Fetch verified close price
+            share_price = None
+            if curr_date:
+                try:
+                    import datetime as _dt
+                    end = _dt.datetime.strptime(curr_date, "%Y-%m-%d")
+                    start = (end - _dt.timedelta(days=30)).strftime("%Y-%m-%d")
+                    raw_ohlcv = route_to_vendor("get_stock_data", ticker, start, curr_date)
+                    share_price = latest_verified_close(raw_ohlcv, curr_date)
+                except Exception as exc:
+                    logger.debug("Failed to fetch verified close for financial derived metrics: %s", exc)
+
+            for vendor in vendor_chain:
+                started = time.monotonic()
+                try:
+                    is_data = None
+                    bs_data = None
+                    cf_data = None
+                    fd_data = None
+
+                    # IS
+                    if "get_income_statement" in VENDOR_METHODS and vendor in VENDOR_METHODS["get_income_statement"]:
+                        try:
+                            is_data = VENDOR_METHODS["get_income_statement"][vendor](ticker, freq, curr_date)
+                            if not isinstance(is_data, NormalizedFinancialData):
+                                is_data = normalize_financial_result(is_data, source=vendor)
+                            val = validate_financial_result(is_data, curr_date)
+                            if not val.is_valid:
+                                log_financial_audit(ticker, vendor, "get_income_statement", "invalid", is_data, val.detail)
+                                raise NoUsableFinancialDataError(ticker, "income_statement", val.detail)
+                        except Exception as e:
+                            if method == "get_income_statement":
+                                logger.warning("Vendor %s get_income_statement failed: %s", vendor, e)
+                                raise
+                            else:
+                                is_data = None
+
+                    # BS
+                    if "get_balance_sheet" in VENDOR_METHODS and vendor in VENDOR_METHODS["get_balance_sheet"]:
+                        try:
+                            bs_data = VENDOR_METHODS["get_balance_sheet"][vendor](ticker, freq, curr_date)
+                            if not isinstance(bs_data, NormalizedFinancialData):
+                                bs_data = normalize_financial_result(bs_data, source=vendor)
+                            val = validate_financial_result(bs_data, curr_date)
+                            if not val.is_valid:
+                                log_financial_audit(ticker, vendor, "get_balance_sheet", "invalid", bs_data, val.detail)
+                                raise NoUsableFinancialDataError(ticker, "balance_sheet", val.detail)
+                        except Exception as e:
+                            if method == "get_balance_sheet":
+                                logger.warning("Vendor %s get_balance_sheet failed: %s", vendor, e)
+                                raise
+                            else:
+                                bs_data = None
+
+                    # CF
+                    if "get_cashflow" in VENDOR_METHODS and vendor in VENDOR_METHODS["get_cashflow"]:
+                        try:
+                            cf_data = VENDOR_METHODS["get_cashflow"][vendor](ticker, freq, curr_date)
+                            if not isinstance(cf_data, NormalizedFinancialData):
+                                cf_data = normalize_financial_result(cf_data, source=vendor)
+                            val = validate_financial_result(cf_data, curr_date)
+                            if not val.is_valid:
+                                log_financial_audit(ticker, vendor, "get_cashflow", "invalid", cf_data, val.detail)
+                                raise NoUsableFinancialDataError(ticker, "cashflow", val.detail)
+                        except Exception as e:
+                            if method == "get_cashflow":
+                                logger.warning("Vendor %s get_cashflow failed: %s", vendor, e)
+                                raise
+                            else:
+                                cf_data = None
+
+                    # Fundamentals
+                    if "get_fundamentals" in VENDOR_METHODS and vendor in VENDOR_METHODS["get_fundamentals"]:
+                        try:
+                            fd_data = VENDOR_METHODS["get_fundamentals"][vendor](ticker, curr_date)
+                            if not isinstance(fd_data, NormalizedFinancialData):
+                                fd_data = normalize_financial_result(fd_data, source=vendor)
+                            val = validate_financial_result(fd_data, curr_date)
+                            if not val.is_valid:
+                                log_financial_audit(ticker, vendor, "get_fundamentals", "invalid", fd_data, val.detail)
+                                raise NoUsableFinancialDataError(ticker, "fundamentals", val.detail)
+                        except Exception as e:
+                            if method == "get_fundamentals":
+                                logger.warning("Vendor %s get_fundamentals failed: %s", vendor, e)
+                                raise
+                            else:
+                                fd_data = None
+
+                    # Determine period and reconcile
+                    is_periods = {m.period for m in is_data.metrics} if is_data else set()
+                    bs_periods = {m.period for m in bs_data.metrics} if bs_data else set()
+                    cf_periods = {m.period for m in cf_data.metrics} if cf_data else set()
+
+                    present_periods = [p for p in (is_periods, bs_periods, cf_periods) if p]
+                    common_periods = set()
+                    if len(present_periods) >= 2:
+                        common_periods = present_periods[0]
+                        for p in present_periods[1:]:
+                            common_periods = common_periods & p
+                    elif len(present_periods) == 1:
+                        common_periods = present_periods[0]
+
+                    active_statements_count = sum(1 for d in (is_data, bs_data, cf_data) if d)
+                    if active_statements_count >= 2 and not common_periods:
+                        p_detail = f"Period inconsistency: IS periods={is_periods}, BS periods={bs_periods}, CF periods={cf_periods}"
+                        for name, d in [("IS", is_data), ("BS", bs_data), ("CF", cf_data)]:
+                            if d: log_financial_audit(ticker, vendor, f"get_{name.lower()}", "invalid", d, p_detail)
+                        raise NoUsableFinancialDataError(ticker, "financial_reconciliation", p_detail)
+
+                    latest_period = None
+                    latest_period_type = "quarterly"
+                    if common_periods:
+                        def parse_period_key(p_str):
+                            m = re.search(r"Q([1-4])\s+(\d{4})", p_str, re.IGNORECASE)
+                            if m:
+                                return int(m.group(2)), int(m.group(1))
+                            m = re.search(r"(?:FY|ANNUAL)\s+(\d{4})", p_str, re.IGNORECASE)
+                            if m:
+                                return int(m.group(1)), 12
+                            m = re.match(r"^\d{4}$", p_str)
+                            if m:
+                                return int(p_str), 12
+                            return 0, 0
+                        latest_period = max(common_periods, key=parse_period_key)
+                        latest_period_type = "quarterly" if "Q" in latest_period.upper() else "annual"
+
+                        # Reconcile financials only if at least two statements are present
+                        if active_statements_count >= 2:
+                            is_reconciled, recon_error = reconcile_financials(ticker, latest_period, is_data, bs_data, cf_data)
+                            if not is_reconciled:
+                                for name, d in [("IS", is_data), ("BS", bs_data), ("CF", cf_data)]:
+                                    if d: log_financial_audit(ticker, vendor, f"get_{name.lower()}", "invalid", d, recon_error)
+                                raise NoUsableFinancialDataError(ticker, "financial_reconciliation", recon_error)
+
+                    # Compute derived metrics
+                    derived = []
+                    if latest_period:
+                        derived = compute_derived_metrics(
+                            latest_period,
+                            latest_period_type,
+                            is_data,
+                            bs_data,
+                            cf_data,
+                            fd_data,
+                            share_price
+                        )
+
+                    # Store results in cache
+                    data_dict = {}
+                    if is_data:
+                        data_dict["get_income_statement"] = render_financial_data(is_data, derived)
+                        log_financial_audit(ticker, vendor, "get_income_statement", "verified", is_data)
+                    if bs_data:
+                        data_dict["get_balance_sheet"] = render_financial_data(bs_data, derived)
+                        log_financial_audit(ticker, vendor, "get_balance_sheet", "verified", bs_data)
+                    if cf_data:
+                        data_dict["get_cashflow"] = render_financial_data(cf_data, derived)
+                        log_financial_audit(ticker, vendor, "get_cashflow", "verified", cf_data)
+                    if fd_data:
+                        data_dict["get_fundamentals"] = render_financial_data(fd_data, [])
+                        log_financial_audit(ticker, vendor, "get_fundamentals", "verified", fd_data)
+
+                    _local_state.financial_cache[cache_key] = (vendor, data_dict)
+                    _record_vendor_verification(vendor, category, method, "available", "analysis", started)
+                    reconciled = True
+                    break
+
+                except VendorRateLimitError as e:
+                    _record_vendor_verification(vendor, category, method, "rate_limited", "analysis", started, e)
+                    continue
+                except VendorNotConfiguredError as e:
+                    _record_vendor_verification(vendor, category, method, "not_configured", "analysis", started, e)
+                    if first_error is None:
+                        first_error = e
+                    continue
+                except (NoMarketDataError, NoUsableFinancialDataError) as e:
+                    _record_vendor_verification(vendor, category, method, "no_data", "analysis", started, e)
+                    last_no_data = e
+                    continue
+                except Exception as e:
+                    _record_vendor_verification(vendor, category, method, "unavailable", "analysis", started, e)
+                    if first_error is None:
+                        first_error = e
+                    continue
+
+            if not reconciled:
+                if last_no_data is not None:
+                    raise last_no_data
+                if first_error is not None:
+                    raise first_error
+                raise RuntimeError(f"No available vendor for '{method}'")
+
+        finally:
+            _local_state.in_reconciliation = False
+
+        cached_vendor, cached_data_dict = _local_state.financial_cache[cache_key]
+        if method in cached_data_dict:
+            return cached_data_dict[method]
+        raise NoUsableFinancialDataError(
+            ticker,
+            method.removeprefix("get_"),
+            f"Method {method} not available in reconciled cache for vendor {cached_vendor}"
+        )
+
+    # --- Non-Financial Methods Routing (OHLCV, Indicators, News, etc.) ---
     last_no_data: VendorError | None = None
     first_error: Exception | None = None
     for vendor in vendor_chain:
@@ -289,19 +559,6 @@ def route_to_vendor(method: str, *args, **kwargs):
                     reference_close = latest_verified_close(raw_ohlcv, curr_date)
                 normalized = normalize_indicator_result(result, indicator, str(args[2]))
                 validation = validate_indicator_result(normalized, reference_close=reference_close)
-            elif method in FINANCIAL_METHODS:
-                normalized = (
-                    result
-                    if isinstance(result, NormalizedFinancialData)
-                    else normalize_financial_result(result, source=vendor)
-                )
-                analysis_date = (
-                    str(args[1]) if method == "get_fundamentals" and len(args) > 1
-                    else str(args[2]) if len(args) > 2 and args[2]
-                    else None
-                )
-                validation = validate_financial_result(normalized, analysis_date)
-                normalized_result = render_financial_data(normalized)
             else:
                 validation = validate_vendor_result(method, result)
             if not validation.is_valid:
@@ -309,12 +566,6 @@ def route_to_vendor(method: str, *args, **kwargs):
                     error = NoUsableTechnicalIndicatorError(
                         str(args[0]),
                         str(args[1]),
-                        validation.detail or "vendor data failed validation",
-                    )
-                elif method in FINANCIAL_METHODS:
-                    error = NoUsableFinancialDataError(
-                        str(args[0]),
-                        method.removeprefix("get_"),
                         validation.detail or "vendor data failed validation",
                     )
                 else:
@@ -341,23 +592,18 @@ def route_to_vendor(method: str, *args, **kwargs):
             _record_vendor_verification(vendor, category, method, "not_configured", "analysis", started, e)
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
             if first_error is None:
-                first_error = e  # Surface it if no other vendor can serve the call.
+                first_error = e
             continue
         except NoMarketDataError as e:
             _record_vendor_verification(vendor, category, method, "no_data", "analysis", started, e)
-            last_no_data = e  # No data here; another configured vendor may have it
+            last_no_data = e
             continue
         except Exception as e:
             _record_vendor_verification(vendor, category, method, "unavailable", "analysis", started, e)
-            # Don't let one vendor's failure crash the call when another can
-            # serve it, but never swallow silently: a broken primary must be
-            # visible in the logs (#989), not hidden behind a fallback's verdict.
             logger.warning("Vendor %r failed for %s: %s", vendor, method, e)
             if first_error is None:
                 first_error = e
             continue
-
-    # If any vendor reported "no data", the symbol is genuinely unavailable.
     # Return one explicit, instructive sentinel rather than a vendor-specific
     # empty string, so the agent reports "unavailable" instead of inventing a
     # value. This takes precedence over incidental fallback errors.

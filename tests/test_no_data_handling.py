@@ -34,7 +34,7 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
     def test_empty_download_raises_and_does_not_cache(self):
         with mock.patch("tradingagents.dataflows.symbol_utils.is_westock_available", return_value=True), \
                 mock.patch("tradingagents.dataflows.symbol_utils.run_westock", return_value="[]") as run, \
-                mock.patch("tradingagents.dataflows.interface.route_to_vendor", side_effect=NoMarketDataError("FAKE")), \
+                mock.patch("tradingagents.dataflows.interface.route_to_vendor", side_effect=NoMarketDataError("FAKE")) as route_mock, \
                 self.assertRaises(NoMarketDataError):
             stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
         # Nothing should have been written to the cache.
@@ -43,11 +43,11 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
         # A second call must re-attempt the fetch (no poisoned cache served).
         with mock.patch("tradingagents.dataflows.symbol_utils.is_westock_available", return_value=True), \
                 mock.patch("tradingagents.dataflows.symbol_utils.run_westock", return_value="[]") as run2, \
-                mock.patch("tradingagents.dataflows.interface.route_to_vendor", side_effect=NoMarketDataError("FAKE")):
+                mock.patch("tradingagents.dataflows.interface.route_to_vendor", side_effect=NoMarketDataError("FAKE")) as route_mock2:
             with self.assertRaises(NoMarketDataError):
                 stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
-            self.assertTrue(run.called)
-            self.assertTrue(run2.called)
+            self.assertTrue(route_mock.called)
+            self.assertTrue(route_mock2.called)
 
 
 @pytest.mark.unit

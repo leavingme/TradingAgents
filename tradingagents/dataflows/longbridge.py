@@ -38,6 +38,8 @@ from typing import Any
 
 import pandas as pd
 
+from .errors import NoMarketDataError
+
 
 # ---- Symbol normalization (matches TradingAgents conventions) ----
 
@@ -196,7 +198,7 @@ def get_stock_data(
         start = datetime.strptime(start_date, "%Y-%m-%d")
         end = datetime.strptime(end_date, "%Y-%m-%d")
     except ValueError as e:
-        return f"Error: invalid date format (need yyyy-mm-dd): {e}"
+        raise ValueError(f"invalid date format (need yyyy-mm-dd): {e}") from e
 
     span_days = max((end - start).days + 1, 30)
     count = min(max(span_days + 5, 30), 500)
@@ -204,10 +206,10 @@ def get_stock_data(
     try:
         raw = _run_cli_json_list(["kline", sym, "--period", "day", "--count", str(count)])
     except LongbridgeCLIError as e:
-        return f"Error fetching data for {sym}: {e}"
+        raise LongbridgeCLIError(f"Error fetching data for {sym}: {e}") from e
 
     if not raw:
-        return f"No data found for symbol '{sym}' between {start_date} and {end_date}"
+        raise NoMarketDataError(symbol, sym, f"no rows between {start_date} and {end_date}")
 
     rows = []
     for k in raw:
@@ -227,14 +229,14 @@ def get_stock_data(
 
     df = pd.DataFrame(rows)
     if df.empty:
-        return f"No data found for symbol '{sym}' between {start_date} and {end_date}"
+        raise NoMarketDataError(symbol, sym, "no parseable OHLCV rows")
 
     df = normalize_ohlcv_dates(df, cache_key)
     df = df[(df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))]
     df = filter_completed_daily_bars(df, cache_key)
     df = df.sort_values("Date")
     if df.empty:
-        return f"No data found for symbol '{sym}' between {start_date} and {end_date}"
+        raise NoMarketDataError(symbol, sym, f"no completed rows between {start_date} and {end_date}")
 
     # --- cache write ---
     merge_and_write_ohlcv(cache_dir, cache_key, df)
@@ -431,7 +433,7 @@ def get_indicators(
     try:
         end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     except ValueError as e:
-        return f"Error: invalid curr_date '{curr_date}': {e}"
+        raise ValueError(f"invalid curr_date {curr_date!r}: {e}") from e
     indicator_key = _INDICATOR_ALIASES.get(indicator.lower().strip(), indicator.lower().strip())
     min_lookback = {
         "close_10_ema": 30,
@@ -488,44 +490,21 @@ def get_indicators(
 # returns the full IS/BS/CF tree in one call. We expose all 5 entry points so
 # the router can route each one correctly.
 
-def get_fundamentals(symbol: Annotated[str, "ticker symbol"]) -> str:
+def get_fundamentals(
+    symbol: Annotated[str, "ticker symbol"],
+    curr_date: str | None = None,
+) -> object:
     """
     Top-line fundamentals summary (name, EPS, BPS, shares, dividend)
     plus valuation ratios (PE / PB / PS / turnover_rate / mktcap).
     """
     sym = normalize_symbol(symbol)
-    lines = [f"# Fundamentals summary for {sym}", ""]
-
-    try:
-        static_raw = _run_cli_json_list(["static", sym])
-    except LongbridgeCLIError as e:
-        static_raw = []
-        lines.append(f"(static failed: {e})")
-
-    if static_raw:
-        s = static_raw[0]
-        lines.append("## Reference")
-        for k in ("name", "exchange", "currency", "lot_size", "total_shares", "eps", "eps_ttm", "bps", "dividend"):
-            if k in s:
-                lines.append(f"  {k}: {s[k]}")
-        lines.append("")
-
-    try:
-        idx_raw = _run_cli_json_list(["calc-index", sym])
-    except LongbridgeCLIError as e:
-        idx_raw = []
-        lines.append(f"(calc-index failed: {e})")
-
-    if idx_raw:
-        i = idx_raw[0] if isinstance(idx_raw[0], dict) else {}
-        lines.append("## Valuation")
-        for k in ("pe", "pb", "ps", "dps_rate", "turnover_rate", "mktcap"):
-            if k in i:
-                lines.append(f"  {k}: {i[k]}")
-        lines.append("")
-
-    lines.append(f"Data retrieved from Longbridge CLI on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    return "\n".join(lines)
+    static_raw = _run_cli_json_list(["static", sym])
+    idx_raw = _run_cli_json_list(["calc-index", sym])
+    from .longbridge_financial_adapter import adapt_longbridge_company_reference
+    return adapt_longbridge_company_reference(
+        static_raw, idx_raw, sym, "longbridge"
+    )
 
 
 def _flatten_financial(report: dict, kind: str, sym: str) -> str:
@@ -593,31 +572,46 @@ def _flatten_financial(report: dict, kind: str, sym: str) -> str:
     return "\n".join(lines)
 
 
-def get_income_statement(symbol: Annotated[str, "ticker symbol"]) -> str:
+def get_income_statement(
+    symbol: Annotated[str, "ticker symbol"],
+    freq: str | None = None,
+    curr_date: str | None = None,
+) -> str:
     sym = normalize_symbol(symbol)
     try:
         raw = _run_cli_json_dict(["financial-report", sym, "--kind", "IS"])
     except LongbridgeCLIError as e:
-        return f"Error fetching IS for {sym}: {e}"
-    return _flatten_financial(raw, "IS", sym)
+        raise LongbridgeCLIError(f"Error fetching IS for {sym}: {e}") from e
+    from .longbridge_financial_adapter import adapt_longbridge_financial_report
+    return adapt_longbridge_financial_report(raw, "IS", "longbridge", sym)
 
 
-def get_balance_sheet(symbol: Annotated[str, "ticker symbol"]) -> str:
+def get_balance_sheet(
+    symbol: Annotated[str, "ticker symbol"],
+    freq: str | None = None,
+    curr_date: str | None = None,
+) -> str:
     sym = normalize_symbol(symbol)
     try:
         raw = _run_cli_json_dict(["financial-report", sym, "--kind", "BS"])
     except LongbridgeCLIError as e:
-        return f"Error fetching BS for {sym}: {e}"
-    return _flatten_financial(raw, "BS", sym)
+        raise LongbridgeCLIError(f"Error fetching BS for {sym}: {e}") from e
+    from .longbridge_financial_adapter import adapt_longbridge_financial_report
+    return adapt_longbridge_financial_report(raw, "BS", "longbridge", sym)
 
 
-def get_cashflow(symbol: Annotated[str, "ticker symbol"]) -> str:
+def get_cashflow(
+    symbol: Annotated[str, "ticker symbol"],
+    freq: str | None = None,
+    curr_date: str | None = None,
+) -> str:
     sym = normalize_symbol(symbol)
     try:
         raw = _run_cli_json_dict(["financial-report", sym, "--kind", "CF"])
     except LongbridgeCLIError as e:
-        return f"Error fetching CF for {sym}: {e}"
-    return _flatten_financial(raw, "CF", sym)
+        raise LongbridgeCLIError(f"Error fetching CF for {sym}: {e}") from e
+    from .longbridge_financial_adapter import adapt_longbridge_financial_report
+    return adapt_longbridge_financial_report(raw, "CF", "longbridge", sym)
 
 
 # ---- Compat aliases (legacy SDK path exposed the same names) ----

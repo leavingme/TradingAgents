@@ -57,6 +57,16 @@ class FakeCompiledGraph:
         }
 
 
+class FailingCompiledGraph:
+    def stream(self, init_state, **kwargs):
+        from tradingagents.dataflows.errors import NoUsableFinancialDataError
+
+        raise NoUsableFinancialDataError(
+            init_state["company_of_interest"], "income_statement", "missing currency"
+        )
+        yield  # pragma: no cover
+
+
 class FakeMemoryLog:
     def __init__(self):
         self.decisions = []
@@ -140,6 +150,30 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert isinstance(completed.content, dict)
     assert completed.content["decision"] == "Hold"
     assert Path(completed.content["report_path"]).exists()
+
+
+def test_data_validation_error_stops_run_without_report_or_completion(monkeypatch, tmp_path):
+    from tradingagents.runtime import analysis_runner
+
+    class FailingTradingAgentsGraph(FakeTradingAgentsGraph):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.graph = FailingCompiledGraph()
+
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", FailingTradingAgentsGraph)
+    report_dir = tmp_path / "reports"
+    events = list(run_analysis_stream(AnalysisRequest(
+        ticker="0700.HK",
+        analysis_date="2026-07-10",
+        selected_analysts=("fundamentals",),
+        report_dir=report_dir,
+        run_id="run-financial-gate",
+    )))
+
+    assert events[-1].type == "error"
+    assert events[-1].content["error_type"] == "NoUsableFinancialDataError"
+    assert not any(event.type == "run_completed" for event in events)
+    assert not report_dir.exists()
 
 
 class FakeStatsHandler:

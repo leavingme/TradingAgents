@@ -8,27 +8,18 @@ the analyst is told to treat as the source of truth for any exact numeric
 claim. Deterministic, no LLM involved.
 
 Data source: routes through ``data_vendors.core_stock_apis`` (default
-``longbridge_mcp, longbridge, westock``), with a direct Westock loader fallback
-if the configured vendor chain fails.
+``longbridge_mcp, longbridge, westock``). Validation and fallback are owned by
+the shared vendor router.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from io import StringIO
-import logging
-
 import pandas as pd
 from stockstats import wrap
 
-from tradingagents.dataflows.config import get_config
-from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.interface import route_to_vendor
-from tradingagents.dataflows.stockstats_utils import (
-    load_ohlcv as _westock_load_ohlcv,
-)
-
-logger = logging.getLogger(__name__)
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
 DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
@@ -87,42 +78,17 @@ def _load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     """OHLCV via the configured ``core_stock_apis`` vendor chain.
 
     Honours the user's ``data_vendors.core_stock_apis`` setting (typically
-    ``longbridge_mcp, longbridge, westock``) and falls back to the Westock loader if
-    the configured chain fails for any reason.
+    ``longbridge_mcp, longbridge, westock``). The shared router validates each
+    result and controls all fallback behavior.
     """
-    cfg = get_config()
-    chain = (cfg.get("data_vendors") or {}).get("core_stock_apis", "")
-    explicit = [v.strip() for v in chain.split(",") if v.strip() and v.strip() != "default"]
-
-    if explicit:
-        # Pull a 365-day window ending at curr_date for indicator coverage.
-        # 200 SMA needs 200+ trading days ≈ 280 calendar days; 365 days gives
-        # a comfortable buffer for simple averages and convergence room for EMAs.
-        try:
-            import datetime as _dt
-            end = _dt.datetime.strptime(curr_date, "%Y-%m-%d")
-            start = (end - _dt.timedelta(days=365)).strftime("%Y-%m-%d")
-            raw = route_to_vendor("get_stock_data", symbol, start, curr_date)
-            df = _parse_vendor_csv(raw)
-            if not df.empty and "Close" in df.columns:
-                return df
-            logger.warning(
-                "data_vendors chain %s returned empty/invalid for %s; "
-                "falling back to westock", explicit, symbol,
-            )
-        except NoMarketDataError as exc:
-            logger.warning(
-                "data_vendors chain %s raised NoMarketDataError for %s "
-                "(%s); falling back to westock",
-                explicit, symbol, exc,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "data_vendors chain %s raised %s for %s; falling back to westock",
-                explicit, type(exc).__name__, symbol,
-            )
-
-    return _westock_load_ohlcv(symbol, curr_date)
+    # Pull a 365-day window ending at curr_date for indicator coverage.
+    # 200 SMA needs 200+ trading days ≈ 280 calendar days; 365 days gives
+    # a comfortable buffer for simple averages and convergence room for EMAs.
+    import datetime as _dt
+    end = _dt.datetime.strptime(curr_date, "%Y-%m-%d")
+    start = (end - _dt.timedelta(days=365)).strftime("%Y-%m-%d")
+    raw = route_to_vendor("get_stock_data", symbol, start, curr_date)
+    return _parse_vendor_csv(raw)
 
 
 def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:

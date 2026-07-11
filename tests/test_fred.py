@@ -68,11 +68,9 @@ class FredResolutionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 fred._resolve_series_id(bad)
 
-    def test_get_macro_data_returns_guidance_on_bad_indicator(self):
-        # Invalid indicator -> actionable message, not a crash (no API call).
-        out = fred.get_macro_data("bank of japan rate", "2026-01-01")
-        self.assertIn("FRED", out)
-        self.assertIn("not a known macro alias", out)
+    def test_get_macro_data_raises_on_bad_indicator(self):
+        with self.assertRaisesRegex(fred.NoMarketDataError, "not a known macro alias"):
+            fred.get_macro_data("bank of japan rate", "2026-01-01")
 
 
 @pytest.mark.unit
@@ -106,19 +104,17 @@ class FredFormattingTests(unittest.TestCase):
         # the "." observation must not appear as a row
         self.assertNotIn("2025-08-01", out)
 
-    def test_empty_window_reports_no_observations(self):
+    def test_empty_window_raises_no_data(self):
         empty = {"observations": []}
-        with mock.patch.object(fred, "_request", side_effect=_request_stub(obs=empty)):
-            out = fred.get_macro_data("unemployment", "2025-09-30", 30)
-        self.assertIn("No observations", out)
+        with mock.patch.object(fred, "_request", side_effect=_request_stub(obs=empty)), \
+                self.assertRaisesRegex(fred.NoMarketDataError, "no observations"):
+            fred.get_macro_data("unemployment", "2025-09-30", 30)
 
-    def test_unknown_series_returns_not_found_message(self):
-        # A well-formed but unknown series ID returns guidance, not a crash, so
-        # the run is not aborted over an optional macro lookup.
+    def test_unknown_series_raises_no_data(self):
         no_series = {"seriess": []}
-        with mock.patch.object(fred, "_request", side_effect=_request_stub(meta=no_series)):
-            out = fred.get_macro_data("totally_unknown_xyz", "2025-09-30", 30)
-        self.assertIn("not found", out)
+        with mock.patch.object(fred, "_request", side_effect=_request_stub(meta=no_series)), \
+                self.assertRaisesRegex(fred.NoMarketDataError, "not found"):
+            fred.get_macro_data("totally_unknown_xyz", "2025-09-30", 30)
 
     def test_long_series_is_truncated_but_change_uses_full_range(self):
         # Build > MAX_ROWS observations deterministically.

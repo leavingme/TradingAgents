@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from .errors import VendorNotConfiguredError
+from .errors import NoMarketDataError, VendorNotConfiguredError
 
 logger = logging.getLogger(__name__)
 
@@ -133,78 +133,6 @@ def _request(path: str, params: dict) -> dict:
     return response.json()
 
 
-def _search_macro_fallback(indicator: str, curr_date: str) -> str:
-    """Fallback to searching DuckDuckGo for the macro indicator when FRED is missing."""
-    from .duckduckgo_search import ddg_search
-
-    # Map friendly alias to readable name for query
-    readable = indicator.replace("_", " ").strip()
-    query = f"US {readable} macro economy data value {curr_date[:4]}"
-    logger.info("FRED API Key missing; falling back to DuckDuckGo search for macro query %r", query)
-
-    try:
-        results = ddg_search(query, limit=5)
-    except Exception as e:
-        return f"FRED: API Key not configured and web search fallback failed: {e}"
-
-    if not results:
-        return f"FRED: API Key not configured and no search results found for query '{query}'"
-
-    lines = [
-        f"## FRED Fallback: {readable.upper()} Search Results",
-        f"- Note: FRED_API_KEY not configured. This is a search-based fallback for date around {curr_date}.",
-        "",
-        "### Recent relevant news/data observations",
-        ""
-    ]
-    for r in results:
-        lines.append(f"#### {r['title']} (source: {r['publisher']})")
-        if r["summary"]:
-            lines.append(r["summary"])
-        if r["link"]:
-            lines.append(f"Link: {r['link']}")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-_FRED_TO_WESTOCK_MAP = {
-    # Policy rates
-    "FEDFUNDS": "us_monetary",
-    "fed_funds_rate": "us_monetary",
-    "federal_funds_rate": "us_monetary",
-    "fed_funds": "us_monetary",
-    # Yields
-    "DGS2": "us_monetary",
-    "DGS10": "us_monetary",
-    "DGS30": "us_monetary",
-    "T10Y2Y": "us_monetary",
-    "10y_2y_spread": "us_monetary",
-    "yield_curve": "us_monetary",
-    # Inflation
-    "CPIAUCSL": "us_inflation",
-    "cpi": "us_inflation",
-    "core_cpi": "us_inflation",
-    "CPILFESL": "us_inflation",
-    "pce": "us_inflation",
-    "PCEPI": "us_inflation",
-    "core_pce": "us_inflation",
-    "PCEPILFE": "us_inflation",
-    "inflation_expectations": "us_inflation",
-    # Growth
-    "GDPC1": "us_eco_growth",
-    "gdp": "us_eco_growth",
-    "real_gdp": "us_eco_growth",
-    # Labor
-    "UNRATE": "us_employment",
-    "unemployment_rate": "us_employment",
-    "unemployment": "us_employment",
-    "PAYEMS": "us_employment",
-    "nonfarm_payrolls": "us_employment",
-    "payrolls": "us_employment",
-}
-
-
 def get_macro_data(
     indicator: str,
     curr_date: str,
@@ -229,81 +157,17 @@ def get_macro_data(
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
 
-    from .symbol_utils import is_westock_available, run_westock
-    if is_westock_available():
-        # Get mapped westock indicator
-        w_indicator = _FRED_TO_WESTOCK_MAP.get(indicator)
-        if not w_indicator:
-            try:
-                resolved_id = _resolve_series_id(indicator)
-                w_indicator = _FRED_TO_WESTOCK_MAP.get(resolved_id)
-            except ValueError:
-                pass
-
-        if w_indicator:
-            logger.info("westock-data available; fetching macro indicator %s (mapped to %s)", indicator, w_indicator)
-            try:
-                raw = run_westock(["macro", "indicator", w_indicator], raw=True)
-                import json
-                data = json.loads(raw)
-                if data and isinstance(data, list):
-                    # Flatten list of lists/dicts
-                    flat_data = []
-                    for item in data:
-                        if isinstance(item, list):
-                            flat_data.extend(item)
-                        elif isinstance(item, dict):
-                            flat_data.append(item)
-
-                    # Filter by OccurDate <= curr_date (format YYYYMMDD)
-                    cutoff_int = int(curr_date.replace("-", ""))
-                    flat_data = [d for d in flat_data if d.get("OccurDate", 99999999) <= cutoff_int]
-
-                    # Sort by date descending
-                    flat_data.sort(key=lambda x: x.get("OccurDate", 0), reverse=True)
-
-                    shown = flat_data[:40]
-                    lines = [
-                        f"## westock-data Macro Indicator: {indicator.upper()} (via {w_indicator})",
-                        f"- Requested date: {curr_date}",
-                        f"- Window: {start_date} to {curr_date}",
-                        "",
-                        "| Date | Indicator Name | Actual | Forecast | Former |",
-                        "| --- | --- | ---: | ---: | ---: |"
-                    ]
-                    for d in shown:
-                        date_str = str(d.get("OccurDate", ""))
-                        if len(date_str) == 8:
-                            date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                        name = d.get("IndicatorName", "")
-                        actual = d.get("ActualValue") or "N/A"
-                        forecast = d.get("ForecastValue") or "N/A"
-                        former = d.get("FormerValue") or "N/A"
-                        lines.append(f"| {date_str} | {name} | {actual} | {forecast} | {former} |")
-
-                    return "\n".join(lines)
-            except Exception as exc:
-                logger.warning("westock-data macro fetch failed: %s; trying FRED", exc)
-
-    # Check API key configuration upfront
-    try:
-        get_api_key()
-    except FredNotConfiguredError:
-        return _search_macro_fallback(indicator, curr_date)
-
-    # Invalid LLM-supplied indicator: return guidance rather than raising, so a
-    # bad argument doesn't abort the run (the routing layer also degrades macro
-    # data, but a specific message is more useful to the analyst).
     try:
         series_id = _resolve_series_id(indicator)
     except ValueError as e:
-        return f"FRED: {e}"
+        raise NoMarketDataError(indicator, detail=str(e)) from e
 
     meta = _request("series", {"series_id": series_id}).get("seriess") or []
     if not meta:
-        return (
-            f"FRED series '{series_id}' not found. Pass a known alias "
-            f"(e.g. 'cpi', 'unemployment') or a valid FRED series ID."
+        raise NoMarketDataError(
+            indicator,
+            series_id,
+            "FRED series was not found",
         )
     info = meta[0]
     title = info.get("title", series_id)
@@ -337,9 +201,10 @@ def get_macro_data(
     )
 
     if not points:
-        return header + (
-            f"\nNo observations for {series_id} in this window. The series may "
-            f"report less frequently than the window length; widen look_back_days."
+        raise NoMarketDataError(
+            indicator,
+            series_id,
+            "no observations in the requested window",
         )
 
     first_date, first_val = points[0]

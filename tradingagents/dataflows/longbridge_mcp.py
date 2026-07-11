@@ -28,10 +28,12 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
+
+from .errors import NoMarketDataError
 
 ROOT = Path(__file__).resolve().parents[2]  # /data/disk/workspace/TradingAgents
 TOKEN_PATH = ROOT / ".longbridge_mcp_token.json"
@@ -385,11 +387,11 @@ def get_stock_data(
     except MCPAuthError:
         raise
     except MCPTransportError as e:
-        return f"Error fetching data for {sym}: {e}"
+        raise MCPTransportError(f"Error fetching data for {sym}: {e}") from e
 
     bars = _normalize_candlesticks(raw)
     if not bars:
-        return f"No data found for symbol '{sym}' between {start_date} and {end_date}"
+        raise NoMarketDataError(symbol, sym, f"no rows between {start_date} and {end_date}")
 
     rows = []
     for b in bars:
@@ -495,7 +497,7 @@ def get_indicators(
     try:
         end = datetime.strptime(curr_date, "%Y-%m-%d")
     except ValueError as e:
-        return f"Error: invalid curr_date '{curr_date}': {e}"
+        raise ValueError(f"invalid curr_date {curr_date!r}: {e}") from e
 
     indicator_key = _INDICATOR_ALIASES.get(indicator.lower().strip(), indicator.lower().strip())
     script = _PINE_TEMPLATES.get(indicator_key)
@@ -602,7 +604,7 @@ def _summarize_quant_payload(raw: Any) -> str:
                 if ts_ms is not None:
                     bar_times.append(str(ts_ms))
 
-    series_results: list[tuple[str, list[float]]] = []
+    series_results: list[tuple[str, list[float], list[tuple[str, float]]]] = []
     items = sorted(series_graphs.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 999)
     for idx, body in items:
         plot = body.get("Plot") if isinstance(body, dict) else None
@@ -612,9 +614,17 @@ def _summarize_quant_payload(raw: Any) -> str:
         if not isinstance(vals, list) or not vals:
             continue
         float_vals: list[float] = []
-        for v in vals:
+        dated_values: list[tuple[str, float]] = []
+        for value_index, v in enumerate(vals):
             try:
-                float_vals.append(float(v))
+                numeric = float(v)
+                float_vals.append(numeric)
+                if value_index < len(bar_times):
+                    timestamp = float(bar_times[value_index])
+                    if timestamp > 10_000_000_000:
+                        timestamp /= 1000
+                    date_text = datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
+                    dated_values.append((date_text, numeric))
             except (TypeError, ValueError):
                 # `None` (no-data slot) — drop the entry, don't abandon the whole series
                 continue
@@ -622,7 +632,7 @@ def _summarize_quant_payload(raw: Any) -> str:
             continue
         title = plot.get("title")
         name = title if (isinstance(title, str) and title) else f"series_{idx}"
-        series_results.append((name, float_vals))
+        series_results.append((name, float_vals, dated_values))
 
     if not series_results:
         return f"(no series extracted; series_graphs keys: {list(series_graphs.keys())[:5]})"
@@ -631,10 +641,11 @@ def _summarize_quant_payload(raw: Any) -> str:
     # indicator name when the script has no `indicator('NAME')` title); pick a
     # friendly default.
     lines = []
-    for name, vals in series_results:
+    for name, vals, dated_values in series_results:
         if not vals:
             continue
         try:
+            lines.extend(f"{date_text}: {value}" for date_text, value in dated_values)
             lines.append(
                 f"  {name}: last={vals[-1]:+.2f}  range=[{min(vals):+.2f}, {max(vals):+.2f}]  bars={len(vals)}"
             )
@@ -661,34 +672,11 @@ def get_fundamentals(
     except MCPAuthError:
         raise
     except MCPTransportError as e:
-        return f"Error fetching fundamentals for {sym}: {e}"
+        raise MCPTransportError(f"Error fetching fundamentals for {sym}: {e}") from e
 
-    s_item = _first_item(s)
-    i_item = _first_item(i)
-
-    rows = [
-        ("name",          s_item.get("name") if isinstance(s_item, dict) else None),
-        ("exchange",      s_item.get("exchange") if isinstance(s_item, dict) else None),
-        ("currency",      s_item.get("currency") if isinstance(s_item, dict) else None),
-        ("lot_size",      s_item.get("lot_size") if isinstance(s_item, dict) else None),
-        ("total_shares",  s_item.get("total_shares") if isinstance(s_item, dict) else None),
-        ("eps",           s_item.get("eps") if isinstance(s_item, dict) else None),
-        ("eps_ttm",       s_item.get("eps_ttm") if isinstance(s_item, dict) else None),
-        ("bps",           s_item.get("bps") if isinstance(s_item, dict) else None),
-        ("dividend",      s_item.get("dividend") if isinstance(s_item, dict) else None),
-        ("pe_ttm_ratio",  i_item.get("pe_ttm_ratio") if isinstance(i_item, dict) else None),
-        ("pb_ratio",      i_item.get("pb_ratio") if isinstance(i_item, dict) else None),
-        ("ps_ratio",      i_item.get("ps_ratio") if isinstance(i_item, dict) else None),
-        ("dps_ratio_ttm", i_item.get("dps_ratio_ttm") if isinstance(i_item, dict) else None),
-        ("turnover_rate", i_item.get("turnover_rate") if isinstance(i_item, dict) else None),
-        ("total_market_value", i_item.get("total_market_value") if isinstance(i_item, dict) else None),
-    ]
-    rows = [(k, v) for k, v in rows if v is not None]
-    table = _format_text_table(("metric", "value"), rows)
-    return (
-        f"# Fundamentals summary for {sym}\n\n"
-        + table + "\n\n"
-        f"Data retrieved from Longbridge MCP on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    from .longbridge_financial_adapter import adapt_longbridge_company_reference
+    return adapt_longbridge_company_reference(
+        s, i, sym, "longbridge_mcp"
     )
 
 
@@ -703,6 +691,7 @@ def _first_item(raw: Any) -> dict:
 
 def _get_financial_statement(
     symbol: str,
+    kind: str,
     freq: Optional[str] = None,
     curr_date: Optional[str] = None,
 ) -> str:
@@ -724,8 +713,8 @@ def _get_financial_statement(
     sym = normalize_symbol(symbol)
     args = {
         "symbol": sym,
-        "kind": _kind_for_symbol_or_freq(symbol, freq),
-        "report_type": "qf",       # quarterly full → TradingAgents LLM context-friendly
+        "kind": kind,
+        "report_type": "af" if str(freq).lower() == "annual" else "qf",
     }
     try:
         client = _client()
@@ -733,7 +722,7 @@ def _get_financial_statement(
     except MCPAuthError:
         raise
     except MCPTransportError as e:
-        return f"Error fetching {args['kind']} for {sym}: {e}"
+        raise MCPTransportError(f"Error fetching {args['kind']} for {sym}: {e}") from e
 
     # Normalize MCP's lowercase-with-underscore key back to uppercase so the CLI
     # vendored flattener picks it up unchanged.
@@ -746,27 +735,8 @@ def _get_financial_statement(
                 if src in report_list and dst not in report_list:
                     report_list[dst] = report_list.pop(src)
 
-    from .longbridge import _flatten_financial  # type: ignore
-    return _flatten_financial(raw, kind, sym)
-
-
-def _kind_for_symbol_or_freq(symbol: str, freq: Optional[str]) -> str:
-    """
-    Map the 3-arg vendor call (ticker, freq, curr_date) onto the financial-statement
-    type. The graph calls three separate entry points (get_income_statement /
-    get_balance_sheet / get_cashflow) but they all funnel through here; we
-    determine the section from the call site by inspecting the symbol of the
-    enclosing function via the function name (passed at dispatch) — instead,
-    use a tiny dispatcher using `freq` heuristics:
-      freq == 'quarterly' / 'annual' etc. don't carry the IS/BS/CF distinction.
-
-    The proper fix is to read `freq` as either 'IS'|'BS'|'CF' (which TradingAgents
-    passes when calling these three). If freq is None, default to IS.
-    """
-    if freq is None:
-        return "IS"
-    f = str(freq).upper()
-    return f if f in ("IS", "BS", "CF") else "IS"
+    from .longbridge_financial_adapter import adapt_longbridge_financial_report
+    return adapt_longbridge_financial_report(raw, kind, "longbridge_mcp", sym)
 
 
 def get_income_statement(
@@ -774,9 +744,7 @@ def get_income_statement(
     freq: Annotated[Optional[str], "vendor-interface arg; pass 'IS' from graph"] = None,
     curr_date: Annotated[Optional[str], "current date (unused)"] = None,
 ) -> str:
-    if freq is None:
-        freq = "IS"
-    return _get_financial_statement(symbol, freq, curr_date)
+    return _get_financial_statement(symbol, "IS", freq, curr_date)
 
 
 def get_balance_sheet(
@@ -784,9 +752,7 @@ def get_balance_sheet(
     freq: Annotated[Optional[str], "vendor-interface arg; pass 'BS' from graph"] = None,
     curr_date: Annotated[Optional[str], "current date (unused)"] = None,
 ) -> str:
-    if freq is None:
-        freq = "BS"
-    return _get_financial_statement(symbol, freq, curr_date)
+    return _get_financial_statement(symbol, "BS", freq, curr_date)
 
 
 def get_cashflow(
@@ -794,9 +760,7 @@ def get_cashflow(
     freq: Annotated[Optional[str], "vendor-interface arg; pass 'CF' from graph"] = None,
     curr_date: Annotated[Optional[str], "current date (unused)"] = None,
 ) -> str:
-    if freq is None:
-        freq = "CF"
-    return _get_financial_statement(symbol, freq, curr_date)
+    return _get_financial_statement(symbol, "CF", freq, curr_date)
 
 
 # ---- Diagnostics ----

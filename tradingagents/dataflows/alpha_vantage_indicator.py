@@ -1,4 +1,5 @@
 from .alpha_vantage_common import AlphaVantageNotConfiguredError, _make_api_request
+from .errors import NoMarketDataError
 
 
 def get_indicator(
@@ -131,23 +132,24 @@ def get_indicator(
                 "datatype": "csv"
             })
         elif indicator == "vwma":
-            # Alpha Vantage doesn't have direct VWMA, so we'll return an informative message
-            # In a real implementation, this would need to be calculated from OHLCV data
-            return f"## VWMA (Volume Weighted Moving Average) for {symbol}:\n\nVWMA calculation requires OHLCV data and is not directly available from Alpha Vantage API.\nThis indicator would need to be calculated from the raw stock data using volume-weighted price averaging.\n\n{indicator_descriptions.get('vwma', 'No description available.')}"
+            raise NoMarketDataError(symbol, detail="Alpha Vantage does not provide VWMA")
         else:
-            return f"Error: Indicator {indicator} not implemented yet."
+            raise ValueError(f"Indicator {indicator} is not implemented")
 
         # Parse CSV data and extract values for the date range
         lines = data.strip().split('\n')
         if len(lines) < 2:
-            return f"Error: No data returned for {indicator}"
+            raise NoMarketDataError(symbol, detail=f"no {indicator} rows returned")
 
         # Parse header and data
         header = [col.strip() for col in lines[0].split(',')]
         try:
             date_col_idx = header.index('time')
         except ValueError:
-            return f"Error: 'time' column not found in data for {indicator}. Available columns: {header}"
+            raise NoMarketDataError(
+                symbol,
+                detail=f"time column missing from {indicator} payload; columns={header}",
+            )
 
         # Map internal indicator names to expected CSV column names from Alpha Vantage
         col_name_map = {
@@ -166,7 +168,10 @@ def get_indicator(
             try:
                 value_col_idx = header.index(target_col_name)
             except ValueError:
-                return f"Error: Column '{target_col_name}' not found for indicator '{indicator}'. Available columns: {header}"
+                raise NoMarketDataError(
+                    symbol,
+                    detail=f"{target_col_name} column missing from {indicator} payload; columns={header}",
+                )
 
         result_data = []
         for line in lines[1:]:
@@ -210,6 +215,9 @@ def get_indicator(
         # fall back / emit the no-data sentinel instead of returning this as a
         # successful-looking error string.
         raise
+    except NoMarketDataError:
+        raise
     except Exception as e:
-        print(f"Error getting Alpha Vantage indicator data for {indicator}: {e}")
-        return f"Error retrieving {indicator} data: {str(e)}"
+        raise NoMarketDataError(
+            symbol, detail=f"Alpha Vantage {indicator} request failed: {e}"
+        ) from e

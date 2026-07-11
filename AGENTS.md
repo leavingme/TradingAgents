@@ -153,6 +153,21 @@ get_cashflow(symbol, freq=None, curr_date=None)
 **已退休 vendor**：保留 `<name>_legacy.py.bak` 文件。不要把某个 vendor 从
 `VENDOR_METHODS` 里彻底删除；当 vendor-specific bug 出现时，需要旧实现作对比。
 
+### Vendor 原始能力优先
+
+- **以下各项均为硬规则，不是建议。** 新增或修改 vendor 时必须逐项满足，并由测试覆盖。
+- 使用或新增 vendor 数据前，先审计接口原始响应能力、结构、字段元数据和信息完整度，再设计 adapter、统一领域模型和 validator；不要先沿用现有文本接口再补解析。
+- vendor 原始响应为 JSON、表格或其他结构化数据时，adapter 必须直接转换为统一领域模型。禁止先压平成面向 LLM 的文本，再通过正则或字符串解析恢复结构。
+- 统一处理顺序应为：`vendor 原始响应 → vendor-specific adapter → 统一领域模型 → deterministic validator → LLM renderer`。
+- 面向 LLM 的 Markdown/文本只允许在验证通过后生成，不得作为数据层、fallback 层或 validator 的内部交换格式。
+- 当 MCP 比 CLI 提供更完整的结构化字段、逐条序列或元数据时，默认优先 MCP；CLI 作为 MCP 不可用时的 fallback，但不得把信息较少的摘要伪装成与完整数据等价。
+- 如果现有 vendor adapter 丢失原始接口已经提供的字段，应先修复 adapter 和统一模型，再编写依赖缺失字段的上层校验。
+- vendor 实现只能调用自身接口和自身缓存，禁止导入或调用其他 vendor 形成内部 fallback。所有跨 vendor fallback 必须由 `route_to_vendor()` 按配置链统一控制。
+- vendor 请求失败、认证失败、限流、无数据、字段缺失或能力不支持时必须抛出对应的类型化异常；禁止返回 `"Error ..."`、`"No data ..."`、空字符串、说明性 Markdown 或 `None` 冒充成功数据。
+- vendor 只能返回其原始接口实际提供并可规范化的数据。禁止用 Web Search、新闻摘要、估算值、静态说明或低信息摘要替代请求的数据类型。
+- 同一 vendor 内部的网络重试可以保留，但必须保持同一数据源、同一能力和同一语义；缓存命中也必须经过与在线响应相同的规范化和校验。
+- 若某个 fallback 来源需要独立配置、可观测性或质量判断，必须注册为独立 vendor，不得隐藏在另一个 vendor 实现内部。
+
 ## `_cli_entry.py` shim（调试 CLI 失败前先读）
 
 `venv/bin/tradingagents`（console script）从 `tradingagents._cli_entry`

@@ -43,6 +43,32 @@ class NoMarketDataError(VendorError):
         super().__init__(msg)
 
 
+class NoUsableTechnicalIndicatorError(VendorError):
+    """No configured vendor returned an indicator that passed validation."""
+
+    def __init__(self, symbol: str, indicator: str, detail: str = ""):
+        self.symbol = symbol
+        self.indicator = indicator
+        self.detail = detail
+        msg = f"No usable {indicator!r} indicator data for {symbol!r}"
+        if detail:
+            msg += f": {detail}"
+        super().__init__(msg)
+
+
+class NoUsableFinancialDataError(VendorError):
+    """No configured vendor returned financial data that passed validation."""
+
+    def __init__(self, symbol: str, dataset: str, detail: str = ""):
+        self.symbol = symbol
+        self.dataset = dataset
+        self.detail = detail
+        msg = f"No usable {dataset!r} financial data for {symbol!r}"
+        if detail:
+            msg += f": {detail}"
+        super().__init__(msg)
+
+
 class VendorRateLimitError(VendorError):
     """A vendor throttled the request; the router skips to the next vendor."""
 

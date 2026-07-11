@@ -1,4 +1,4 @@
-import { createProviderManager } from './components/provider-manager.js';
+import { createProviderManager } from './components/provider-manager.js?v=20260711-indicator-validation';
 import { createAgentTimeline, formatAgentName } from './components/agent-timeline.js';
 import { createReportViewer } from './components/report-viewer.js';
 import { createRunHistory } from './components/run-history.js';

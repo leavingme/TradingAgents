@@ -14,10 +14,26 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
 from .config import get_config
+from .data_validation import (
+    indicator_requires_close,
+    latest_verified_close,
+    normalize_indicator_result,
+    validate_indicator_result,
+    validate_vendor_result,
+)
 from .errors import (
     NoMarketDataError,
+    NoUsableFinancialDataError,
+    NoUsableTechnicalIndicatorError,
+    VendorError,
     VendorNotConfiguredError,
     VendorRateLimitError,
+)
+from .financial_validation import (
+    NormalizedFinancialData,
+    normalize_financial_result,
+    render_financial_data,
+    validate_financial_result,
 )
 from .duckduckgo_search import (
     get_global_news_duckduckgo,
@@ -66,6 +82,13 @@ from .westock import (
 from .westock_news import get_global_news_westock, get_news_westock
 
 logger = logging.getLogger(__name__)
+
+FINANCIAL_METHODS = {
+    "get_fundamentals",
+    "get_balance_sheet",
+    "get_cashflow",
+    "get_income_statement",
+}
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
@@ -244,7 +267,7 @@ def route_to_vendor(method: str, *args, **kwargs):
     else:
         vendor_chain = all_available_vendors
 
-    last_no_data: NoMarketDataError | None = None
+    last_no_data: VendorError | None = None
     first_error: Exception | None = None
     for vendor in vendor_chain:
         vendor_impl = VENDOR_METHODS[method][vendor]
@@ -253,8 +276,63 @@ def route_to_vendor(method: str, *args, **kwargs):
         started = time.monotonic()
         try:
             result = impl_func(*args, **kwargs)
+            normalized_result = result
+            if method == "get_indicators":
+                indicator = str(args[1])
+                reference_close = None
+                if indicator_requires_close(indicator):
+                    symbol, curr_date = str(args[0]), str(args[2])
+                    end = datetime.strptime(curr_date, "%Y-%m-%d")
+                    lookback = max(int(args[3]), 30)
+                    start = (end - timedelta(days=lookback)).strftime("%Y-%m-%d")
+                    raw_ohlcv = route_to_vendor("get_stock_data", symbol, start, curr_date)
+                    reference_close = latest_verified_close(raw_ohlcv, curr_date)
+                normalized = normalize_indicator_result(result, indicator, str(args[2]))
+                validation = validate_indicator_result(normalized, reference_close=reference_close)
+            elif method in FINANCIAL_METHODS:
+                normalized = (
+                    result
+                    if isinstance(result, NormalizedFinancialData)
+                    else normalize_financial_result(result, source=vendor)
+                )
+                analysis_date = (
+                    str(args[1]) if method == "get_fundamentals" and len(args) > 1
+                    else str(args[2]) if len(args) > 2 and args[2]
+                    else None
+                )
+                validation = validate_financial_result(normalized, analysis_date)
+                normalized_result = render_financial_data(normalized)
+            else:
+                validation = validate_vendor_result(method, result)
+            if not validation.is_valid:
+                if method == "get_indicators":
+                    error = NoUsableTechnicalIndicatorError(
+                        str(args[0]),
+                        str(args[1]),
+                        validation.detail or "vendor data failed validation",
+                    )
+                elif method in FINANCIAL_METHODS:
+                    error = NoUsableFinancialDataError(
+                        str(args[0]),
+                        method.removeprefix("get_"),
+                        validation.detail or "vendor data failed validation",
+                    )
+                else:
+                    error = NoMarketDataError(
+                        str(args[0]) if args else method,
+                        detail=validation.detail or "vendor data failed validation",
+                    )
+                _record_vendor_verification(
+                    vendor, category, method, "invalid", "analysis", started, error
+                )
+                last_no_data = error
+                logger.warning(
+                    "Vendor %r returned invalid data for %s (%s); trying next vendor.",
+                    vendor, method, validation.detail,
+                )
+                continue
             _record_vendor_verification(vendor, category, method, "available", "analysis", started)
-            return result
+            return normalized_result
         except VendorRateLimitError as e:
             _record_vendor_verification(vendor, category, method, "rate_limited", "analysis", started, e)
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
@@ -291,6 +369,8 @@ def route_to_vendor(method: str, *args, **kwargs):
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
                 method, first_error,
             )
+        if method in {"get_stock_data", "get_indicators"} | FINANCIAL_METHODS:
+            raise last_no_data
         sym = last_no_data.symbol
         canonical = last_no_data.canonical
         resolved = "" if canonical == sym else f" (resolved to '{canonical}')"

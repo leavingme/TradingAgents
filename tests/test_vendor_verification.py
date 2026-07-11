@@ -7,6 +7,9 @@ from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.vendor_verification import VendorVerificationStore
 
 
+VALID_OHLCV = "Date,Open,High,Low,Close,Volume\n2026-07-09,100,105,99,103,1000\n"
+
+
 @pytest.mark.unit
 def test_verification_store_keeps_latest_result_per_capability(tmp_path):
     store = VendorVerificationStore(tmp_path / "runs.db")
@@ -43,10 +46,10 @@ def test_router_records_analysis_success(monkeypatch):
 
     with mock.patch.dict(
         interface.VENDOR_METHODS,
-        {"get_stock_data": {"westock": lambda *args: "rows"}},
+        {"get_stock_data": {"westock": lambda *args: VALID_OHLCV}},
         clear=False,
     ):
-        assert interface.route_to_vendor("get_stock_data", "AAPL", "2026-07-01", "2026-07-10") == "rows"
+        assert interface.route_to_vendor("get_stock_data", "AAPL", "2026-07-01", "2026-07-10") == VALID_OHLCV
 
     assert recorder.call_args.args[:5] == (
         "westock",

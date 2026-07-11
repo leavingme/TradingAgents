@@ -18,6 +18,9 @@ from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 
 
+VALID_OHLCV = "Date,Open,High,Low,Close,Volume\n2026-01-09,100,105,99,103,1000\n"
+
+
 def _reset_config():
     # Hard reset: set_config() merges, so empty DEFAULT dicts (e.g. tool_vendors)
     # don't clear keys leaked by other tests. Replace the global outright.
@@ -58,27 +61,70 @@ class VendorRoutingTests(unittest.TestCase):
     def test_explicit_single_vendor_does_not_fall_back(self):
         # #988: with westock pinned, a healthy alpha_vantage must NOT be used.
         set_config({"data_vendors": {"core_stock_apis": "westock"}})
-        av = mock.Mock(side_effect=_returns("AV_DATA"))
+        av = mock.Mock(side_effect=_returns(VALID_OHLCV))
         with self._route({"westock": _no_data, "alpha_vantage": av}):
-            result = interface.route_to_vendor("get_stock_data", "FAKE", "2026-01-01", "2026-01-10")
-        self.assertIn("NO_DATA_AVAILABLE", result)
+            with self.assertRaises(NoMarketDataError):
+                interface.route_to_vendor("get_stock_data", "FAKE", "2026-01-01", "2026-01-10")
         av.assert_not_called()  # the unchosen vendor was never tried
 
     def test_explicit_multi_vendor_falls_back_within_chain(self):
         # Listing both vendors opts in to ordered fallback.
         set_config({"data_vendors": {"core_stock_apis": "westock,alpha_vantage"}})
-        with self._route({"westock": _no_data, "alpha_vantage": _returns("AV_DATA")}):
+        with self._route({"westock": _no_data, "alpha_vantage": _returns(VALID_OHLCV)}):
             result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
-        self.assertEqual(result, "AV_DATA")
+        self.assertEqual(result, VALID_OHLCV)
+
+    def test_invalid_primary_data_falls_back_to_next_vendor(self):
+        set_config({"data_vendors": {"core_stock_apis": "westock,alpha_vantage"}})
+        invalid = "Date,Open,High,Low,Close,Volume\n2026-01-09,100,90,99,103,1000\n"
+        with self._route({"westock": _returns(invalid), "alpha_vantage": _returns(VALID_OHLCV)}):
+            result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+        self.assertEqual(result, VALID_OHLCV)
+
+    def test_all_invalid_data_raises(self):
+        set_config({"data_vendors": {"core_stock_apis": "westock,alpha_vantage"}})
+        with self._route({"westock": _returns("bad"), "alpha_vantage": _returns("also bad")}):
+            with self.assertRaisesRegex(NoMarketDataError, "unparseable OHLCV"):
+                interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+
+    def test_invalid_amount_falls_back_to_next_vendor(self):
+        set_config({"data_vendors": {"core_stock_apis": "westock,alpha_vantage"}})
+        invalid = (
+            "Date,Open,High,Low,Close,Volume,Amount\n"
+            "2026-01-09,100,105,99,103,1000,100000000\n"
+        )
+        with self._route({"westock": _returns(invalid), "alpha_vantage": _returns(VALID_OHLCV)}):
+            result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+        self.assertEqual(result, VALID_OHLCV)
+
+    def test_valid_lowercase_amount_is_accepted(self):
+        set_config({"data_vendors": {"core_stock_apis": "westock"}})
+        valid = (
+            "date,open,high,low,close,volume,amount\n"
+            "2026-01-09,100,105,99,103,1000,102000\n"
+        )
+        with self._route({"westock": _returns(valid)}):
+            result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+        self.assertEqual(result, valid)
+
+    def test_invalid_turnover_alias_raises(self):
+        set_config({"data_vendors": {"core_stock_apis": "longbridge_mcp"}})
+        invalid = (
+            "Date,Open,High,Low,Close,Volume,Turnover\n"
+            "2026-01-09,100,105,99,103,1000,-1\n"
+        )
+        with self._route({"longbridge_mcp": _returns(invalid)}):
+            with self.assertRaisesRegex(NoMarketDataError, "amount must not be negative"):
+                interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
 
     def test_primary_error_is_logged_not_masked(self):
         # #989: primary errors + fallback no-data -> NO_DATA, but the failure
         # must be visible in logs (broken primary not hidden).
         set_config({"data_vendors": {"core_stock_apis": "westock,alpha_vantage"}})
         with self._route({"westock": _raises(ValueError("boom")), "alpha_vantage": _no_data}), \
-                self.assertLogs("tradingagents.dataflows.interface", level="WARNING") as cm:
-            result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
-        self.assertIn("NO_DATA_AVAILABLE", result)
+                self.assertLogs("tradingagents.dataflows.interface", level="WARNING") as cm, \
+                self.assertRaises(NoMarketDataError):
+            interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         joined = "\n".join(cm.output)
         self.assertIn("boom", joined)            # the real error surfaced in logs
         self.assertIn("westock", joined)
@@ -92,9 +138,9 @@ class VendorRoutingTests(unittest.TestCase):
     def test_default_sentinel_uses_all_vendors(self):
         # No explicit choice ("default") keeps the resilient full-chain behavior.
         set_config({"data_vendors": {"core_stock_apis": "default"}})
-        with self._route({"westock": _no_data, "alpha_vantage": _returns("AV_DATA")}):
+        with self._route({"westock": _no_data, "alpha_vantage": _returns(VALID_OHLCV)}):
             result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
-        self.assertEqual(result, "AV_DATA")
+        self.assertEqual(result, VALID_OHLCV)
 
     def _route_method(self, method, vendors):
         return mock.patch.dict(interface.VENDOR_METHODS, {method: vendors}, clear=False)

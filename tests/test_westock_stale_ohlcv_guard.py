@@ -66,7 +66,7 @@ class StaleGuardRoutingTests(unittest.TestCase):
     def tearDown(self):
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
 
-    def test_router_sentinel_surfaces_stale_reason(self):
+    def test_router_error_surfaces_stale_reason(self):
         set_config({"data_vendors": {"core_stock_apis": "westock"}})
 
         def _stale(symbol, *a, **k):
@@ -79,11 +79,10 @@ class StaleGuardRoutingTests(unittest.TestCase):
             {"get_stock_data": {"westock": _stale}},
             clear=False,
         ):
-            out = interface.route_to_vendor(
-                "get_stock_data", "CB", "2026-06-01", "2026-06-11"
-            )
-        self.assertIn("NO_DATA_AVAILABLE", out)
-        self.assertIn("stale", out)  # the typed detail is surfaced to the agent
+            with self.assertRaisesRegex(NoMarketDataError, "stale"):
+                interface.route_to_vendor(
+                    "get_stock_data", "CB", "2026-06-01", "2026-06-11"
+                )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
-"""Westock dataflow implementation with Longbridge fallback.
+"""Westock dataflow implementation.
 
-This module exposes first-class Westock vendor functions. It uses westock-data
-when available and falls back to Longbridge MCP/CLI for coverage gaps.
+This module exposes first-class Westock vendor functions. Cross-vendor fallback
+is exclusively controlled by ``dataflows.interface.route_to_vendor``.
 """
 from __future__ import annotations
 
@@ -28,10 +28,7 @@ def get_westock_data_online(
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
 ) -> str:
-    """Retrieve OHLCV stock price data online.
-
-    Routes to westock-data first, and falls back to Longbridge vendors.
-    """
+    """Retrieve OHLCV stock price data from Westock only."""
     from .symbol_utils import is_westock_available, run_westock, to_westock_code
 
     canonical = normalize_symbol(symbol)
@@ -77,16 +74,13 @@ def get_westock_data_online(
                     header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                     return header + csv_string
         except Exception as exc:
-            logger.warning("westock kline failed: %s; trying Longbridge fallback", exc)
+            raise NoMarketDataError(
+                symbol,
+                canonical,
+                f"Westock kline request failed: {exc}",
+            ) from exc
 
-    # 2. Fall back to Longbridge
-    try:
-        from .longbridge_mcp import get_stock_data as mcp_stock
-        return mcp_stock(symbol, start_date, end_date)
-    except Exception as mcp_exc:
-        logger.debug("Longbridge MCP stock data fetch failed: %s; trying CLI", mcp_exc)
-        from .longbridge import get_stock_data as cli_stock
-        return cli_stock(symbol, start_date, end_date)
+    raise NoMarketDataError(symbol, canonical, "Westock is not available")
 
 
 def get_stock_stats_indicators_window(
@@ -264,13 +258,10 @@ def get_stockstats_indicator(
     except NoMarketDataError:
         raise
     except Exception as e:
-        logger.error(
-            "Error getting stockstats indicator data for indicator %s on %s: %s",
-            indicator,
-            curr_date,
-            e,
-        )
-        return ""
+        raise NoMarketDataError(
+            symbol,
+            detail=f"Westock could not calculate {indicator}: {e}",
+        ) from e
 
     return str(indicator_value)
 
@@ -294,34 +285,25 @@ def get_fundamentals(
             res = json.loads(raw)
             if res and res.get("success") and isinstance(res.get("data"), dict):
                 data = res["data"]
-                fields = [
-                    ("Name", data.get("name")),
-                    ("Sector", data.get("industry")),
-                    ("Industry", data.get("industry")),
-                    ("Website", data.get("website")),
-                    ("Chairman", data.get("chairman")),
-                    ("Introduction", data.get("introduction")),
-                    ("Business Description", data.get("business")),
-                ]
-                lines = []
-                for label, value in fields:
-                    if value:
-                        lines.append(f"{label}: {value.strip()}")
-                
-                header = f"# Company Fundamentals for {canonical} (via westock-data)\n"
-                header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                return header + "\n".join(lines)
+                from .financial_validation import NormalizedFinancialData
+                return NormalizedFinancialData(
+                    metrics=(),
+                    source_text="",
+                    raw_payload=res,
+                    entity_metadata={
+                        "symbol": canonical,
+                        "name": data.get("name"),
+                        "industry": data.get("industry"),
+                        "website": data.get("website"),
+                        "vendor": "westock",
+                    },
+                )
         except Exception as exc:
-            logger.warning("westock-data fundamentals lookup failed for %s: %s; trying Longbridge", ticker, exc)
+            raise NoMarketDataError(
+                ticker, canonical, f"Westock fundamentals request failed: {exc}"
+            ) from exc
 
-    # 2. Fall back to Longbridge fundamentals
-    try:
-        from .longbridge_mcp import get_fundamentals as mcp_fundamentals
-        return mcp_fundamentals(ticker, curr_date)
-    except Exception as mcp_exc:
-        logger.debug("Longbridge MCP fundamentals fallback failed: %s; trying CLI", mcp_exc)
-        from .longbridge import get_fundamentals as cli_fundamentals
-        return cli_fundamentals(ticker, curr_date)
+    raise NoMarketDataError(ticker, canonical, "Westock fundamentals are not available")
 
 
 def get_balance_sheet(
@@ -329,14 +311,8 @@ def get_balance_sheet(
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
 ) -> str:
-    """Get balance sheet data."""
-    try:
-        from .longbridge_mcp import get_balance_sheet as mcp_bs
-        return mcp_bs(ticker, freq, curr_date)
-    except Exception as mcp_exc:
-        logger.debug("Longbridge MCP balance sheet fallback failed: %s; trying CLI", mcp_exc)
-        from .longbridge import get_balance_sheet as cli_bs
-        return cli_bs(ticker, freq, curr_date)
+    """Westock does not currently expose balance-sheet data directly."""
+    raise NoMarketDataError(ticker, detail="Westock balance-sheet data are not available")
 
 
 def get_cashflow(
@@ -344,14 +320,8 @@ def get_cashflow(
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
 ) -> str:
-    """Get cash flow data."""
-    try:
-        from .longbridge_mcp import get_cashflow as mcp_cf
-        return mcp_cf(ticker, freq, curr_date)
-    except Exception as mcp_exc:
-        logger.debug("Longbridge MCP cashflow fallback failed: %s; trying CLI", mcp_exc)
-        from .longbridge import get_cashflow as cli_cf
-        return cli_cf(ticker, freq, curr_date)
+    """Westock does not currently expose cash-flow data directly."""
+    raise NoMarketDataError(ticker, detail="Westock cash-flow data are not available")
 
 
 def get_income_statement(
@@ -359,14 +329,8 @@ def get_income_statement(
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None,
 ) -> str:
-    """Get income statement data."""
-    try:
-        from .longbridge_mcp import get_income_statement as mcp_is
-        return mcp_is(ticker, freq, curr_date)
-    except Exception as mcp_exc:
-        logger.debug("Longbridge MCP income statement fallback failed: %s; trying CLI", mcp_exc)
-        from .longbridge import get_income_statement as cli_is
-        return cli_is(ticker, freq, curr_date)
+    """Westock does not currently expose income-statement data directly."""
+    raise NoMarketDataError(ticker, detail="Westock income-statement data are not available")
 
 
 def get_insider_transactions(

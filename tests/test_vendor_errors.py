@@ -16,6 +16,9 @@ from tradingagents.dataflows.alpha_vantage_common import (
     AlphaVantageRateLimitError,
 )
 from tradingagents.dataflows.config import set_config
+
+
+VALID_OHLCV = "Date,Open,High,Low,Close,Volume\n2026-01-09,100,105,99,103,1000\n"
 from tradingagents.dataflows.errors import (
     NoMarketDataError,
     VendorError,
@@ -66,11 +69,11 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
 
         with mock.patch.dict(
             interface.VENDOR_METHODS,
-            {"get_stock_data": {"alpha_vantage": _throttled, "westock": lambda *a, **k: "YF"}},
+            {"get_stock_data": {"alpha_vantage": _throttled, "westock": lambda *a, **k: VALID_OHLCV}},
             clear=False,
         ):
             out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
-        self.assertEqual(out, "YF")
+        self.assertEqual(out, VALID_OHLCV)
 
     def test_not_configured_falls_through_to_next_vendor(self):
         set_config({"data_vendors": {"core_stock_apis": "alpha_vantage,westock"}})
@@ -80,11 +83,11 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
 
         with mock.patch.dict(
             interface.VENDOR_METHODS,
-            {"get_stock_data": {"alpha_vantage": _unconfigured, "westock": lambda *a, **k: "YF"}},
+            {"get_stock_data": {"alpha_vantage": _unconfigured, "westock": lambda *a, **k: VALID_OHLCV}},
             clear=False,
         ):
             out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
-        self.assertEqual(out, "YF")
+        self.assertEqual(out, VALID_OHLCV)
 
     def test_sole_unconfigured_vendor_surfaces_the_error(self):
         # With no fallback, the not-configured condition must surface (not vanish).

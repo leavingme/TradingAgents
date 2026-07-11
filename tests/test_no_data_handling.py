@@ -3,8 +3,8 @@
 Covers two systematic fixes:
   - load_ohlcv must not cache an empty download (cache poisoning), and must
     raise NoMarketDataError instead of returning an empty frame.
-  - route_to_vendor must convert NoMarketDataError into a single explicit
-    "NO_DATA_AVAILABLE" sentinel after all vendors are exhausted.
+  - route_to_vendor must raise NoMarketDataError after all configured OHLCV
+    vendors are exhausted, so invalid data cannot enter the analysis graph.
 """
 
 import os
@@ -66,7 +66,7 @@ class TestRouteToVendorSentinel(unittest.TestCase):
             }
         })
 
-    def test_no_data_from_all_vendors_returns_sentinel(self):
+    def test_no_data_from_all_vendors_raises(self):
         def raises_no_data(symbol, *a, **k):
             raise NoMarketDataError(symbol, "GC=F", "no rows")
 
@@ -74,13 +74,12 @@ class TestRouteToVendorSentinel(unittest.TestCase):
         with mock.patch.dict(
             interface.VENDOR_METHODS, {"get_stock_data": patched}, clear=False
         ):
-            result = interface.route_to_vendor(
-                "get_stock_data", "XAUUSD+", "2026-01-01", "2026-01-10"
-            )
-        self.assertIn("NO_DATA_AVAILABLE", result)
-        self.assertIn("XAUUSD+", result)
-        self.assertIn("GC=F", result)
-        self.assertIn("Do not estimate", result)
+            with self.assertRaises(NoMarketDataError) as ctx:
+                interface.route_to_vendor(
+                    "get_stock_data", "XAUUSD+", "2026-01-01", "2026-01-10"
+                )
+        self.assertEqual(ctx.exception.symbol, "XAUUSD+")
+        self.assertEqual(ctx.exception.canonical, "GC=F")
 
     def test_unconfigured_fallback_does_not_mask_no_data(self):
         # When the primary vendor reports no data and the fallback is simply
@@ -96,10 +95,10 @@ class TestRouteToVendorSentinel(unittest.TestCase):
         with mock.patch.dict(
             interface.VENDOR_METHODS, {"get_stock_data": patched}, clear=False
         ):
-            result = interface.route_to_vendor(
-                "get_stock_data", "FAKE", "2026-01-01", "2026-01-10"
-            )
-        self.assertIn("NO_DATA_AVAILABLE", result)
+            with self.assertRaises(NoMarketDataError):
+                interface.route_to_vendor(
+                    "get_stock_data", "FAKE", "2026-01-01", "2026-01-10"
+                )
 
 
 if __name__ == "__main__":

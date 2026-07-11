@@ -3,8 +3,8 @@ const LEGACY_CORE_DEFAULT = ['westock', 'longbridge_mcp', 'longbridge', 'alpha_v
 
 const CATEGORY_VENDORS = {
   core_stock_apis: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
-  technical_indicators: ['westock', 'longbridge_mcp', 'longbridge', 'alpha_vantage'],
-  fundamental_data: ['westock', 'longbridge_mcp', 'longbridge', 'alpha_vantage'],
+  technical_indicators: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
+  fundamental_data: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   news_data: ['westock', 'duckduckgo', 'alpha_vantage'],
   macro_data: ['fred'],
   prediction_markets: ['polymarket'],
@@ -22,8 +22,8 @@ const PROVIDER_META = {
 
 const FALLBACK_DEFAULTS = {
   core_stock_apis: 'longbridge_mcp, longbridge, westock',
-  technical_indicators: 'westock, longbridge_mcp, longbridge',
-  fundamental_data: 'westock, longbridge_mcp, longbridge',
+  technical_indicators: 'longbridge_mcp, longbridge, westock',
+  fundamental_data: 'longbridge_mcp, longbridge, westock',
   news_data: 'westock, duckduckgo, alpha_vantage',
   macro_data: 'fred',
   prediction_markets: 'polymarket',

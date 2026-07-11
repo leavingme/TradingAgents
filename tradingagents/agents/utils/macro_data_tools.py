@@ -17,6 +17,12 @@ def get_macro_indicators(
     look_back_days: Annotated[
         int | None, "Trailing window length in days; omit for a 1-year window"
     ] = None,
+    symbol: Annotated[
+        str | None,
+        "The ticker symbol of the asset being analyzed (e.g., 'NVDA', '0700.HK', '600519.SS'). "
+        "Providing this enables mapping friendly aliases to the correct local market indicators.",
+    ] = None,
+    **kwargs,
 ) -> str:
     """
     Retrieve a macroeconomic indicator time series from FRED (Federal Reserve
@@ -29,8 +35,35 @@ def get_macro_indicators(
         indicator (str): Friendly alias or raw FRED series ID
         curr_date (str): Current date in yyyy-mm-dd format
         look_back_days (int): Trailing window length; omit for a 1-year window
+        symbol (str): Optional symbol to resolve non-US market indicators
 
     Returns:
         str: A formatted markdown report of the macro series
     """
-    return route_to_vendor("get_macro_indicators", indicator, curr_date, look_back_days)
+    indicator_mapped = indicator
+    if symbol:
+        sym_upper = symbol.strip().upper()
+        # Hong Kong market routing
+        if sym_upper.endswith(".HK"):
+            mapping = {
+                "cpi": "hk_cpi",
+                "core_cpi": "hk_cpi",
+                "gdp": "hk_gdp",
+                "real_gdp": "hk_gdp",
+            }
+            if indicator.lower() in mapping:
+                indicator_mapped = mapping[indicator.lower()]
+        # China A-shares routing
+        elif any(sym_upper.endswith(suffix) for suffix in (".SS", ".SZ", ".SH", ".CN")):
+            mapping = {
+                "cpi": "cn_cpi",
+                "core_cpi": "cn_cpi",
+                "gdp": "cn_gdp",
+                "real_gdp": "cn_gdp",
+                "interest_rate": "cn_interest_rate",
+                "fed_funds_rate": "cn_interest_rate",
+            }
+            if indicator.lower() in mapping:
+                indicator_mapped = mapping[indicator.lower()]
+
+    return route_to_vendor("get_macro_indicators", indicator_mapped, curr_date, look_back_days)

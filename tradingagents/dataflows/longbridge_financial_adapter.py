@@ -144,6 +144,32 @@ def adapt_longbridge_financial_report(
                     source_field=str(account.get("field") or "") or None,
                 ))
 
+    if kind == "BS":
+        from .financial_validation import extract_metric
+        temp_data = NormalizedFinancialData(metrics=tuple(metrics), source_text="")
+        periods = {m.period for m in metrics if m.period}
+        for p in periods:
+            assets = extract_metric(temp_data, "total_assets", p)
+            liabilities = extract_metric(temp_data, "total_liabilities", p)
+            equity = extract_metric(temp_data, "total_equity", p)
+            if assets is not None and liabilities is not None and equity is None:
+                ref_m = next((m for m in metrics if m.period == p and ("assets" in m.metric.lower() or "liabilities" in m.metric.lower() or "资产" in m.metric or "负债" in m.metric)), None)
+                if not ref_m:
+                    ref_m = next(m for m in metrics if m.period == p)
+                metrics.append(FinancialMetric(
+                    metric="Total Equity",
+                    value=assets - liabilities,
+                    currency=ref_m.currency,
+                    unit=ref_m.unit,
+                    period=ref_m.period,
+                    period_type=ref_m.period_type,
+                    source=ref_m.source,
+                    period_start=ref_m.period_start,
+                    period_end=ref_m.period_end,
+                    context_type=ref_m.context_type,
+                    source_field="derived: assets - liabilities",
+                ))
+
     return NormalizedFinancialData(
         metrics=tuple(metrics),
         source_text="",

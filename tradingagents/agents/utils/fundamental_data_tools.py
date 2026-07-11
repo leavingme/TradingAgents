@@ -9,6 +9,7 @@ from tradingagents.dataflows.interface import route_to_vendor
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
+    **kwargs,
 ) -> str:
     """
     Retrieve comprehensive fundamental data for a given ticker symbol.
@@ -27,6 +28,7 @@ def get_balance_sheet(
     ticker: Annotated[str, "ticker symbol"],
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
+    **kwargs,
 ) -> str:
     """
     Retrieve balance sheet data for a given ticker symbol.
@@ -46,6 +48,7 @@ def get_cashflow(
     ticker: Annotated[str, "ticker symbol"],
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
+    **kwargs,
 ) -> str:
     """
     Retrieve cash flow statement data for a given ticker symbol.
@@ -65,6 +68,7 @@ def get_income_statement(
     ticker: Annotated[str, "ticker symbol"],
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
+    **kwargs,
 ) -> str:
     """
     Retrieve income statement data for a given ticker symbol.

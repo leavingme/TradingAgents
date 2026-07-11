@@ -69,6 +69,12 @@ MACRO_SERIES = {
     "consumer_sentiment": "UMCSENT",
     "housing_starts": "HOUST",
     "retail_sales": "RSAFS",
+    # Global / International Indicators (added for CN/HK support)
+    "cn_cpi": "CHNCPIALLMINMEI",
+    "cn_gdp": "NGDPXDCCNA",
+    "cn_interest_rate": "INTDSRCNM193N",
+    "hk_cpi": "FPCPITOTLZGHKG",
+    "hk_gdp": "MKTGDPHKA646NWDB",
 }
 
 
@@ -151,16 +157,25 @@ def get_macro_data(
         A markdown report with the series title, units, frequency, the latest
         value, the change over the window, and a recent observation table.
     """
-    if look_back_days is None:
-        look_back_days = DEFAULT_LOOKBACK_DAYS
-
-    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-    start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
-
     try:
         series_id = _resolve_series_id(indicator)
     except ValueError as e:
         raise NoMarketDataError(indicator, detail=str(e)) from e
+
+    # Force a minimum lookback period (e.g. 1095 days) for lagging non-US series
+    # to prevent "no observations in window" errors due to reporting lag.
+    is_lagging = (
+        indicator in ("cn_cpi", "cn_gdp", "cn_interest_rate", "hk_cpi", "hk_gdp")
+        or series_id in ("CHNCPIALLMINMEI", "NGDPXDCCNA", "INTDSRCNM193N", "FPCPITOTLZGHKG", "MKTGDPHKA646NWDB")
+    )
+
+    if look_back_days is None:
+        look_back_days = 1095 if is_lagging else DEFAULT_LOOKBACK_DAYS
+    elif is_lagging and look_back_days < 730:
+        look_back_days = 1095
+
+    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
 
     meta = _request("series", {"series_id": series_id}).get("seriess") or []
     if not meta:

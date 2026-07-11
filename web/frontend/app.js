@@ -533,12 +533,51 @@ const providerManager = createProviderManager({
   setEnvStatus: value => { envStatus = value; },
   ohlcvSettingsBody,
 });
+const AGENT_TO_SECTION = {
+  'Market Analyst': 'market_report',
+  'Sentiment Analyst': 'sentiment_report',
+  'News Analyst': 'news_report',
+  'Fundamentals Analyst': 'fundamentals_report',
+  'Bull Researcher': 'bull_researcher',
+  'Bear Researcher': 'bear_researcher',
+  'Research Manager': 'investment_plan',
+  'Trader': 'trader_investment_plan',
+  'Aggressive Analyst': 'aggressive_analyst',
+  'Conservative Analyst': 'conservative_analyst',
+  'Neutral Analyst': 'neutral_analyst',
+  'Portfolio Manager': 'final_trade_decision'
+};
+
 const agentTimeline = createAgentTimeline({
   element: agentList,
   t,
   locale: i18n.locale,
   formatStatus,
   statusClassName,
+  isAgentClickable: agentName => {
+    const section = AGENT_TO_SECTION[agentName];
+    if (!section) return false;
+    const select = document.querySelector('#reportSectionSelect');
+    if (!select) return false;
+    const exists = Array.from(select.options).some(opt => opt.value === section);
+    console.log(`[TimelineClick] isAgentClickable for "${agentName}" (section: "${section}"): ${exists}`);
+    return exists;
+  },
+  onAgentClick: agentName => {
+    const section = AGENT_TO_SECTION[agentName];
+    console.log(`[TimelineClick] onAgentClick clicked for "${agentName}" (section: "${section}")`);
+    if (!section) return;
+    const select = document.querySelector('#reportSectionSelect');
+    if (!select) return;
+    const option = Array.from(select.options).find(opt => opt.value === section);
+    if (option) {
+      console.log(`[TimelineClick] onAgentClick: selecting option "${section}" and dispatching change`);
+      select.value = section;
+      select.dispatchEvent(new Event('change'));
+    } else {
+      console.log(`[TimelineClick] onAgentClick: option "${section}" not found in select`);
+    }
+  },
 });
 const reportView = createReportViewer({
   api,
@@ -952,6 +991,7 @@ function handleRuntimeEvent(type, event) {
 
   if (type === 'report_section') {
     reportView.updateSection(event.content);
+    agentTimeline.render();
   }
 
   if (type === 'stats') {

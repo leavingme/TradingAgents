@@ -24,7 +24,7 @@ export function formatAgentName(name, locale = 'en') {
   return String(name || '').replace(/_/g, ' ').replace(/\b\w/g, character => character.toUpperCase());
 }
 
-export function createAgentTimeline({ element, t, locale, formatStatus, statusClassName }) {
+export function createAgentTimeline({ element, t, locale, formatStatus, statusClassName, isAgentClickable, onAgentClick }) {
   const agents = new Map();
 
   function update(name, status) {
@@ -63,6 +63,12 @@ export function createAgentTimeline({ element, t, locale, formatStatus, statusCl
   function agentRow(teamName, agent, status) {
     const item = document.createElement('li');
     item.className = `agent-row status-${statusClassName(status)}`;
+    
+    if (onAgentClick && isAgentClickable && isAgentClickable(agent)) {
+      item.classList.add('clickable');
+      item.addEventListener('click', () => onAgentClick(agent));
+    }
+
     const name = cell('', 'agent-name');
     const dot = document.createElement('span');
     dot.className = 'dot';

@@ -12,6 +12,7 @@ def get_verified_market_snapshot(
     look_back_days: Annotated[
         int, "number of recent trading rows to include for sanity-checking"
     ] = 30,
+    **kwargs,
 ) -> str:
     """Deterministic verification snapshot for exact market-data claims.
 

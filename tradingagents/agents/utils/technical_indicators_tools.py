@@ -11,6 +11,7 @@ def get_indicators(
     indicator: Annotated[str, "technical indicator to get the analysis and report of"],
     curr_date: Annotated[str, "The current trading date you are trading on, YYYY-mm-dd"],
     look_back_days: Annotated[int, "how many days to look back"] = 30,
+    **kwargs,
 ) -> str:
     """
     Retrieve a single technical indicator for a given ticker symbol.

@@ -10,6 +10,7 @@ def get_news(
     ticker: Annotated[str, "Ticker symbol"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+    **kwargs,
 ) -> str:
     """
     Retrieve news data for a given ticker symbol.
@@ -28,6 +29,7 @@ def get_global_news(
     curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
     look_back_days: Annotated[int | None, "Days to look back; omit to use the configured default"] = None,
     limit: Annotated[int | None, "Max articles to return; omit to use the configured default"] = None,
+    **kwargs,
 ) -> str:
     """
     Retrieve global news data.
@@ -48,6 +50,7 @@ def get_global_news(
 @tool
 def get_insider_transactions(
     ticker: Annotated[str, "ticker symbol"],
+    **kwargs,
 ) -> str:
     """
     Retrieve insider transaction information about a company.

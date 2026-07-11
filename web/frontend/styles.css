@@ -886,6 +886,18 @@ h2, .panel-title {
   background: rgba(255, 255, 255, 0.03);
 }
 
+#agentList li.clickable {
+  cursor: pointer;
+}
+
+#agentList li.clickable:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#agentList li.clickable:active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .agent-team {
   color: var(--accent-blue);
   font-weight: 600;

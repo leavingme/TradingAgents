@@ -13,6 +13,7 @@ def get_prediction_markets(
         "'US election', or a sector/company event.",
     ],
     limit: Annotated[int | None, "Max markets to return; omit for a default of 6"] = None,
+    **kwargs,
 ) -> str:
     """
     Retrieve live, market-implied probabilities for forward-looking events from

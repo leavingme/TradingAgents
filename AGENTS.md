@@ -294,6 +294,12 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   视为完整数据；共享 OHLCV 缓存只保留规范的 Date/Open/High/Low/Close/Volume
   列，新获取的同日完整 K 线必须覆盖盘中残缺记录。
 
+## 开发最佳实践与文档维护约定
+
+- **TODO.md 与 PLAN.md 维护**：Agent 只要完成任意新功能开发或数据校验重构，且确认本地单元测试通过，必须自觉同步更新这两个文件的进度复选框 `[x]` 或 Progress 列表，并与代码改动一同提交与推送。
+- **Tool 参数安全性加固 (`**kwargs`)**：为了防止 LLM 在长上下文或交织思考（Interleaved Thinking）时发生幻觉并在 arguments 中夹带非标控制参数（例如 `"/invoke"` ），所有暴露给 LLM 调用的数据工具（`@tool`）函数签名末尾必须添加 `**kwargs`，在运行时自动忽略这些多余键值，严防因 Unexpected Keyword Argument 报错导致 Graph 崩溃。
+- **非美宏观指标回溯窗口**：由于 FRED 数据库中的中国/香港等非美宏观指标（如中国 CPI `CHNCPIALLMINMEI`、香港 CPI `FPCPITOTLZGHKG`）存在显著的数据发布滞后，直接请求 180 或 365 天的回溯极易因窗口内无数据导致 API 报错。对此类滞后指标在底层请求端必须强制采用至少 1095 天（3 年）的最小 Lookback 周期。
+
 ## 不需要先问权限的操作
 
 - 运行 `tradingagents --help` 或任何非交互 smoke

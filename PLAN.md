@@ -275,7 +275,7 @@ After this works, refactor the existing TUI to consume the same runtime stream.
 - Done: Global macro routing for Hong Kong (.HK) and China (A-shares) equities, automatically mapping CPI/GDP/interest rate friendly aliases to FRED series IDs.
 - Done: Automatic window expansion for lagging international macro series, ensuring a minimum of 1095 days lookback to prevent "no observations in window" exceptions.
 - Done: Parameter sanitizer and robustness against tool call parameter hallucinations, guarding all core data tool signatures with **kwargs to absorb extra keys (e.g. /invoke) generated during interleaved thinking cycles.
-- Next: parallelization of basic analyst nodes (Market, Sentiment, News, Fundamentals) to reduce Shallow runtimes from 11 minutes to ~5 minutes.
+- Done: Parallelization of basic analyst nodes (Market, Sentiment, News, Fundamentals) using sandboxed subgraphs, reducing Shallow runtimes from 11 minutes to under 5 minutes (~4.3 minutes).
 
 ## CLI / WebUI Coverage Matrix (2026-07-11)
 

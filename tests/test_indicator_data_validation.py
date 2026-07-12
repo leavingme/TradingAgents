@@ -15,8 +15,12 @@ from tradingagents.dataflows.errors import NoUsableTechnicalIndicatorError
 from tradingagents.dataflows.indicator_requirements import (
     effective_indicator_lookback_days,
     minimum_indicator_lookback_days,
+    indicator_calculation_lookback_days,
 )
-from tradingagents.dataflows.longbridge_mcp import _summarize_quant_payload
+from tradingagents.dataflows.longbridge_mcp import (
+    _summarize_quant_payload,
+    get_indicators as get_mcp_indicators,
+)
 
 
 OHLCV = "Date,Open,High,Low,Close,Volume\n2026-07-10,455,465,450,460,1000\n"
@@ -46,6 +50,29 @@ def test_invalid_indicator_values_are_rejected(indicator, payload, detail):
 
 
 @pytest.mark.unit
+def test_indicator_older_than_verified_ohlcv_date_is_rejected():
+    result = validate_indicator_result(
+        "2026-07-09: 55",
+        "rsi",
+        "2026-07-10",
+        expected_latest_date="2026-07-10",
+    )
+    assert not result.is_valid
+    assert "latest observation is 2026-07-09" in result.detail
+
+
+@pytest.mark.unit
+def test_indicator_on_latest_verified_ohlcv_date_is_accepted():
+    result = validate_indicator_result(
+        "2026-07-10: 55",
+        "rsi",
+        "2026-07-12",
+        expected_latest_date="2026-07-10",
+    )
+    assert result.is_valid
+
+
+@pytest.mark.unit
 def test_indicator_output_bars_include_an_implicit_warmup_window():
     payload = (
         "Technical Indicator Report for 0700.HK\n"
@@ -71,6 +98,22 @@ def test_indicator_output_bars_include_an_implicit_warmup_window():
 def test_indicator_minimum_windows_are_deterministic(indicator, minimum):
     assert minimum_indicator_lookback_days(indicator) == minimum
     assert effective_indicator_lookback_days(indicator, 30) == max(30, minimum)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("indicator", "expected"),
+    [
+        ("close_10_ema", 1095),
+        ("rsi", 1095),
+        ("atr", 1095),
+        ("macd", 1095),
+        ("close_200_sma", 1095),
+        ("boll", 1095),
+    ],
+)
+def test_indicator_engines_share_stable_calculation_history(indicator, expected):
+    assert indicator_calculation_lookback_days(indicator, 30) == expected
 
 
 @pytest.mark.unit
@@ -140,6 +183,55 @@ def test_mcp_payload_preserves_dated_observations():
     assert "2026-07-08: 455.0" in result
     assert "2026-07-10: 460.0" in result
     assert "bars=3" in result
+
+
+@pytest.mark.unit
+def test_mcp_summary_hides_seed_history_outside_display_window():
+    timestamps = [
+        int(datetime(2026, 6, 1, tzinfo=timezone.utc).timestamp() * 1000),
+        int(datetime(2026, 7, 9, tzinfo=timezone.utc).timestamp() * 1000),
+        int(datetime(2026, 7, 10, tzinfo=timezone.utc).timestamp() * 1000),
+    ]
+    raw = {
+        "chart_json": json.dumps({
+            "series_graphs": {
+                "0": {"Plot": {"title": "RSI", "series": [40.0, 50.0, 55.0]}}
+            }
+        }),
+        "events_json": json.dumps([
+            {"BarStart": {"timestamp": timestamp}} for timestamp in timestamps
+        ]),
+    }
+    result = _summarize_quant_payload(
+        raw, display_start="2026-07-01", display_end="2026-07-10"
+    )
+    assert "2026-06-01" not in result
+    assert "2026-07-10: 55.0" in result
+    assert "bars=2" in result
+
+
+@pytest.mark.unit
+def test_mcp_quant_end_is_exclusive_and_seed_window_is_separate():
+    timestamp = int(datetime(2026, 7, 10, tzinfo=timezone.utc).timestamp() * 1000)
+    raw = {
+        "chart_json": json.dumps({
+            "series_graphs": {"0": {"Plot": {"series": [55.0]}}}
+        }),
+        "events_json": json.dumps([{"BarStart": {"timestamp": timestamp}}]),
+    }
+    client = mock.Mock()
+    client.tools = {"quant_run": {}}
+    client.list_tools.return_value = [{"name": "quant_run"}]
+    client.call_tool.return_value = raw
+    with mock.patch("tradingagents.dataflows.longbridge_mcp._client", return_value=client):
+        result = get_mcp_indicators("NVDA", "rsi", "2026-07-10", 30)
+
+    arguments = client.call_tool.call_args.args[1]
+    assert arguments["start"] == "2023-07-11"
+    assert arguments["end"] == "2026-07-11"
+    assert "2026-07-10: 55.0" in result
+    assert "Lookback Period: 30 days" in result
+    assert "Calculation History: 1095 days" in result
 
 
 @pytest.mark.unit

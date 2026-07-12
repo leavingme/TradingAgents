@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+from unittest import mock
 
 from tradingagents.dataflows import stockstats_utils as su
 
@@ -68,3 +69,27 @@ class TestCleanDataframeAcrossVersions:
         df["close_5_sma"]  # triggers calculation
         assert "close_5_sma" in df.columns
         assert df["close_5_sma"].notna().any()
+
+
+@pytest.mark.unit
+def test_stockstats_calculation_drops_rows_before_shared_start_date():
+    data = _ohlcv("Date")
+    captured = {}
+
+    def wrapping(frame):
+        captured["first_date"] = frame["Date"].min()
+        from stockstats import wrap
+        return wrap(frame)
+
+    with (
+        mock.patch.object(su, "load_ohlcv", return_value=data),
+        mock.patch.object(su, "wrap", side_effect=wrapping),
+    ):
+        su.StockstatsUtils.get_stock_stats(
+            "NVDA",
+            "close_5_sma",
+            "2026-04-14",
+            calculation_start="2026-04-07",
+        )
+
+    assert captured["first_date"] == pd.Timestamp("2026-04-07")

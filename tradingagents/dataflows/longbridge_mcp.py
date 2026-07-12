@@ -34,7 +34,10 @@ from pathlib import Path
 import pandas as pd
 
 from .errors import NoMarketDataError
-from .indicator_requirements import effective_indicator_lookback_days
+from .indicator_requirements import (
+    effective_indicator_lookback_days,
+    indicator_calculation_lookback_days,
+)
 
 ROOT = Path(__file__).resolve().parents[2]  # /data/disk/workspace/TradingAgents
 TOKEN_PATH = ROOT / ".longbridge_mcp_token.json"
@@ -520,11 +523,16 @@ def get_indicators(
         supported = sorted(set(_PINE_TEMPLATES) | set(_INDICATOR_ALIASES))
         raise MCPTransportError(f"unsupported indicator '{indicator}'. Supported: {supported}")
 
-    effective_lookback = effective_indicator_lookback_days(
+    output_lookback = effective_indicator_lookback_days(
         indicator_key, look_back_days
     )
-    start = (end - timedelta(days=effective_lookback)).strftime("%Y-%m-%d")
-    end_s = end.strftime("%Y-%m-%d")
+    calculation_lookback = indicator_calculation_lookback_days(
+        indicator_key, output_lookback
+    )
+    start = (end - timedelta(days=calculation_lookback)).strftime("%Y-%m-%d")
+    # Longbridge quant uses an exclusive `end`; advance it so curr_date is
+    # eligible to appear in the calculated series.
+    end_s = (end + timedelta(days=1)).strftime("%Y-%m-%d")
 
     try:
         client = _client()
@@ -543,17 +551,28 @@ def get_indicators(
     # We re-use the CLI vendor's text-pretty-summary parse because the underlying
     # engine is the same. But on MCP we get the rich per-bar list, so we also
     # extract first/last/min/max for the summary.
-    summary = _summarize_quant_payload(raw)
+    display_start = (end - timedelta(days=output_lookback)).strftime("%Y-%m-%d")
+    summary = _summarize_quant_payload(
+        raw,
+        display_start=display_start,
+        display_end=curr_date,
+    )
     return (
         f"Technical Indicator Report for {sym}\n"
         f"Indicator: {indicator.upper()}\n"
         f"Report Date: {curr_date}\n"
-        f"Lookback Period: {effective_lookback} days\n\n"
+        f"Lookback Period: {output_lookback} days\n"
+        f"Calculation History: {calculation_lookback} days\n\n"
         f"Series summary (over the requested range):\n{summary}\n\n"
         f"Data Source: Longbridge MCP (quant_run)"
     )
 
-def _summarize_quant_payload(raw: Any) -> str:
+def _summarize_quant_payload(
+    raw: Any,
+    *,
+    display_start: str | None = None,
+    display_end: str | None = None,
+) -> str:
     """
     Reduce MCP quant_run response to a "Series ... last=... range=... bars=..." block.
 
@@ -627,13 +646,19 @@ def _summarize_quant_payload(raw: Any) -> str:
         for value_index, v in enumerate(vals):
             try:
                 numeric = float(v)
-                float_vals.append(numeric)
                 if value_index < len(bar_times):
                     timestamp = float(bar_times[value_index])
                     if timestamp > 10_000_000_000:
                         timestamp /= 1000
                     date_text = datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
-                    dated_values.append((date_text, numeric))
+                    if (
+                        (display_start is None or date_text >= display_start)
+                        and (display_end is None or date_text <= display_end)
+                    ):
+                        dated_values.append((date_text, numeric))
+                        float_vals.append(numeric)
+                elif display_start is None and display_end is None:
+                    float_vals.append(numeric)
             except (TypeError, ValueError):
                 # `None` (no-data slot) — drop the entry, don't abandon the whole series
                 continue

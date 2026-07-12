@@ -39,7 +39,10 @@ from typing import Any
 import pandas as pd
 
 from .errors import NoMarketDataError
-from .indicator_requirements import effective_indicator_lookback_days
+from .indicator_requirements import (
+    effective_indicator_lookback_days,
+    indicator_calculation_lookback_days,
+)
 
 
 # ---- Symbol normalization (matches TradingAgents conventions) ----
@@ -447,12 +450,16 @@ def get_indicators(
     except ValueError as e:
         raise ValueError(f"invalid curr_date {curr_date!r}: {e}") from e
     indicator_key = _INDICATOR_ALIASES.get(indicator.lower().strip(), indicator.lower().strip())
-    effective_lookback = effective_indicator_lookback_days(
+    output_lookback = effective_indicator_lookback_days(
         indicator_key, look_back_days
     )
-    start_dt = end_dt - timedelta(days=effective_lookback)
+    calculation_lookback = indicator_calculation_lookback_days(
+        indicator_key, output_lookback
+    )
+    start_dt = end_dt - timedelta(days=calculation_lookback)
     start_iso = start_dt.strftime("%Y-%m-%d")
-    end_iso = end_dt.strftime("%Y-%m-%d")
+    # Longbridge quant treats `end` as an exclusive boundary.
+    end_iso = (end_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
     try:
         result = _run_quant(sym, start_iso, end_iso, indicator)
@@ -472,7 +479,8 @@ def get_indicators(
         f"Technical Indicator Report for {sym}",
         f"Indicator: {indicator.upper()}",
         f"Report Date: {curr_date}",
-        f"Lookback Period: {effective_lookback} days",
+        f"Lookback Period: {output_lookback} days",
+        f"Calculation History: {calculation_lookback} days",
         "",
         "Series summary (over the requested range):",
     ]

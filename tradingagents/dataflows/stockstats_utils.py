@@ -194,8 +194,19 @@ class StockstatsUtils:
         curr_date: Annotated[
             str, "curr date for retrieving stock price data, YYYY-mm-dd"
         ],
+        calculation_start: str | None = None,
     ):
         data = load_ohlcv(symbol, curr_date)
+        if calculation_start:
+            data = data[data["Date"] >= pd.Timestamp(calculation_start)].copy()
+            if data.empty:
+                raise NoMarketDataError(
+                    symbol,
+                    detail=(
+                        "No OHLCV rows on or after calculation start "
+                        f"{calculation_start}"
+                    ),
+                )
         df = wrap(data)
         df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
         curr_date_str = pd.to_datetime(curr_date).strftime("%Y-%m-%d")

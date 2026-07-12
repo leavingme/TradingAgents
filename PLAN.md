@@ -369,6 +369,14 @@ Known differences:
 - Kept canonical cache CSVs unchanged and added `ohlcv_audit.jsonl` for vendor, raw timestamp, timezone semantics, adapter version, and batch ID evidence.
 - Removed the source-ambiguous secondary cache write from `stockstats_utils`; the vendor adapter that fetched the data owns the audited write.
 
+## Technical Indicator Calculation Parity (2026-07-12)
+
+- Longbridge Pine and Westock/stockstats now share the same deterministic three-year `calculation_start`; the shorter requested window controls rendering only.
+- Longbridge `quant_run` receives an exclusive end boundary one day after the analysis date, and MCP seed-history observations are removed from the LLM-facing output.
+- Indicator freshness is checked against the latest verified ordinary OHLCV trading date. A stale Pine series is rejected so vendor routing can fall back instead of labeling an older value with a newer report date.
+- Known upstream limitation: Longbridge ordinary OHLCV for NVDA contained 2026-07-10 while Longbridge MCP `quant_run` remained at 2026-07-09 even when its end boundary was extended through 2026-07-14.
+- Same-start 2026-07-09 comparison: EMA/RSI/MACD/ATR converge within small tolerances; SMA50/SMA200 retain roughly 0.06%/0.11% source-history differences; Bollinger middle matches while upper/lower differ because Pine and stockstats use different standard-deviation definitions.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

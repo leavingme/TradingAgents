@@ -28,6 +28,11 @@ _WARMUP_TRADING_BARS = {
     "boll": 20,
 }
 
+# Longbridge Pine and Westock/stockstats must start on the same date so their
+# recursive indicators have the same seed horizon. Three years supplies about
+# 750 US trading bars while keeping online quant requests bounded.
+INDICATOR_CALCULATION_HISTORY_DAYS = 1095
+
 
 def canonical_indicator(indicator: str) -> str:
     key = str(indicator).lower().strip()
@@ -53,3 +58,14 @@ def minimum_indicator_lookback_days(indicator: str) -> int:
 def effective_indicator_lookback_days(indicator: str, requested_days: int) -> int:
     """Never allow an LLM-selected window below the calculation requirement."""
     return max(int(requested_days), minimum_indicator_lookback_days(indicator))
+
+
+def indicator_calculation_lookback_days(indicator: str, requested_days: int) -> int:
+    """Return the shared vendor-neutral indicator calculation horizon.
+
+    ``requested_days`` remains the output/display window.  This function only
+    controls how much earlier source history is supplied to calculation
+    engines. Longbridge Pine and Westock must both use the resulting start date.
+    """
+    minimum = minimum_indicator_lookback_days(indicator)
+    return max(int(requested_days), minimum, INDICATOR_CALCULATION_HISTORY_DAYS)

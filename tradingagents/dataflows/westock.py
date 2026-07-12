@@ -189,9 +189,22 @@ def get_stock_stats_indicators_window(
     end_date = curr_date
     curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     before = curr_date_dt - relativedelta(days=look_back_days)
+    from .indicator_requirements import indicator_calculation_lookback_days
+
+    calculation_days = indicator_calculation_lookback_days(
+        indicator, look_back_days
+    )
+    calculation_start = (
+        curr_date_dt - relativedelta(days=calculation_days)
+    ).strftime("%Y-%m-%d")
 
     try:
-        indicator_data = _get_stock_stats_bulk(symbol, indicator, curr_date)
+        indicator_data = _get_stock_stats_bulk(
+            symbol,
+            indicator,
+            curr_date,
+            calculation_start=calculation_start,
+        )
 
         current_dt = curr_date_dt
         date_values = []
@@ -219,7 +232,10 @@ def get_stock_stats_indicators_window(
         curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
         while curr_date_dt >= before:
             indicator_value = get_stockstats_indicator(
-                symbol, indicator, curr_date_dt.strftime("%Y-%m-%d")
+                symbol,
+                indicator,
+                curr_date_dt.strftime("%Y-%m-%d"),
+                calculation_start=calculation_start,
             )
             ind_string += f"{curr_date_dt.strftime('%Y-%m-%d')}: {indicator_value}\n"
             curr_date_dt = curr_date_dt - relativedelta(days=1)
@@ -238,10 +254,18 @@ def _get_stock_stats_bulk(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to calculate"],
     curr_date: Annotated[str, "current date for reference"],
+    calculation_start: str | None = None,
 ) -> dict:
     from stockstats import wrap
 
     data = load_ohlcv(symbol, curr_date)
+    if calculation_start:
+        data = data[data["Date"] >= pd.Timestamp(calculation_start)].copy()
+        if data.empty:
+            raise NoMarketDataError(
+                symbol,
+                detail=f"No OHLCV rows on or after calculation start {calculation_start}",
+            )
     df = wrap(data)
     df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
 
@@ -264,6 +288,7 @@ def get_stockstats_indicator(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to get the analysis and report of"],
     curr_date: Annotated[str, "The current trading date you are trading on, YYYY-mm-dd"],
+    calculation_start: str | None = None,
 ) -> str:
     curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     curr_date = curr_date_dt.strftime("%Y-%m-%d")
@@ -273,6 +298,7 @@ def get_stockstats_indicator(
             symbol,
             indicator,
             curr_date,
+            calculation_start=calculation_start,
         )
     except NoMarketDataError:
         raise

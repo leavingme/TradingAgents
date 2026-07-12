@@ -197,6 +197,7 @@ def validate_indicator_result(
     indicator: str | None = None,
     analysis_date: str | None = None,
     reference_close: float | None = None,
+    expected_latest_date: str | pd.Timestamp | None = None,
 ) -> ValidationResult:
     """Validate a technical-indicator payload against deterministic bounds."""
     normalized = (
@@ -228,6 +229,20 @@ def validate_indicator_result(
     cutoff = normalized.analysis_date
     if dates and max(dates) > cutoff:
         return ValidationResult(ValidationStatus.INVALID, "indicator contains values after the analysis date")
+    if expected_latest_date is not None:
+        expected = pd.Timestamp(expected_latest_date).normalize()
+        if not dates:
+            return ValidationResult(
+                ValidationStatus.INVALID,
+                "indicator payload has no dated observations for freshness validation",
+            )
+        latest = max(dates).normalize()
+        if latest < expected:
+            return ValidationResult(
+                ValidationStatus.INVALID,
+                f"indicator latest observation is {latest.date()}; "
+                f"latest verified OHLCV trading date is {expected.date()}",
+            )
     report_date = re.search(r"Report Date:\s*(\d{4}-\d{2}-\d{2})", text, re.IGNORECASE)
     if report_date and pd.Timestamp(report_date.group(1)) > cutoff:
         return ValidationResult(ValidationStatus.INVALID, "indicator report date is after the analysis date")
@@ -296,3 +311,17 @@ def latest_verified_close(payload: object, analysis_date: str) -> float:
     if eligible.empty:
         raise ValueError("OHLCV has no Close on or before the analysis date")
     return float(eligible.iloc[-1]["Close"])
+
+
+def latest_verified_ohlcv_date(payload: object, analysis_date: str) -> pd.Timestamp:
+    """Return the latest verified OHLCV trading date on or before analysis date."""
+    validation = _validate_ohlcv(payload)
+    if not validation.is_valid:
+        raise ValueError(validation.detail or "invalid OHLCV")
+    frame = _parse_ohlcv(payload)
+    lookup = {str(column).strip().lower(): column for column in frame.columns}
+    dates = pd.to_datetime(frame[lookup["date"]], errors="coerce")
+    eligible = dates[dates <= pd.Timestamp(analysis_date)].dropna()
+    if eligible.empty:
+        raise ValueError("OHLCV has no trading date on or before the analysis date")
+    return pd.Timestamp(eligible.max()).normalize()

@@ -17,6 +17,7 @@ from .config import get_config
 from .data_validation import (
     indicator_requires_close,
     latest_verified_close,
+    latest_verified_ohlcv_date,
     normalize_indicator_result,
     validate_indicator_result,
     validate_vendor_result,
@@ -568,15 +569,22 @@ def route_to_vendor(method: str, *args, **kwargs):
             if method == "get_indicators":
                 indicator = str(args[1])
                 reference_close = None
+                symbol, curr_date = str(args[0]), str(args[2])
+                end = datetime.strptime(curr_date, "%Y-%m-%d")
+                lookback = max(int(args[3]), 30)
+                start = (end - timedelta(days=lookback)).strftime("%Y-%m-%d")
+                raw_ohlcv = route_to_vendor("get_stock_data", symbol, start, curr_date)
+                expected_latest_date = latest_verified_ohlcv_date(
+                    raw_ohlcv, curr_date
+                )
                 if indicator_requires_close(indicator):
-                    symbol, curr_date = str(args[0]), str(args[2])
-                    end = datetime.strptime(curr_date, "%Y-%m-%d")
-                    lookback = max(int(args[3]), 30)
-                    start = (end - timedelta(days=lookback)).strftime("%Y-%m-%d")
-                    raw_ohlcv = route_to_vendor("get_stock_data", symbol, start, curr_date)
                     reference_close = latest_verified_close(raw_ohlcv, curr_date)
                 normalized = normalize_indicator_result(result, indicator, str(args[2]))
-                validation = validate_indicator_result(normalized, reference_close=reference_close)
+                validation = validate_indicator_result(
+                    normalized,
+                    reference_close=reference_close,
+                    expected_latest_date=expected_latest_date,
+                )
             elif method == "get_social_posts":
                 try:
                     normalized_result = validate_social_feed(

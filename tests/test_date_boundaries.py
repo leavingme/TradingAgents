@@ -17,6 +17,7 @@ from tradingagents.dataflows.ohlcv_cache import (
     normalize_ohlcv_dates,
     read_cached_ohlcv,
     symbol_to_cache_key,
+    validate_canonical_daily_bars_for_write,
 )
 
 
@@ -118,26 +119,53 @@ def test_cache_removes_holiday_shifted_duplicate_and_persists_migration(tmp_path
         }
     )
 
-    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", polluted)
+    migrated = clean_canonical_daily_bars(
+        normalize_ohlcv_dates(polluted, "NVDA_US"), "NVDA_US"
+    )
+    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", migrated)
     cached = pd.read_csv(tmp_path / "NVDA_US.csv")
 
     assert cached["Date"].tolist() == ["2025-12-24", "2025-12-26"]
 
 
 @pytest.mark.unit
-def test_cache_read_rejects_pollution_instead_of_repairing_it(tmp_path):
-    (tmp_path / "NVDA_US.csv").write_text(
-        "Date,Open,High,Low,Close,Volume\n"
-        "2025-11-30,174.76,180.30,173.68,179.92,188130955\n"
-        "2025-12-01,174.76,180.30,173.68,179.92,188130955\n",
-        encoding="utf-8",
+def test_cache_write_rejects_shifted_dates_without_modifying_existing_file(tmp_path):
+    valid = pd.DataFrame(
+        {
+            "Date": ["2025-12-01"],
+            "Open": [174.76],
+            "High": [180.30],
+            "Low": [173.68],
+            "Close": [179.92],
+            "Volume": [188130955],
+        }
+    )
+    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", valid)
+    before = (tmp_path / "NVDA_US.csv").read_bytes()
+    shifted = valid.copy()
+    shifted["Date"] = "2025-11-30"
+
+    with pytest.raises(ValueError, match="shifted trading dates"):
+        merge_and_write_ohlcv(str(tmp_path), "NVDA_US", shifted)
+
+    assert (tmp_path / "NVDA_US.csv").read_bytes() == before
+
+
+@pytest.mark.unit
+def test_cache_write_rejects_invalid_ohlc():
+    invalid = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(["2026-07-10"]),
+            "Open": [100.0],
+            "High": [90.0],
+            "Low": [95.0],
+            "Close": [100.0],
+            "Volume": [1],
+        }
     )
 
-    out = read_cached_ohlcv(
-        str(tmp_path), "NVDA_US", "2025-11-30", "2025-12-01"
-    )
-
-    assert out is None
+    with pytest.raises(ValueError, match="OHLC"):
+        validate_canonical_daily_bars_for_write(invalid, "NVDA_US")
 
 
 @pytest.mark.unit

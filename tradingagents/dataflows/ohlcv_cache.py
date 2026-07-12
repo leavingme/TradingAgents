@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from datetime import datetime, time
 from io import StringIO
 from zoneinfo import ZoneInfo
@@ -96,6 +97,38 @@ def clean_canonical_daily_bars(data: pd.DataFrame, cache_key: str) -> pd.DataFra
         out = out[~(same_candle & adjacent & positive_volume)].copy()
 
     return out.reset_index(drop=True)
+
+
+def validate_canonical_daily_bars_for_write(
+    data: pd.DataFrame,
+    cache_key: str,
+) -> pd.DataFrame:
+    """Validate and type-normalize OHLCV immediately before persistence."""
+    missing = [column for column in CANONICAL_OHLCV_COLUMNS if column not in data.columns]
+    if missing:
+        raise ValueError(f"OHLCV cache write missing columns: {', '.join(missing)}")
+
+    out = normalize_ohlcv_dates(data[CANONICAL_OHLCV_COLUMNS], cache_key)
+    if out["Date"].isna().any():
+        raise ValueError("OHLCV cache write contains invalid dates")
+
+    numeric_columns = ["Open", "High", "Low", "Close", "Volume"]
+    out[numeric_columns] = out[numeric_columns].apply(pd.to_numeric, errors="coerce")
+    if out[numeric_columns].isna().any().any():
+        raise ValueError("OHLCV cache write contains invalid numeric values")
+    if (out[["Open", "High", "Low", "Close"]] <= 0).any().any():
+        raise ValueError("OHLCV cache write contains non-positive prices")
+    if (out["Volume"] < 0).any():
+        raise ValueError("OHLCV cache write contains negative volume")
+    if (out["Low"] > out[["Open", "High", "Close"]].min(axis=1)).any():
+        raise ValueError("OHLCV cache write contains Low above another OHLC value")
+    if (out["High"] < out[["Open", "Low", "Close"]].max(axis=1)).any():
+        raise ValueError("OHLCV cache write contains High below another OHLC value")
+
+    canonical = clean_canonical_daily_bars(out, cache_key)
+    if len(canonical) != len(out) or canonical["Date"].tolist() != out["Date"].tolist():
+        raise ValueError("OHLCV cache write contains invalid or shifted trading dates")
+    return out
 
 
 def parse_ohlcv_payload(raw: object) -> pd.DataFrame:
@@ -222,7 +255,6 @@ def filter_completed_daily_bars(
     if data.empty or "Date" not in data.columns:
         return data
     out = normalize_ohlcv_dates(data, cache_key)
-    out = clean_canonical_daily_bars(out, cache_key)
     cutoff = latest_completed_daily_bar_date(cache_key, now)
     return out[out["Date"] <= cutoff].copy()
 
@@ -314,11 +346,6 @@ def read_cached_ohlcv(
         return None
 
     df = normalize_ohlcv_dates(df, cache_key)
-    validated = clean_canonical_daily_bars(df, cache_key)
-    if len(validated) != len(df) or validated["Date"].tolist() != df["Date"].tolist():
-        # Reads never repair persistent state. A polluted cache is a miss and
-        # must be refreshed (or rewritten by the explicit migration path).
-        return None
     df = (
         df.dropna(subset=["Date"])
         .drop_duplicates(subset=["Date"], keep="last")
@@ -370,16 +397,35 @@ def merge_and_write_ohlcv(
         except Exception:
             pass
 
-    frames.append(new_df.copy())
+    if not new_df.empty:
+        # Validate vendor output before filtering incomplete sessions so bad
+        # dates/numbers cannot disappear silently on the way to persistence.
+        frames.append(validate_canonical_daily_bars_for_write(new_df, cache_key))
+    elif not frames:
+        raise ValueError("OHLCV cache write has no data")
     combined = pd.concat(frames, ignore_index=True)
     combined = filter_completed_daily_bars(combined, cache_key)
-    available_columns = [column for column in CANONICAL_OHLCV_COLUMNS if column in combined.columns]
-    combined = combined[available_columns]
     combined = (
         combined.dropna(subset=["Date"])
         .drop_duplicates(subset=["Date"], keep="last")
         .sort_values("Date")
         .reset_index(drop=True)
     )
+    combined = validate_canonical_daily_bars_for_write(combined, cache_key)
     os.makedirs(cache_dir, exist_ok=True)
-    combined.to_csv(path, index=False, encoding="utf-8")
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=cache_dir,
+            prefix=f".{cache_key}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = handle.name
+            combined.to_csv(handle, index=False)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)

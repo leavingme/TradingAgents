@@ -13,7 +13,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
-    invoke_structured_or_freetext,
+    invoke_structured_or_safe,
 )
 
 
@@ -32,6 +32,8 @@ def create_trader(llm):
                     "You are a trading agent analyzing market data to make investment decisions. "
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
                     "Anchor your reasoning in the analysts' reports and the research plan."
+                    " For Buy, provide every structured risk field; deterministic code calculates "
+                    "derived metrics. For Hold or Sell, omit all executable numeric fields."
                     + get_language_instruction()
                 ),
             },
@@ -48,11 +50,20 @@ def create_trader(llm):
             },
         ]
 
-        trader_plan = invoke_structured_or_freetext(
+        def safe_trader_plan(exc: Exception) -> str:
+            return render_trader_proposal(TraderProposal(
+                action="Hold",
+                reasoning=(
+                    "REVIEW_REQUIRED: executable trade-plan validation failed; "
+                    f"no transaction is authorized ({type(exc).__name__}: {exc})."
+                ),
+            ))
+
+        trader_plan = invoke_structured_or_safe(
             structured_llm,
-            llm,
             messages,
             render_trader_proposal,
+            safe_trader_plan,
             "Trader",
         )
 

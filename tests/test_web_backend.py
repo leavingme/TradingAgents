@@ -203,6 +203,27 @@ def test_get_run_report_returns_markdown(monkeypatch, tmp_path):
     assert response.body.decode("utf-8") == "# Report\n\nHold"
 
 
+def test_get_run_vendor_calls_returns_run_scoped_ledger(monkeypatch):
+    from web.backend import main
+    import tradingagents.runtime as runtime
+
+    def fake_start_background_run(run_id, request, task_store):
+        task_store.mark_started(run_id)
+        task_store.mark_finished(run_id, "completed")
+
+    monkeypatch.setattr(main, "start_background_run", fake_start_background_run)
+    expected = [{"call_id": "call-1", "attempt": 1, "vendor": "westock"}]
+    monkeypatch.setattr(runtime.history_store, "get_vendor_calls", lambda run_id: expected)
+
+    async def exercise():
+        created = await main.create_run(
+            main.RunCreateRequest(ticker="NVDA", analysis_date="2026-07-10")
+        )
+        return await main.get_run_vendor_calls(created["run_id"])
+
+    assert asyncio.run(exercise()) == expected
+
+
 def test_web_index_serves_frontend_file():
     from web.backend import main
 

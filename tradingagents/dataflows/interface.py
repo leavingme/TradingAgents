@@ -1,5 +1,8 @@
 import logging
 import time
+import hashlib
+import json
+from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 
 from .alpha_vantage import (
@@ -271,6 +274,29 @@ def route_to_vendor(method: str, *args, **kwargs):
         args = tuple(normalized_args)
 
     category = get_category_for_method(method)
+    audit_call_id = uuid4().hex
+    audit_arguments = _safe_audit_arguments(args, kwargs)
+    audit_metadata = _vendor_audit_metadata(method, args, category)
+
+    def record_attempt(
+        vendor: str,
+        status: str,
+        started: float,
+        error: Exception | None = None,
+        *,
+        attempt: int,
+        selected: bool = False,
+        result: object = None,
+    ):
+        return _record_vendor_verification(
+            vendor, category, method, status, "analysis", started, error,
+            call_id=audit_call_id,
+            attempt=attempt,
+            selected=selected,
+            arguments_json=audit_arguments,
+            result=result,
+            audit_metadata=audit_metadata,
+        )
     vendor_config = get_vendor(category, method)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]
 
@@ -296,21 +322,33 @@ def route_to_vendor(method: str, *args, **kwargs):
             # Inner call (sub-fetch), bypass reconciliation and cache, return raw NormalizedFinancialData
             last_no_data = None
             first_error = None
-            for vendor in vendor_chain:
+            for attempt, vendor in enumerate(vendor_chain, start=1):
                 vendor_impl = VENDOR_METHODS[method][vendor]
                 impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
+                started = time.monotonic()
                 try:
                     result = impl_func(*args, **kwargs)
                     if not isinstance(result, NormalizedFinancialData):
                         result = normalize_financial_result(result, source=vendor)
+                    record_attempt(
+                        vendor, "available", started, attempt=attempt,
+                        selected=True, result=result,
+                    )
                     return result
                 except (VendorRateLimitError, VendorNotConfiguredError, NoMarketDataError) as e:
+                    status = (
+                        "rate_limited" if isinstance(e, VendorRateLimitError)
+                        else "not_configured" if isinstance(e, VendorNotConfiguredError)
+                        else "no_data"
+                    )
+                    record_attempt(vendor, status, started, e, attempt=attempt)
                     if first_error is None and isinstance(e, VendorNotConfiguredError):
                         first_error = e
                     if isinstance(e, NoMarketDataError):
                         last_no_data = e
                     continue
                 except Exception as e:
+                    record_attempt(vendor, "unavailable", started, e, attempt=attempt)
                     if first_error is None:
                         first_error = e
                     continue
@@ -338,6 +376,11 @@ def route_to_vendor(method: str, *args, **kwargs):
         if cache_key in _local_state.financial_cache:
             cached_vendor, cached_data_dict = _local_state.financial_cache[cache_key]
             if method in cached_data_dict:
+                started = time.monotonic()
+                record_attempt(
+                    cached_vendor, "cache_hit", started, attempt=1,
+                    selected=True, result=cached_data_dict[method],
+                )
                 return cached_data_dict[method]
             raise NoUsableFinancialDataError(
                 ticker,
@@ -363,7 +406,7 @@ def route_to_vendor(method: str, *args, **kwargs):
                 except Exception as exc:
                     logger.debug("Failed to fetch verified close for financial derived metrics: %s", exc)
 
-            for vendor in vendor_chain:
+            for attempt, vendor in enumerate(vendor_chain, start=1):
                 started = time.monotonic()
                 try:
                     is_data = None
@@ -371,8 +414,33 @@ def route_to_vendor(method: str, *args, **kwargs):
                     cf_data = None
                     fd_data = None
 
+                    def record_financial_subcall(
+                        submethod: str,
+                        sub_started: float,
+                        status: str,
+                        *,
+                        error: Exception | None = None,
+                        result: object = None,
+                    ) -> None:
+                        _record_vendor_verification(
+                            vendor,
+                            category,
+                            submethod,
+                            status,
+                            "analysis",
+                            sub_started,
+                            error,
+                            call_id=f"{audit_call_id}:{submethod}:{attempt}",
+                            attempt=1,
+                            selected=False,
+                            arguments_json=audit_arguments,
+                            result=result,
+                            audit_metadata=audit_metadata,
+                        )
+
                     # IS
                     if "get_income_statement" in VENDOR_METHODS and vendor in VENDOR_METHODS["get_income_statement"]:
+                        sub_started = time.monotonic()
                         try:
                             is_data = VENDOR_METHODS["get_income_statement"][vendor](ticker, freq, curr_date)
                             if not isinstance(is_data, NormalizedFinancialData):
@@ -381,7 +449,14 @@ def route_to_vendor(method: str, *args, **kwargs):
                             if not val.is_valid:
                                 log_financial_audit(ticker, vendor, "get_income_statement", "invalid", is_data, val.detail)
                                 raise NoUsableFinancialDataError(ticker, "income_statement", val.detail)
+                            record_financial_subcall(
+                                "get_income_statement", sub_started, "available", result=is_data
+                            )
                         except Exception as e:
+                            record_financial_subcall(
+                                "get_income_statement", sub_started, "unavailable", error=e,
+                                result=is_data,
+                            )
                             if method == "get_income_statement":
                                 logger.warning("Vendor %s get_income_statement failed: %s", vendor, e)
                                 raise
@@ -390,6 +465,7 @@ def route_to_vendor(method: str, *args, **kwargs):
 
                     # BS
                     if "get_balance_sheet" in VENDOR_METHODS and vendor in VENDOR_METHODS["get_balance_sheet"]:
+                        sub_started = time.monotonic()
                         try:
                             bs_data = VENDOR_METHODS["get_balance_sheet"][vendor](ticker, freq, curr_date)
                             if not isinstance(bs_data, NormalizedFinancialData):
@@ -398,7 +474,14 @@ def route_to_vendor(method: str, *args, **kwargs):
                             if not val.is_valid:
                                 log_financial_audit(ticker, vendor, "get_balance_sheet", "invalid", bs_data, val.detail)
                                 raise NoUsableFinancialDataError(ticker, "balance_sheet", val.detail)
+                            record_financial_subcall(
+                                "get_balance_sheet", sub_started, "available", result=bs_data
+                            )
                         except Exception as e:
+                            record_financial_subcall(
+                                "get_balance_sheet", sub_started, "unavailable", error=e,
+                                result=bs_data,
+                            )
                             if method == "get_balance_sheet":
                                 logger.warning("Vendor %s get_balance_sheet failed: %s", vendor, e)
                                 raise
@@ -407,6 +490,7 @@ def route_to_vendor(method: str, *args, **kwargs):
 
                     # CF
                     if "get_cashflow" in VENDOR_METHODS and vendor in VENDOR_METHODS["get_cashflow"]:
+                        sub_started = time.monotonic()
                         try:
                             cf_data = VENDOR_METHODS["get_cashflow"][vendor](ticker, freq, curr_date)
                             if not isinstance(cf_data, NormalizedFinancialData):
@@ -415,7 +499,14 @@ def route_to_vendor(method: str, *args, **kwargs):
                             if not val.is_valid:
                                 log_financial_audit(ticker, vendor, "get_cashflow", "invalid", cf_data, val.detail)
                                 raise NoUsableFinancialDataError(ticker, "cashflow", val.detail)
+                            record_financial_subcall(
+                                "get_cashflow", sub_started, "available", result=cf_data
+                            )
                         except Exception as e:
+                            record_financial_subcall(
+                                "get_cashflow", sub_started, "unavailable", error=e,
+                                result=cf_data,
+                            )
                             if method == "get_cashflow":
                                 logger.warning("Vendor %s get_cashflow failed: %s", vendor, e)
                                 raise
@@ -424,6 +515,7 @@ def route_to_vendor(method: str, *args, **kwargs):
 
                     # Fundamentals
                     if "get_fundamentals" in VENDOR_METHODS and vendor in VENDOR_METHODS["get_fundamentals"]:
+                        sub_started = time.monotonic()
                         try:
                             fd_data = VENDOR_METHODS["get_fundamentals"][vendor](ticker, curr_date)
                             if not isinstance(fd_data, NormalizedFinancialData):
@@ -432,7 +524,14 @@ def route_to_vendor(method: str, *args, **kwargs):
                             if not val.is_valid:
                                 log_financial_audit(ticker, vendor, "get_fundamentals", "invalid", fd_data, val.detail)
                                 raise NoUsableFinancialDataError(ticker, "fundamentals", val.detail)
+                            record_financial_subcall(
+                                "get_fundamentals", sub_started, "available", result=fd_data
+                            )
                         except Exception as e:
+                            record_financial_subcall(
+                                "get_fundamentals", sub_started, "unavailable", error=e,
+                                result=fd_data,
+                            )
                             if method == "get_fundamentals":
                                 logger.warning("Vendor %s get_fundamentals failed: %s", vendor, e)
                                 raise
@@ -514,24 +613,27 @@ def route_to_vendor(method: str, *args, **kwargs):
                         log_financial_audit(ticker, vendor, "get_fundamentals", "verified", fd_data)
 
                     _local_state.financial_cache[cache_key] = (vendor, data_dict)
-                    _record_vendor_verification(vendor, category, method, "available", "analysis", started)
+                    record_attempt(
+                        vendor, "available", started, attempt=attempt,
+                        selected=True, result=data_dict.get(method),
+                    )
                     reconciled = True
                     break
 
                 except VendorRateLimitError as e:
-                    _record_vendor_verification(vendor, category, method, "rate_limited", "analysis", started, e)
+                    record_attempt(vendor, "rate_limited", started, e, attempt=attempt)
                     continue
                 except VendorNotConfiguredError as e:
-                    _record_vendor_verification(vendor, category, method, "not_configured", "analysis", started, e)
+                    record_attempt(vendor, "not_configured", started, e, attempt=attempt)
                     if first_error is None:
                         first_error = e
                     continue
                 except (NoMarketDataError, NoUsableFinancialDataError) as e:
-                    _record_vendor_verification(vendor, category, method, "no_data", "analysis", started, e)
+                    record_attempt(vendor, "no_data", started, e, attempt=attempt)
                     last_no_data = e
                     continue
                 except Exception as e:
-                    _record_vendor_verification(vendor, category, method, "unavailable", "analysis", started, e)
+                    record_attempt(vendor, "unavailable", started, e, attempt=attempt)
                     if first_error is None:
                         first_error = e
                     continue
@@ -558,7 +660,7 @@ def route_to_vendor(method: str, *args, **kwargs):
     # --- Non-Financial Methods Routing (OHLCV, Indicators, News, etc.) ---
     last_no_data: VendorError | None = None
     first_error: Exception | None = None
-    for vendor in vendor_chain:
+    for attempt, vendor in enumerate(vendor_chain, start=1):
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
@@ -607,8 +709,9 @@ def route_to_vendor(method: str, *args, **kwargs):
                         str(args[0]) if args else method,
                         detail=validation.detail or "vendor data failed validation",
                     )
-                _record_vendor_verification(
-                    vendor, category, method, "invalid", "analysis", started, error
+                record_attempt(
+                    vendor, "invalid", started, error, attempt=attempt,
+                    result=normalized_result,
                 )
                 last_no_data = error
                 logger.warning(
@@ -616,24 +719,27 @@ def route_to_vendor(method: str, *args, **kwargs):
                     vendor, method, validation.detail,
                 )
                 continue
-            _record_vendor_verification(vendor, category, method, "available", "analysis", started)
+            record_attempt(
+                vendor, "available", started, attempt=attempt,
+                selected=True, result=normalized_result,
+            )
             return normalized_result
         except VendorRateLimitError as e:
-            _record_vendor_verification(vendor, category, method, "rate_limited", "analysis", started, e)
+            record_attempt(vendor, "rate_limited", started, e, attempt=attempt)
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
             continue
         except VendorNotConfiguredError as e:
-            _record_vendor_verification(vendor, category, method, "not_configured", "analysis", started, e)
+            record_attempt(vendor, "not_configured", started, e, attempt=attempt)
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
             if first_error is None:
                 first_error = e
             continue
         except NoMarketDataError as e:
-            _record_vendor_verification(vendor, category, method, "no_data", "analysis", started, e)
+            record_attempt(vendor, "no_data", started, e, attempt=attempt)
             last_no_data = e
             continue
         except Exception as e:
-            _record_vendor_verification(vendor, category, method, "unavailable", "analysis", started, e)
+            record_attempt(vendor, "unavailable", started, e, attempt=attempt)
             logger.warning("Vendor %r failed for %s: %s", vendor, method, e)
             if first_error is None:
                 first_error = e
@@ -681,12 +787,86 @@ def route_to_vendor(method: str, *args, **kwargs):
     raise RuntimeError(f"No available vendor for '{method}'")
 
 
-def _record_vendor_verification(vendor, category, method, status, source, started, error=None):
-    """Best-effort telemetry must never alter vendor routing behavior."""
+def _safe_audit_arguments(args, kwargs) -> str:
+    """Serialize call parameters while excluding secret-like keys."""
+    secret_markers = ("key", "token", "secret", "password", "cookie", "auth")
+
+    def clean(value):
+        if isinstance(value, dict):
+            return {
+                str(key): ("[REDACTED]" if any(m in str(key).lower() for m in secret_markers) else clean(item))
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [clean(item) for item in value]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
+
+    return json.dumps({"args": clean(args), "kwargs": clean(kwargs)}, ensure_ascii=False)
+
+
+def _vendor_audit_metadata(method: str, args: tuple, category: str) -> dict[str, str | None]:
+    agent_by_category = {
+        "core_stock_apis": "Market Analyst",
+        "technical_indicators": "Market Analyst",
+        "fundamental_data": "Fundamentals Analyst",
+        "news_data": "News Analyst",
+        "macro_data": "News Analyst",
+        "prediction_markets": "News Analyst",
+        "social_data": "Sentiment Analyst",
+    }
+    metadata = {
+        "agent": agent_by_category.get(category),
+        "symbol": str(args[0]) if args else None,
+        "calculation_start": None,
+        "requested_end": None,
+    }
+    if method == "get_stock_data" and len(args) >= 3:
+        metadata["calculation_start"] = str(args[1])
+        metadata["requested_end"] = str(args[2])
+    elif method == "get_indicators" and len(args) >= 4:
+        end = datetime.strptime(str(args[2]), "%Y-%m-%d")
+        from .indicator_requirements import indicator_calculation_lookback_days
+
+        days = indicator_calculation_lookback_days(str(args[1]), int(args[3]))
+        metadata["calculation_start"] = (end - timedelta(days=days)).strftime("%Y-%m-%d")
+        metadata["requested_end"] = str(args[2])
+    return metadata
+
+
+def _latest_date_in_result(result: object) -> str | None:
+    if result is None:
+        return None
+    text = str(result)
+    dates = re.findall(r"(?m)^\s*(\d{4}-\d{2}-\d{2})(?=[:,])", text)
+    if not dates:
+        dates = re.findall(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+    return max(dates) if dates else None
+
+
+def _record_vendor_verification(
+    vendor,
+    category,
+    method,
+    status,
+    source,
+    started,
+    error=None,
+    *,
+    call_id=None,
+    attempt=1,
+    selected=False,
+    arguments_json=None,
+    result=None,
+    audit_metadata=None,
+):
+    """Update health telemetry and append mandatory run-scoped audit evidence."""
+    health_record = None
     try:
         from .vendor_verification import vendor_verification_store
 
-        return vendor_verification_store.record(
+        health_record = vendor_verification_store.record(
             vendor=vendor,
             category=category,
             method=method,
@@ -696,8 +876,48 @@ def _record_vendor_verification(vendor, category, method, status, source, starte
             latency_ms=round((time.monotonic() - started) * 1000),
         )
     except Exception as exc:
-        logger.debug("Could not persist vendor verification: %s", exc)
-        return None
+        logger.debug("Could not update latest vendor health status: %s", exc)
+
+    if source == "analysis" and call_id:
+        from tradingagents.runtime.audit_context import current_run_id
+        from tradingagents.runtime.history import history_store
+
+        run_id = current_run_id()
+        if run_id:
+            finished = datetime.now(timezone.utc)
+            latency_ms = round((time.monotonic() - started) * 1000)
+            summary = None
+            result_hash = None
+            if result is not None:
+                rendered = str(result)
+                summary = rendered[:500]
+                result_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+            # Deliberately not swallowed: an analysis without its immutable
+            # provenance ledger must not continue to an executable report.
+            history_store.add_vendor_call({
+                "run_id": run_id,
+                "call_id": call_id,
+                "attempt": attempt,
+                "category": category,
+                "method": method,
+                "vendor": vendor,
+                "agent": (audit_metadata or {}).get("agent"),
+                "symbol": (audit_metadata or {}).get("symbol"),
+                "status": status,
+                "selected": selected,
+                "arguments_json": arguments_json,
+                "latency_ms": latency_ms,
+                "error_type": type(error).__name__ if error else None,
+                "error_detail": str(error) if error else None,
+                "result_summary": summary,
+                "result_hash": result_hash,
+                "calculation_start": (audit_metadata or {}).get("calculation_start"),
+                "requested_end": (audit_metadata or {}).get("requested_end"),
+                "data_latest_date": _latest_date_in_result(result),
+                "started_at": (finished - timedelta(milliseconds=latency_ms)).isoformat(),
+                "finished_at": finished.isoformat(),
+            })
+    return health_record
 
 
 def verify_vendor(vendor: str, category: str):

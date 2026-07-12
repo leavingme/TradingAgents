@@ -377,6 +377,14 @@ Known differences:
 - Known upstream limitation: Longbridge ordinary OHLCV for NVDA contained 2026-07-10 while Longbridge MCP `quant_run` remained at 2026-07-09 even when its end boundary was extended through 2026-07-14.
 - Same-start 2026-07-09 comparison: EMA/RSI/MACD/ATR converge within small tolerances; SMA50/SMA200 retain roughly 0.06%/0.11% source-history differences; Bollinger middle matches while upper/lower differ because Pine and stockstats use different standard-deviation definitions.
 
+## Release-blocking Execution Integrity (2026-07-12)
+
+- Added append-only `run_vendor_calls` provenance keyed by `run_id + call_id + attempt`; each fallback attempt records vendor, sanitized arguments, timing, status/error, selected result, result hash, calculation range, and latest returned date.
+- Kept `vendor_verifications` as overwriteable current-health state only. Historical run audit is exposed separately at `/api/runs/{run_id}/vendor-calls` and is deleted only with its owning run.
+- Run-scoped vendor audit is mandatory: persistence failure stops analysis rather than allowing an unauditable executable report.
+- Buy/Overweight decisions require structured entry, stop, target, ATR, initial/target position, and maximum portfolio-risk fields. Reward/risk, ATR distance, and portfolio loss are calculated only by deterministic code.
+- Invalid structured plans receive one correction attempt containing the validator error. A second failure, missing structured-output support, or upstream Trader `REVIEW_REQUIRED` deterministically produces `Hold / REVIEW_REQUIRED`; free-text executable fallback is prohibited.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

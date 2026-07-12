@@ -77,3 +77,48 @@ def invoke_structured_or_freetext(
 
     response = plain_llm.invoke(prompt)
     return response.content
+
+
+def invoke_structured_or_safe(
+    structured_llm: Any | None,
+    prompt: Any,
+    render: Callable[[T], str],
+    safe_fallback: Callable[[Exception], str],
+    agent_name: str,
+) -> str:
+    """Require validated structured output for decision agents.
+
+    One retry is allowed so the model can correct a malformed or inconsistent
+    plan. Free text is never accepted at this boundary; after two failures the
+    caller emits a deterministic non-executable REVIEW_REQUIRED decision.
+    """
+    if structured_llm is None:
+        return safe_fallback(RuntimeError("provider has no structured-output support"))
+    last_error: Exception = RuntimeError("structured decision failed")
+    current_prompt = prompt
+    for attempt in range(1, 3):
+        try:
+            result = structured_llm.invoke(current_prompt)
+            if result is None:
+                raise ValueError("structured output returned no parsed result")
+            return render(result)
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "%s: validated structured decision attempt %d failed: %s",
+                agent_name,
+                attempt,
+                exc,
+            )
+            correction = (
+                "Previous structured decision was rejected by deterministic validation: "
+                f"{type(exc).__name__}: {exc}. Return a corrected structured decision. "
+                "Do not repeat the invalid values. Put all executable entry, stop, target, "
+                "ATR, and position numbers in structured fields only; do not put calculated "
+                "trade math in prose."
+            )
+            if isinstance(prompt, str):
+                current_prompt = prompt + "\n\n" + correction
+            elif isinstance(prompt, list):
+                current_prompt = [*prompt, {"role": "user", "content": correction}]
+    return safe_fallback(last_error)

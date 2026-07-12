@@ -50,13 +50,20 @@ class TestRenderTraderProposal:
             reasoning="Strong technicals + fundamentals.",
             entry_price=189.5,
             stop_loss=178.0,
+            price_target=215.0,
+            atr=6.0,
+            target_position_pct=6.0,
+            initial_position_pct=3.0,
+            max_portfolio_risk_pct=1.0,
             position_sizing="6% of portfolio",
         )
         md = render_trader_proposal(p)
         assert "**Action**: Buy" in md
         assert "**Entry Price**: 189.5" in md
         assert "**Stop Loss**: 178.0" in md
-        assert "**Position Sizing**: 6% of portfolio" in md
+        assert "**Target Position**: 6.00%" in md
+        assert "**Position Sizing**: 6% of portfolio" not in md
+        assert "**Reward/Risk (calculated)**: 2.22" in md
         assert "FINAL TRANSACTION PROPOSAL: **BUY**" in md
 
     def test_optional_fields_omitted_when_absent(self):
@@ -140,8 +147,8 @@ def _structured_trader_llm(captured: dict, proposal: TraderProposal | None = Non
     """
     if proposal is None:
         proposal = TraderProposal(
-            action=TraderAction.BUY,
-            reasoning="Strong setup.",
+            action=TraderAction.HOLD,
+            reasoning="Await confirmation.",
         )
     structured = MagicMock()
     structured.invoke.side_effect = lambda prompt: (
@@ -179,6 +186,11 @@ class TestTraderAgent:
             reasoning="AI capex cycle intact; institutional flows constructive.",
             entry_price=189.5,
             stop_loss=178.0,
+            price_target=215.0,
+            atr=6.0,
+            target_position_pct=6.0,
+            initial_position_pct=3.0,
+            max_portfolio_risk_pct=1.0,
             position_sizing="6% of portfolio",
         )
         llm = _structured_trader_llm(captured, proposal)
@@ -200,7 +212,7 @@ class TestTraderAgent:
         prompt = captured["prompt"]
         assert any("Proposed Investment Plan" in m["content"] for m in prompt)
 
-    def test_falls_back_to_freetext_when_structured_unavailable(self):
+    def test_structured_unavailable_returns_non_executable_review_required(self):
         plain_response = (
             "**Action**: Sell\n\nGuidance cut hits margins.\n\n"
             "FINAL TRANSACTION PROPOSAL: **SELL**"
@@ -210,7 +222,9 @@ class TestTraderAgent:
         llm.invoke.return_value = MagicMock(content=plain_response)
         trader = create_trader(llm)
         result = trader(_make_trader_state())
-        assert result["trader_investment_plan"] == plain_response
+        assert "**Action**: Hold" in result["trader_investment_plan"]
+        assert "REVIEW_REQUIRED" in result["trader_investment_plan"]
+        llm.invoke.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

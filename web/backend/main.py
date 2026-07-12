@@ -200,6 +200,15 @@ async def stream_run_events(run_id: str):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.get("/api/runs/{run_id}/vendor-calls")
+async def get_run_vendor_calls(run_id: str):
+    if store.get(run_id) is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    from tradingagents.runtime import history_store
+
+    return history_store.get_vendor_calls(run_id)
+
+
 @app.get("/api/runs/{run_id}/report", response_class=PlainTextResponse)
 async def get_run_report(run_id: str):
     record = store.get(run_id)

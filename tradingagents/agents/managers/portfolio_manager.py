@@ -17,7 +17,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
-    invoke_structured_or_freetext,
+    invoke_structured_or_safe,
 )
 
 
@@ -38,6 +38,28 @@ def create_portfolio_manager(llm):
             if past_context
             else ""
         )
+
+        if "REVIEW_REQUIRED" in trader_plan:
+            safe = PortfolioDecision(
+                rating="Hold",
+                executive_summary=(
+                    "REVIEW_REQUIRED: Trader validation failed; no trade is authorized."
+                ),
+                investment_thesis=(
+                    "The executable proposal did not pass deterministic validation, "
+                    "so downstream risk debate cannot authorize it."
+                ),
+            )
+            final_trade_decision = render_pm_decision(safe)
+            new_risk_debate_state = {
+                **risk_debate_state,
+                "judge_decision": final_trade_decision,
+                "latest_speaker": "Judge",
+            }
+            return {
+                "risk_debate_state": new_risk_debate_state,
+                "final_trade_decision": final_trade_decision,
+            }
 
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
@@ -63,11 +85,33 @@ def create_portfolio_manager(llm):
 
 Be decisive and ground every conclusion in specific evidence from the analysts.{get_language_instruction()}"""
 
-        final_trade_decision = invoke_structured_or_freetext(
+        prompt += """
+
+For Buy or Overweight, all executable numbers MUST be supplied through the
+structured fields: entry_price, stop_loss, price_target, atr,
+target_position_pct, initial_position_pct, and max_portfolio_risk_pct.
+Do not calculate or state reward/risk, ATR multiples, or portfolio-loss math in
+prose. Do not repeat executable entry, stop, target, ATR, or position numbers in
+prose; deterministic code will render the structured fields. If reliable
+numeric inputs are unavailable, choose Hold rather than inventing them.
+For Hold, Underweight, or Sell, omit all executable numeric fields; those
+directions do not yet have an approved direction-specific calculator."""
+
+        def safe_pm_decision(exc: Exception) -> str:
+            return render_pm_decision(PortfolioDecision(
+                rating="Hold",
+                executive_summary=(
+                    "REVIEW_REQUIRED: executable trade-plan validation failed; "
+                    "no trade is authorized."
+                ),
+                investment_thesis=f"Validation failure: {type(exc).__name__}: {exc}",
+            ))
+
+        final_trade_decision = invoke_structured_or_safe(
             structured_llm,
-            llm,
             prompt,
             render_pm_decision,
+            safe_pm_decision,
             "Portfolio Manager",
         )
 

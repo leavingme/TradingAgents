@@ -26,6 +26,8 @@
 - [x] OHLCV 缓存日期修复：显式迁移股票日 K 的日期漂移副本；读取不清理数据，写入边界执行日期/OHLCV 硬校验并原子替换缓存文件。
 - [x] OHLCV 写入溯源：Longbridge MCP/CLI 与 Westock adapter 统一构造 `OHLCVBatch`，缓存拒绝裸 DataFrame，并以 JSONL sidecar 记录原始时间戳、时区语义、vendor、adapter 版本和批次 ID。
 - [x] 技术指标计算起点统一：Longbridge Pine 与 Westock/stockstats 使用相同的三年 calculation_start；Pine 输出按权威 OHLCV 最新交易日校验，服务端 quant 数据滞后时自动 fallback。
+- [x] 运行级 vendor 审计：新增按 run/call/attempt 追加且不可覆盖的 fallback 调用账本与查询 API；审计落盘失败时禁止继续生成可执行报告。
+- [x] 交易计划确定性门禁：Buy/Overweight 的价格、ATR、仓位与最大风险必须结构化；收益风险比、ATR 倍数和组合损失由代码计算，重复校验失败降级为 `Hold / REVIEW_REQUIRED`。
 - [x] Runtime Agent 状态机：累积 graph snapshot 不得导致已完成 Agent 重新进入运行态；团队交接状态完整且报告事件去重。
 - [x] X/Twitter 舆情：Bird 只读结构化 adapter、统一 SocialPost 模型、日期截止/去重/垃圾推广校验、独立 `social_data` vendor 路由与 Web 配置。
 - [x] Web 舆情分类：新闻与社交数据分卡展示，Reddit、StockTwits 与 X/Twitter 统一归入“社交动态舆情”，后端仍保持 `news_data` / `social_data` 边界。

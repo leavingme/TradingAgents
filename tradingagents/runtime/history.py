@@ -78,6 +78,51 @@ class RunHistoryStore:
                         FOREIGN KEY (run_id) REFERENCES runs(run_id)
                     )
                 """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS run_vendor_calls (
+                        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id              TEXT NOT NULL,
+                        call_id             TEXT NOT NULL,
+                        attempt             INTEGER NOT NULL,
+                        category            TEXT NOT NULL,
+                        method              TEXT NOT NULL,
+                        vendor              TEXT NOT NULL,
+                        agent               TEXT,
+                        symbol              TEXT,
+                        status              TEXT NOT NULL,
+                        selected            INTEGER NOT NULL DEFAULT 0,
+                        arguments_json      TEXT,
+                        latency_ms          INTEGER,
+                        error_type          TEXT,
+                        error_detail        TEXT,
+                        result_summary      TEXT,
+                        result_hash         TEXT,
+                        calculation_start   TEXT,
+                        requested_end       TEXT,
+                        data_latest_date    TEXT,
+                        started_at          TEXT NOT NULL,
+                        finished_at         TEXT NOT NULL,
+                        FOREIGN KEY (run_id) REFERENCES runs(run_id),
+                        UNIQUE (run_id, call_id, attempt)
+                    )
+                """)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_run_vendor_calls_run "
+                    "ON run_vendor_calls(run_id, id)"
+                )
+                existing_columns = {
+                    row["name"] for row in conn.execute("PRAGMA table_info(run_vendor_calls)")
+                }
+                for column in (
+                    "symbol TEXT",
+                    "agent TEXT",
+                    "calculation_start TEXT",
+                    "requested_end TEXT",
+                    "data_latest_date TEXT",
+                ):
+                    name = column.split()[0]
+                    if name not in existing_columns:
+                        conn.execute(f"ALTER TABLE run_vendor_calls ADD COLUMN {column}")
 
     def create_run(
         self,
@@ -195,6 +240,44 @@ class RunHistoryStore:
                     (status, finished_at, run_id),
                 )
 
+    def add_vendor_call(self, record: dict[str, Any]) -> None:
+        """Append one immutable vendor attempt to a run's audit ledger."""
+        with self._lock:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO run_vendor_calls (
+                        run_id, call_id, attempt, category, method, vendor, agent, symbol,
+                        status, selected, arguments_json, latency_ms,
+                        error_type, error_detail, result_summary, result_hash,
+                        calculation_start, requested_end, data_latest_date,
+                        started_at, finished_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record["run_id"], record["call_id"], record["attempt"],
+                        record["category"], record["method"], record["vendor"],
+                        record.get("agent"),
+                        record.get("symbol"),
+                        record["status"], int(bool(record.get("selected"))),
+                        record.get("arguments_json"), record.get("latency_ms"),
+                        record.get("error_type"), record.get("error_detail"),
+                        record.get("result_summary"), record.get("result_hash"),
+                        record.get("calculation_start"), record.get("requested_end"),
+                        record.get("data_latest_date"),
+                        record["started_at"], record["finished_at"],
+                    ),
+                )
+
+    def get_vendor_calls(self, run_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM run_vendor_calls WHERE run_id=? ORDER BY id",
+                    (run_id,),
+                ).fetchall()
+                return [dict(row) for row in rows]
+
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
             with self._conn() as conn:
@@ -253,6 +336,7 @@ class RunHistoryStore:
                 if not row:
                     return False
                 conn.execute("DELETE FROM events WHERE run_id=?", (run_id,))
+                conn.execute("DELETE FROM run_vendor_calls WHERE run_id=?", (run_id,))
                 conn.execute("DELETE FROM runs WHERE run_id=?", (run_id,))
                 return True
 
@@ -260,6 +344,7 @@ class RunHistoryStore:
         with self._lock:
             with self._conn() as conn:
                 conn.execute("DELETE FROM events")
+                conn.execute("DELETE FROM run_vendor_calls")
                 conn.execute("DELETE FROM runs")
 
     def _recover_runs(self) -> None:

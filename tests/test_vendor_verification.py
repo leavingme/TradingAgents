@@ -5,6 +5,8 @@ import pytest
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.vendor_verification import VendorVerificationStore
+from tradingagents.runtime.audit_context import bind_run_id, reset_run_id
+from tradingagents.runtime.history import RunHistoryStore
 
 
 VALID_OHLCV = "Date,Open,High,Low,Close,Volume\n2026-07-09,100,105,99,103,1000\n"
@@ -83,3 +85,93 @@ def test_manual_verification_records_no_data(monkeypatch):
         "no_data",
         "manual",
     )
+
+
+@pytest.mark.unit
+def test_run_audit_preserves_every_fallback_attempt(monkeypatch, tmp_path):
+    from tradingagents.runtime import history as history_module
+    from tradingagents.dataflows import vendor_verification as verification_module
+
+    run_store = RunHistoryStore(tmp_path / "runs.db")
+    run_store.create_run(
+        "run-audit", "NVDA", "2026-07-10", "stock", ["market"], "test", 1
+    )
+    monkeypatch.setattr(history_module, "history_store", run_store)
+    monkeypatch.setattr(
+        verification_module,
+        "vendor_verification_store",
+        VendorVerificationStore(tmp_path / "runs.db"),
+    )
+    monkeypatch.setattr(interface, "get_vendor", lambda category, method: "primary, fallback")
+
+    def unavailable(*args):
+        raise NoMarketDataError("NVDA", detail="primary has no row")
+
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {
+            "get_stock_data": {
+                "primary": unavailable,
+                "fallback": lambda *args: VALID_OHLCV,
+            }
+        },
+        clear=False,
+    ):
+        token = bind_run_id("run-audit")
+        try:
+            result = interface.route_to_vendor(
+                "get_stock_data", "NVDA", "2026-07-01", "2026-07-10"
+            )
+        finally:
+            reset_run_id(token)
+
+    assert result == VALID_OHLCV
+    calls = run_store.get_vendor_calls("run-audit")
+    assert [(call["attempt"], call["vendor"], call["status"], call["selected"]) for call in calls] == [
+        (1, "primary", "no_data", 0),
+        (2, "fallback", "available", 1),
+    ]
+    assert calls[0]["call_id"] == calls[1]["call_id"]
+    assert '"NVDA"' in calls[0]["arguments_json"]
+    assert calls[0]["error_type"] == "NoMarketDataError"
+    assert calls[1]["result_hash"]
+    assert calls[1]["symbol"] == "NVDA"
+    assert calls[1]["agent"] == "Market Analyst"
+    assert calls[1]["calculation_start"] == "2026-07-01"
+    assert calls[1]["requested_end"] == "2026-07-10"
+    assert calls[1]["data_latest_date"] == "2026-07-09"
+
+
+@pytest.mark.unit
+def test_analysis_stops_if_run_audit_cannot_be_written(monkeypatch, tmp_path):
+    from tradingagents.runtime import history as history_module
+    from tradingagents.dataflows import vendor_verification as verification_module
+
+    run_store = RunHistoryStore(tmp_path / "runs.db")
+    run_store.create_run("run-hard-gate", "NVDA", "2026-07-10", "stock", ["market"], "test", 1)
+    monkeypatch.setattr(history_module, "history_store", run_store)
+    monkeypatch.setattr(
+        verification_module,
+        "vendor_verification_store",
+        VendorVerificationStore(tmp_path / "runs.db"),
+    )
+    monkeypatch.setattr(interface, "get_vendor", lambda category, method: "westock")
+    monkeypatch.setattr(
+        run_store,
+        "add_vendor_call",
+        mock.Mock(side_effect=RuntimeError("audit disk unavailable")),
+    )
+
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_stock_data": {"westock": lambda *args: VALID_OHLCV}},
+        clear=False,
+    ):
+        token = bind_run_id("run-hard-gate")
+        try:
+            with pytest.raises(RuntimeError, match="audit disk unavailable"):
+                interface.route_to_vendor(
+                    "get_stock_data", "NVDA", "2026-07-01", "2026-07-10"
+                )
+        finally:
+            reset_run_id(token)

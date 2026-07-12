@@ -709,7 +709,13 @@ class TestPortfolioManagerInjection:
             rating=PortfolioRating.OVERWEIGHT,
             executive_summary="Build position gradually over the next two weeks.",
             investment_thesis="AI capex cycle remains intact; institutional flows constructive.",
+            entry_price=200.0,
+            stop_loss=190.0,
             price_target=215.0,
+            atr=7.0,
+            target_position_pct=4.0,
+            initial_position_pct=1.5,
+            max_portfolio_risk_pct=0.8,
             time_horizon="3-6 months",
         )
         llm = _structured_pm_llm(captured, decision)
@@ -722,7 +728,7 @@ class TestPortfolioManagerInjection:
         assert "**Price Target**: 215.0" in md
         assert "**Time Horizon**: 3-6 months" in md
 
-    def test_pm_falls_back_to_freetext_when_structured_unavailable(self):
+    def test_pm_structured_unavailable_returns_review_required_hold(self):
         """If a provider does not support with_structured_output, the agent
         falls back to a plain invoke and returns whatever prose the model
         produced, so the pipeline never blocks."""
@@ -732,7 +738,34 @@ class TestPortfolioManagerInjection:
         llm.invoke.return_value = MagicMock(content=plain_response)
         pm_node = create_portfolio_manager(llm)
         result = pm_node(_make_pm_state())
-        assert result["final_trade_decision"] == plain_response
+        assert "**Rating**: Hold" in result["final_trade_decision"]
+        assert "REVIEW_REQUIRED" in result["final_trade_decision"]
+        llm.invoke.assert_not_called()
+
+    def test_pm_cannot_override_trader_review_required(self):
+        captured = {}
+        llm = _structured_pm_llm(
+            captured,
+            PortfolioDecision(
+                rating=PortfolioRating.BUY,
+                executive_summary="Would otherwise buy.",
+                investment_thesis="Strong setup.",
+                entry_price=200,
+                stop_loss=190,
+                price_target=230,
+                atr=7,
+                target_position_pct=4,
+                initial_position_pct=1.5,
+                max_portfolio_risk_pct=0.8,
+            ),
+        )
+        pm_node = create_portfolio_manager(llm)
+        state = _make_pm_state()
+        state["trader_investment_plan"] = "HOLD REVIEW_REQUIRED"
+        result = pm_node(state)
+        assert "**Rating**: Hold" in result["final_trade_decision"]
+        assert "REVIEW_REQUIRED" in result["final_trade_decision"]
+        llm.with_structured_output.return_value.invoke.assert_not_called()
 
     # get_past_context ordering and limits
 

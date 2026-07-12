@@ -22,6 +22,7 @@ from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+import re
 
 # LLMs sometimes write a placeholder string ("None", "N/A", ...) into an optional
 # numeric field instead of omitting it. Coerce those to None so the structured
@@ -33,6 +34,34 @@ _NULLISH_FLOAT = {"", "none", "n/a", "na", "null", "nil", "-", "tbd", "unknown"}
 def _coerce_optional_float(value):
     if isinstance(value, str) and value.strip().lower() in _NULLISH_FLOAT:
         return None
+    return value
+
+
+_PROSE_TRADE_MATH = re.compile(
+    r"risk\s*[/:-]?\s*reward|reward\s*[/:-]?\s*risk|风险回报|盈亏比|"
+    r"\d+(?:\.\d+)?\s*[×x]\s*atr|atr\s*(?:倍数|multiple)|"
+    r"initial portfolio risk|初始组合风险",
+    re.IGNORECASE,
+)
+_PROSE_EXECUTABLE_NUMBER = re.compile(
+    r"(?:entry|stop(?:[- ]loss)?|price target|position siz(?:e|ing)|"
+    r"入场|止损|目标价|仓位|建仓|加仓)"
+    r"[^\n.!?。！？]{0,35}(?:\$?\d+(?:\.\d+)?%?)|"
+    r"(?:\$?\d+(?:\.\d+)?%?)[^\n.!?。！？]{0,20}"
+    r"(?:entry|stop(?:[- ]loss)?|price target|position|入场|止损|目标价|仓位|建仓|加仓)",
+    re.IGNORECASE,
+)
+
+
+def _reject_calculated_trade_math(value: str) -> str:
+    if _PROSE_TRADE_MATH.search(value):
+        raise ValueError(
+            "calculated reward/risk, ATR multiples, and portfolio risk must not appear in prose"
+        )
+    if _PROSE_EXECUTABLE_NUMBER.search(value):
+        raise ValueError(
+            "executable entry, stop, target, and position numbers must use structured fields, not prose"
+        )
     return value
 
 
@@ -144,15 +173,44 @@ class TraderProposal(BaseModel):
         default=None,
         description="Optional stop-loss price in the instrument's quote currency.",
     )
+    price_target: float | None = Field(
+        default=None,
+        description="Required target price for Buy proposals.",
+    )
+    atr: float | None = Field(
+        default=None,
+        description="Required latest ATR used to validate stop distance for Buy proposals.",
+    )
+    target_position_pct: float | None = Field(
+        default=None,
+        description="Required final target position as percent of portfolio for Buy proposals.",
+    )
+    initial_position_pct: float | None = Field(
+        default=None,
+        description="Required initial position as percent of portfolio for Buy proposals.",
+    )
+    max_portfolio_risk_pct: float | None = Field(
+        default=None,
+        description="Required maximum allowed initial portfolio loss percent for Buy proposals.",
+    )
     position_sizing: str | None = Field(
         default=None,
         description="Optional sizing guidance, e.g. '5% of portfolio'.",
     )
 
-    @field_validator("entry_price", "stop_loss", mode="before")
+    @field_validator(
+        "entry_price", "stop_loss", "price_target", "atr",
+        "target_position_pct", "initial_position_pct", "max_portfolio_risk_pct",
+        mode="before",
+    )
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
+
+    @field_validator("reasoning")
+    @classmethod
+    def _no_unverified_trade_math(cls, value):
+        return _reject_calculated_trade_math(value)
 
 
 def render_trader_proposal(proposal: TraderProposal) -> str:
@@ -162,6 +220,31 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
     preserved for backward compatibility with the analyst stop-signal text
     and any external code that greps for it.
     """
+    metrics = None
+    if proposal.action is TraderAction.BUY:
+        from .trade_plan import validate_long_trade_plan
+
+        metrics = validate_long_trade_plan(
+            entry_price=proposal.entry_price,
+            stop_loss=proposal.stop_loss,
+            price_target=proposal.price_target,
+            atr=proposal.atr,
+            target_position_pct=proposal.target_position_pct,
+            initial_position_pct=proposal.initial_position_pct,
+            max_portfolio_risk_pct=proposal.max_portfolio_risk_pct,
+        )
+    else:
+        from .trade_plan import reject_numeric_plan_fields
+
+        reject_numeric_plan_fields(
+            entry_price=proposal.entry_price,
+            stop_loss=proposal.stop_loss,
+            price_target=proposal.price_target,
+            atr=proposal.atr,
+            target_position_pct=proposal.target_position_pct,
+            initial_position_pct=proposal.initial_position_pct,
+            max_portfolio_risk_pct=proposal.max_portfolio_risk_pct,
+        )
     parts = [
         f"**Action**: {proposal.action.value}",
         "",
@@ -171,7 +254,22 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
         parts.extend(["", f"**Entry Price**: {proposal.entry_price}"])
     if proposal.stop_loss is not None:
         parts.extend(["", f"**Stop Loss**: {proposal.stop_loss}"])
-    if proposal.position_sizing:
+    if proposal.price_target is not None:
+        parts.extend(["", f"**Price Target**: {proposal.price_target}"])
+    if metrics is not None:
+        parts.extend([
+            "",
+            f"**Reward/Risk (calculated)**: {metrics.reward_risk_ratio:.2f}",
+            "",
+            f"**Stop Distance (ATR, calculated)**: {metrics.stop_atr_multiple:.2f}",
+            "",
+            f"**Initial Position**: {proposal.initial_position_pct:.2f}%",
+            "",
+            f"**Target Position**: {proposal.target_position_pct:.2f}%",
+            "",
+            f"**Initial Portfolio Risk (calculated)**: {metrics.initial_portfolio_risk_pct:.4f}%",
+        ])
+    if proposal.position_sizing and metrics is None:
         parts.extend(["", f"**Position Sizing**: {proposal.position_sizing}"])
     parts.extend([
         "",
@@ -217,15 +315,48 @@ class PortfolioDecision(BaseModel):
         default=None,
         description="Optional target price in the instrument's quote currency.",
     )
+    entry_price: float | None = Field(
+        default=None,
+        description="Required planned entry price for Buy or Overweight decisions.",
+    )
+    stop_loss: float | None = Field(
+        default=None,
+        description="Required hard stop price for Buy or Overweight decisions.",
+    )
+    atr: float | None = Field(
+        default=None,
+        description="Required latest ATR for Buy or Overweight stop validation.",
+    )
+    target_position_pct: float | None = Field(
+        default=None,
+        description="Required final target position percent for Buy or Overweight.",
+    )
+    initial_position_pct: float | None = Field(
+        default=None,
+        description="Required initial position percent for Buy or Overweight.",
+    )
+    max_portfolio_risk_pct: float | None = Field(
+        default=None,
+        description="Required maximum allowed initial portfolio risk percent.",
+    )
     time_horizon: str | None = Field(
         default=None,
         description="Optional recommended holding period, e.g. '3-6 months'.",
     )
 
-    @field_validator("price_target", mode="before")
+    @field_validator(
+        "price_target", "entry_price", "stop_loss", "atr",
+        "target_position_pct", "initial_position_pct", "max_portfolio_risk_pct",
+        mode="before",
+    )
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
+
+    @field_validator("executive_summary", "investment_thesis")
+    @classmethod
+    def _no_unverified_trade_math(cls, value):
+        return _reject_calculated_trade_math(value)
 
 
 def render_pm_decision(decision: PortfolioDecision) -> str:
@@ -236,6 +367,31 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     ``**Executive Summary**``, ``**Investment Thesis**``) that downstream
     parsers and the report writers already handle.
     """
+    metrics = None
+    if decision.rating in {PortfolioRating.BUY, PortfolioRating.OVERWEIGHT}:
+        from .trade_plan import validate_long_trade_plan
+
+        metrics = validate_long_trade_plan(
+            entry_price=decision.entry_price,
+            stop_loss=decision.stop_loss,
+            price_target=decision.price_target,
+            atr=decision.atr,
+            target_position_pct=decision.target_position_pct,
+            initial_position_pct=decision.initial_position_pct,
+            max_portfolio_risk_pct=decision.max_portfolio_risk_pct,
+        )
+    else:
+        from .trade_plan import reject_numeric_plan_fields
+
+        reject_numeric_plan_fields(
+            entry_price=decision.entry_price,
+            stop_loss=decision.stop_loss,
+            price_target=decision.price_target,
+            atr=decision.atr,
+            target_position_pct=decision.target_position_pct,
+            initial_position_pct=decision.initial_position_pct,
+            max_portfolio_risk_pct=decision.max_portfolio_risk_pct,
+        )
     parts = [
         f"**Rating**: {decision.rating.value}",
         "",
@@ -245,6 +401,27 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     ]
     if decision.price_target is not None:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])
+    if metrics is not None:
+        parts.extend([
+            "",
+            f"**Entry Price**: {decision.entry_price}",
+            "",
+            f"**Stop Loss**: {decision.stop_loss}",
+            "",
+            f"**ATR**: {decision.atr}",
+            "",
+            f"**Reward/Risk (calculated)**: {metrics.reward_risk_ratio:.2f}",
+            "",
+            f"**Stop Distance (ATR, calculated)**: {metrics.stop_atr_multiple:.2f}",
+            "",
+            f"**Initial Position**: {decision.initial_position_pct:.2f}%",
+            "",
+            f"**Target Position**: {decision.target_position_pct:.2f}%",
+            "",
+            f"**Initial Portfolio Risk (calculated)**: {metrics.initial_portfolio_risk_pct:.4f}%",
+            "",
+            f"**Maximum Portfolio Risk**: {decision.max_portfolio_risk_pct:.4f}%",
+        ])
     if decision.time_horizon:
         parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
     return "\n".join(parts)

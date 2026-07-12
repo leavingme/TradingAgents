@@ -18,6 +18,13 @@ const DISPLAY_NAMES = {
   },
 };
 
+const ANALYST_NAMES = {
+  market: 'Market Analyst',
+  social: 'Sentiment Analyst',
+  news: 'News Analyst',
+  fundamentals: 'Fundamentals Analyst',
+};
+
 export function formatAgentName(name, locale = 'en') {
   const displayName = DISPLAY_NAMES[locale]?.[name];
   if (displayName) return displayName;
@@ -35,6 +42,18 @@ export function createAgentTimeline({ element, t, locale, formatStatus, statusCl
   function clear() {
     agents.clear();
     element.replaceChildren();
+  }
+
+  function initialize(selectedAnalysts = [], analystStatus = 'pending') {
+    agents.clear();
+    selectedAnalysts.forEach(key => {
+      const name = ANALYST_NAMES[key];
+      if (name) agents.set(name, analystStatus);
+    });
+    TEAMS.slice(1).forEach(team => {
+      team.agents.forEach(agent => agents.set(agent, 'pending'));
+    });
+    render();
   }
 
   function render() {
@@ -79,7 +98,7 @@ export function createAgentTimeline({ element, t, locale, formatStatus, statusCl
     return item;
   }
 
-  return { update, clear, render };
+  return { update, clear, initialize, render };
 }
 
 function cell(text, className) {

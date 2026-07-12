@@ -5,13 +5,14 @@ the old version had a prompt that demanded social-media analysis but the
 only tool available was Westock news — which led LLMs to fabricate
 Reddit/X/StockTwits content under prompt pressure (verified live).
 
-The redesigned agent pre-fetches three complementary data sources before
+The redesigned agent pre-fetches four complementary data sources before
 the LLM is invoked and injects them into the prompt as structured blocks:
 
   1. News headlines     — Westock (institutional framing)
   2. StockTwits messages — retail-trader posts indexed by cashtag, with
                            user-labeled Bullish/Bearish sentiment tags
   3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
+  4. X/Twitter posts     — validated read-only bird search results
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -37,6 +38,7 @@ from tradingagents.agents.schemas import SentimentReport, render_sentiment_repor
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_news,
+    get_social_posts,
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
@@ -73,12 +75,16 @@ def create_sentiment_analyst(llm):
         # on foreign tickers (e.g. 0700.HK -> TCEHY / Tencent)
         sq = resolve_social_query(ticker)
 
-        # Pre-fetch all three sources. Each fetcher degrades gracefully and
+        # Pre-fetch all four sources. Each fetcher degrades gracefully and
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
         stocktwits_block = fetch_stocktwits_messages(sq["stocktwits"], limit=30)
         reddit_block = fetch_reddit_posts(sq["reddit"])
+        try:
+            twitter_block = get_social_posts.func(ticker, start_date, end_date)
+        except Exception as exc:
+            twitter_block = f"<X/Twitter unavailable: {type(exc).__name__}>"
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -87,6 +93,7 @@ def create_sentiment_analyst(llm):
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
+            twitter_block=twitter_block,
         ) + get_no_preamble_instruction()
 
         prompt = ChatPromptTemplate.from_messages(
@@ -132,6 +139,7 @@ def _build_system_message(
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
+    twitter_block: str,
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
     return build_sentiment_analyst_system_message(
@@ -141,6 +149,7 @@ def _build_system_message(
         news_block=news_block,
         stocktwits_block=stocktwits_block,
         reddit_block=reddit_block,
+        twitter_block=twitter_block,
     )
 
 

@@ -668,10 +668,10 @@
               </div>
             </div>
 
-            <!-- Card 4: News & Social Data -->
+            <!-- Card 4: News Data -->
             <div class="provider-card" data-category="news_data">
               <div class="provider-card-header">
-                <h3 data-i18n="catNewsTitle">News & Social Data</h3>
+                <h3 data-i18n="catNewsTitle">News Data</h3>
                 <p class="provider-card-desc" data-i18n="catNewsDesc">Fetches news articles, insider transactions, and market news.</p>
               </div>
               <div class="provider-card-body">
@@ -721,6 +721,19 @@
                       </tbody>
                     </table>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="provider-card" data-category="social_data">
+              <div class="provider-card-header">
+                <h3 data-i18n="catSocialTitle">Social Sentiment</h3>
+                <p class="provider-card-desc" data-i18n="catSocialDesc">Combines X/Twitter, Reddit, and StockTwits discussions. Bird is the configurable read-only X/Twitter provider; Reddit and StockTwits are built-in social sources used by the Sentiment Analyst.</p>
+              </div>
+              <div class="provider-card-body">
+                <div class="provider-selector-area">
+                  <h4 data-i18n="prioritySetting">Priority & Enable Settings</h4>
+                  <ul class="provider-sortable-list" id="list_social_data"></ul>
                 </div>
               </div>
             </div>
@@ -907,6 +920,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260711-analyst-click-v3" type="module"></script>
+    <script src="/static/app.js?v=20260712-social-category" type="module"></script>
   </body>
 </html>

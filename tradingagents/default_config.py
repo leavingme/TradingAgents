@@ -132,6 +132,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "technical_indicators": "longbridge_mcp, longbridge, westock",
         "fundamental_data": "longbridge_mcp, longbridge, westock",
         "news_data": "westock, duckduckgo, alpha_vantage",
+        "social_data": "bird",
         "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },

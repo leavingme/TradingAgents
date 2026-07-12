@@ -83,6 +83,13 @@ async def get_env_status():
         "configured": shutil.which("longbridge") is not None,
         "required": True,
     }
+    data_vendors["bird"] = {
+        "env_var": "AUTH_TOKEN + CT0 / browser cookies",
+        "configured": shutil.which("bird") is not None and bool(
+            os.environ.get("AUTH_TOKEN") and os.environ.get("CT0")
+        ),
+        "required": True,
+    }
     # 5. Polymarket, DuckDuckGo, and Westock do not require credentials
     for v in ["polymarket", "duckduckgo", "westock"]:
         data_vendors[v] = {

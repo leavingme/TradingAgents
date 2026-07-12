@@ -16,11 +16,14 @@
 
 - [x] 行情数据：Date、OHLC、Volume，以及可选 Amount/Turnover 校验。
 - [x] 技术指标：统一格式、日期、历史窗口、固定范围、价格量纲、零值、重复值和数量级异常。
-- [ ] 财务数据：币种、单位、报告期、年度/季度口径和字段关系。
+- [x] 财务数据：币种、单位、报告期、年度/季度口径和字段关系。
 - [ ] 新闻数据：来源、发布时间、正文可用性和分析日期截止校验。
 - [ ] 宏观数据：指标名称、单位、观察期和发布日期。（部分完成：已实现 FRED 滞后非美指标 1095 天 Lookback 智能拓宽防护机制，防空回包异常）
 - [ ] 预测市场：事件标识、到期时间和概率范围。
 - [x] Graph 硬门禁：ToolNode 不吞数据异常；失败运行不生成报告或 `run_completed`。
+- [x] Runtime Agent 状态机：累积 graph snapshot 不得导致已完成 Agent 重新进入运行态；团队交接状态完整且报告事件去重。
+- [x] X/Twitter 舆情：Bird 只读结构化 adapter、统一 SocialPost 模型、日期截止/去重/垃圾推广校验、独立 `social_data` vendor 路由与 Web 配置。
+- [x] Web 舆情分类：新闻与社交数据分卡展示，Reddit、StockTwits 与 X/Twitter 统一归入“社交动态舆情”，后端仍保持 `news_data` / `social_data` 边界。
 - [ ] Runtime 状态：记录失败的数据域、vendor 尝试轨迹和具体校验原因。
 
 架构约束：
@@ -37,9 +40,9 @@ P0-2 财务数据后续重构：
 
 - [x] Longbridge MCP 原始 JSON 直接映射 `FinancialMetric`，不经过 `_flatten_financial()` 文本。
 - [x] Longbridge CLI JSON 直接映射 `FinancialMetric`；文本解析仅保留为旧接口兼容层。
-- [ ] validator 只接收统一领域模型，不接收 vendor 文本。
+- [x] validator 只接收统一领域模型，不接收 vendor 文本。
 - [x] 验证通过后再渲染为提供给 Fundamentals Analyst 的 JSON。
 - [x] Vendor 派生值完整保留为 `unverified_facts`，基础输入充分时由代码重算利润率并记录公式和输入。
-- [ ] 将 `unverified_facts` 和原始 payload 持久化到独立审计记录，不进入 LLM 上下文。
-- [ ] 实现资产负债表、现金流量表和利润表的跨报表勾稽与期间一致性检查。
-- [ ] 基于完整输入确定性计算 ROE、ROA、TTM EPS/PE、净现金和 EV/EBITDA。
+- [x] 将 `unverified_facts` 和原始 payload 持久化到独立审计记录，不进入 LLM 上下文。
+- [x] 实现资产负债表、现金流量表和利润表的跨报表勾稽与期间一致性检查。
+- [x] 基于完整输入确定性计算 ROE、ROA、TTM EPS/PE、净现金和 EV/EBITDA。

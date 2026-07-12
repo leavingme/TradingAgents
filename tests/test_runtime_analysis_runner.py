@@ -152,6 +152,43 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert Path(completed.content["report_path"]).exists()
 
 
+def test_agent_statuses_are_monotonic_and_report_updates_are_deduplicated(
+    monkeypatch, tmp_path
+):
+    from tradingagents.runtime import analysis_runner
+
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", FakeTradingAgentsGraph)
+    events = list(run_analysis_stream(AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-05",
+        selected_analysts=("market",),
+        report_dir=tmp_path / "reports",
+        run_id="run-workflow-status",
+    )))
+
+    statuses: dict[str, list[str]] = {}
+    for event in events:
+        if event.type == "agent_status":
+            statuses.setdefault(event.agent, []).append(event.content["status"])
+
+    assert statuses["Research Manager"] == ["pending", "in_progress", "completed"]
+    assert statuses["Trader"] == ["pending", "in_progress", "completed"]
+    assert statuses["Portfolio Manager"] == ["pending", "in_progress", "completed"]
+    assert statuses["Bull Researcher"][-1] == "completed"
+    assert statuses["Bear Researcher"][-1] == "completed"
+    for transitions in statuses.values():
+        completed_at = [i for i, value in enumerate(transitions) if value == "completed"]
+        if completed_at:
+            assert all(value == "completed" for value in transitions[completed_at[0]:])
+
+    sections = [
+        event.content["section"]
+        for event in events
+        if event.type == "report_section"
+    ]
+    assert len(sections) == len(set(sections))
+
+
 def test_data_validation_error_stops_run_without_report_or_completion(monkeypatch, tmp_path):
     from tradingagents.runtime import analysis_runner
 

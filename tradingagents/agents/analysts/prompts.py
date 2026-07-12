@@ -102,8 +102,9 @@ def build_sentiment_analyst_system_message(
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
+    twitter_block: str,
 ) -> str:
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
+    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on four complementary data sources that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
 
@@ -127,6 +128,13 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 <start_of_reddit>
 {reddit_block}
 <end_of_reddit>
+
+### X/Twitter posts — validated bird search results (past 7 days)
+Fast-moving public discussion. Spam, duplicates, and posts outside the analysis window have been removed deterministically.
+
+<start_of_twitter>
+{twitter_block}
+<end_of_twitter>
 
 ## How to analyze this data (best practices)
 

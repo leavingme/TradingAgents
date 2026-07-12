@@ -30,8 +30,8 @@ def analyst_prompt_payload() -> dict[str, list[dict[str, object]]]:
             {
                 "key": "social",
                 "title": "Sentiment Analyst",
-                "description": "Sentiment analysis from pre-fetched news headlines, StockTwits messages, and Reddit posts.",
-                "tools": ["get_news", "fetch_stocktwits_messages", "fetch_reddit_posts"],
+                "description": "Sentiment analysis from pre-fetched news, X/Twitter, StockTwits, and Reddit posts.",
+                "tools": ["get_news", "get_social_posts", "fetch_stocktwits_messages", "fetch_reddit_posts"],
                 "prompt": render_full_prompt(
                     PREFETCHED_DATA_COLLABORATION_PROMPT,
                     build_sentiment_analyst_system_message(
@@ -41,6 +41,7 @@ def analyst_prompt_payload() -> dict[str, list[dict[str, object]]]:
                         news_block="{news_block}",
                         stocktwits_block="{stocktwits_block}",
                         reddit_block="{reddit_block}",
+                        twitter_block="{twitter_block}",
                     ),
                     [],
                 ),

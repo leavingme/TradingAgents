@@ -21,6 +21,7 @@ from tradingagents.agents.utils.news_data_tools import (
     get_news,
 )
 from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets
+from tradingagents.agents.utils.social_data_tools import get_social_posts
 from tradingagents.agents.utils.technical_indicators_tools import get_indicators
 
 # Public surface: the data tools are imported here so agents and the graph
@@ -37,6 +38,7 @@ __all__ = [
     "get_insider_transactions",
     "get_macro_indicators",
     "get_prediction_markets",
+    "get_social_posts",
     "get_verified_market_snapshot",
     "build_instrument_context",
     "resolve_instrument_identity",
@@ -275,5 +277,4 @@ def create_msg_delete():
         return {"messages": removal_operations + [placeholder]}
 
     return delete_messages
-
 

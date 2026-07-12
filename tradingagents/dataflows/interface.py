@@ -49,6 +49,8 @@ from .duckduckgo_search import (
     get_news_duckduckgo,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .bird import get_social_posts as get_bird_social_posts
+from .social_data import SocialFeed, validate_social_feed
 # Longbridge data vendor plugin: ships on top of v0.3.0 (added 2026-07-04).
 # CLI variant is the fallback when MCP bearer is missing/expired.
 from .longbridge import (
@@ -130,6 +132,10 @@ TOOLS_CATEGORIES = {
             "get_insider_transactions",
         ]
     },
+    "social_data": {
+        "description": "Ticker-specific social sentiment posts",
+        "tools": ["get_social_posts"],
+    },
     "macro_data": {
         "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
         "tools": [
@@ -152,6 +158,7 @@ VENDOR_LIST = [
     "alpha_vantage",
     "longbridge",
     "longbridge_mcp",
+    "bird",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -216,6 +223,9 @@ VENDOR_METHODS = {
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "westock": get_westock_insider_transactions,
+    },
+    "get_social_posts": {
+        "bird": get_bird_social_posts,
     },
     # macro_data
     "get_macro_indicators": {
@@ -559,6 +569,14 @@ def route_to_vendor(method: str, *args, **kwargs):
                     reference_close = latest_verified_close(raw_ohlcv, curr_date)
                 normalized = normalize_indicator_result(result, indicator, str(args[2]))
                 validation = validate_indicator_result(normalized, reference_close=reference_close)
+            elif method == "get_social_posts":
+                try:
+                    normalized_result = validate_social_feed(
+                        result, str(args[1]), str(args[2])
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise NoMarketDataError(str(args[0]), detail=str(exc)) from exc
+                validation = type("Validation", (), {"is_valid": True, "detail": ""})()
             else:
                 validation = validate_vendor_result(method, result)
             if not validation.is_valid:
@@ -615,7 +633,7 @@ def route_to_vendor(method: str, *args, **kwargs):
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
                 method, first_error,
             )
-        if method in {"get_stock_data", "get_indicators"} | FINANCIAL_METHODS:
+        if method in {"get_stock_data", "get_indicators", "get_social_posts"} | FINANCIAL_METHODS:
             raise last_no_data
         sym = last_no_data.symbol
         canonical = last_no_data.canonical
@@ -674,6 +692,7 @@ def verify_vendor(vendor: str, category: str):
         "technical_indicators": ("get_indicators", ("AAPL", "rsi", str(now), 30)),
         "fundamental_data": ("get_fundamentals", ("AAPL",)),
         "news_data": ("get_news", ("AAPL", str(now - timedelta(days=7)), str(now))),
+        "social_data": ("get_social_posts", ("AAPL", str(now - timedelta(days=7)), str(now))),
         "macro_data": ("get_macro_indicators", ("cpi", str(now), 365)),
         "prediction_markets": ("get_prediction_markets", ("Federal Reserve interest rates", 3)),
     }

@@ -163,6 +163,7 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
             yield from _team_events(
                 request.run_id,
                 chunk,
+                report_sections,
                 agent_status,
             )
             stats_event, last_stats = _stats_event(request.run_id, callbacks, last_stats)
@@ -359,6 +360,7 @@ def _analyst_events(
 def _team_events(
     run_id: str,
     chunk: dict[str, Any],
+    report_sections: dict[str, Any],
     agent_status: dict[str, str],
 ) -> Iterator[AnalysisEvent]:
     debate = chunk.get("investment_debate_state") or {}
@@ -369,38 +371,33 @@ def _team_events(
 
         if bull:
             yield from _set_status(run_id, agent_status, "Bull Researcher", "in_progress")
-            yield AnalysisEvent(
-                type="report_section",
-                run_id=run_id,
-                agent="Bull Researcher",
-                content={"section": "bull_researcher", "text": bull},
+            yield from _report_section_event(
+                run_id, report_sections, "Bull Researcher", "bull_researcher", bull
             )
         if bear:
             yield from _set_status(run_id, agent_status, "Bear Researcher", "in_progress")
-            yield AnalysisEvent(
-                type="report_section",
-                run_id=run_id,
-                agent="Bear Researcher",
-                content={"section": "bear_researcher", "text": bear},
+            yield from _report_section_event(
+                run_id, report_sections, "Bear Researcher", "bear_researcher", bear
             )
         if judge:
+            yield from _set_status(run_id, agent_status, "Bull Researcher", "completed")
+            yield from _set_status(run_id, agent_status, "Bear Researcher", "completed")
+            yield from _set_status(run_id, agent_status, "Research Manager", "in_progress")
             yield from _set_status(run_id, agent_status, "Research Manager", "completed")
             yield from _set_status(run_id, agent_status, "Trader", "in_progress")
-            yield AnalysisEvent(
-                type="report_section",
-                run_id=run_id,
-                agent="Research Manager",
-                content={"section": "investment_plan", "text": judge},
+            yield from _report_section_event(
+                run_id, report_sections, "Research Manager", "investment_plan", judge
             )
 
     if chunk.get("trader_investment_plan"):
         yield from _set_status(run_id, agent_status, "Trader", "completed")
         yield from _set_status(run_id, agent_status, "Aggressive Analyst", "in_progress")
-        yield AnalysisEvent(
-            type="report_section",
-            run_id=run_id,
-            agent="Trader",
-            content={"section": "trader_investment_plan", "text": chunk["trader_investment_plan"]},
+        yield from _report_section_event(
+            run_id,
+            report_sections,
+            "Trader",
+            "trader_investment_plan",
+            chunk["trader_investment_plan"],
         )
 
     risk = chunk.get("risk_debate_state") or {}
@@ -413,15 +410,13 @@ def _team_events(
             text = (risk.get(key) or "").strip()
             if text:
                 yield from _set_status(run_id, agent_status, agent, "in_progress")
-                yield AnalysisEvent(
-                    type="report_section",
-                    run_id=run_id,
-                    agent=agent,
-                    content={"section": section, "text": text},
+                yield from _report_section_event(
+                    run_id, report_sections, agent, section, text
                 )
 
         judge = (risk.get("judge_decision") or "").strip()
         if judge:
+            yield from _set_status(run_id, agent_status, "Portfolio Manager", "in_progress")
             for agent in (
                 "Aggressive Analyst",
                 "Conservative Analyst",
@@ -429,12 +424,28 @@ def _team_events(
                 "Portfolio Manager",
             ):
                 yield from _set_status(run_id, agent_status, agent, "completed")
-            yield AnalysisEvent(
-                type="report_section",
-                run_id=run_id,
-                agent="Portfolio Manager",
-                content={"section": "final_trade_decision", "text": judge},
+            yield from _report_section_event(
+                run_id, report_sections, "Portfolio Manager", "final_trade_decision", judge
             )
+
+
+def _report_section_event(
+    run_id: str,
+    report_sections: dict[str, Any],
+    agent: str,
+    section: str,
+    text: str,
+) -> Iterator[AnalysisEvent]:
+    """Emit a report update only when its cumulative graph value changed."""
+    if report_sections.get(section) == text:
+        return
+    report_sections[section] = text
+    yield AnalysisEvent(
+        type="report_section",
+        run_id=run_id,
+        agent=agent,
+        content={"section": section, "text": text},
+    )
 
 
 def _set_status(
@@ -443,7 +454,12 @@ def _set_status(
     agent: str,
     status: str,
 ) -> Iterator[AnalysisEvent]:
-    if agent_status.get(agent) == status:
+    current = agent_status.get(agent)
+    if current == status:
+        return
+    # Graph chunks contain cumulative state. Once an agent is completed, stale
+    # fields in later chunks must never make it appear to run again.
+    if current == "completed" and status != "completed":
         return
     agent_status[agent] = status
     yield AnalysisEvent(

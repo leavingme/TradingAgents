@@ -6,6 +6,7 @@ const CATEGORY_VENDORS = {
   technical_indicators: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   fundamental_data: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   news_data: ['westock', 'duckduckgo', 'alpha_vantage'],
+  social_data: ['bird'],
   macro_data: ['fred'],
   prediction_markets: ['polymarket'],
 };
@@ -18,6 +19,7 @@ const PROVIDER_META = {
   duckduckgo: { name: 'DuckDuckGo' },
   fred: { name: 'FRED' },
   polymarket: { name: 'Polymarket' },
+  bird: { name: 'Bird (X/Twitter)' },
 };
 
 const FALLBACK_DEFAULTS = {
@@ -25,6 +27,7 @@ const FALLBACK_DEFAULTS = {
   technical_indicators: 'longbridge_mcp, longbridge, westock',
   fundamental_data: 'longbridge_mcp, longbridge, westock',
   news_data: 'westock, duckduckgo, alpha_vantage',
+  social_data: 'bird',
   macro_data: 'fred',
   prediction_markets: 'polymarket',
 };

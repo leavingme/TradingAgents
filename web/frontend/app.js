@@ -1,5 +1,5 @@
 import { createProviderManager } from './components/provider-manager.js?v=20260711-indicator-validation';
-import { createAgentTimeline, formatAgentName } from './components/agent-timeline.js';
+import { createAgentTimeline, formatAgentName } from './components/agent-timeline.js?v=20260711-agent-status-init';
 import { createReportViewer } from './components/report-viewer.js';
 import { createRunHistory } from './components/run-history.js';
 import { createEventLog } from './components/event-log.js';
@@ -270,8 +270,10 @@ const translations = {
     indicatorSourceFootnote: 'Verified capability: Westock passed 13 indicators; Longbridge MCP and CLI passed 14 indicators across US stocks, China A-shares, and Hong Kong stocks. Alpha Vantage is shown for source type comparison and is not in the default technical-indicator chain.',
     catFundamentalsTitle: 'Company Fundamental Data',
     catFundamentalsDesc: 'Financial statements (income statements, balance sheets, cashflow statements).',
-    catNewsTitle: 'News & Social Data',
+    catNewsTitle: 'News Data',
     catNewsDesc: 'Fetches ticker news, global market news, and insider transactions. DuckDuckGo is a configurable fallback for news search.',
+    catSocialTitle: 'Social Sentiment',
+    catSocialDesc: 'Combines X/Twitter, Reddit, and StockTwits discussions. Bird is the configurable read-only X/Twitter provider; Reddit and StockTwits are built-in social sources used by the Sentiment Analyst.',
     catMacroTitle: 'Macroeconomic Data',
     catMacroDesc: 'Economic metrics like inflation, GDP, central bank interest rates.',
     catPredictionTitle: 'Prediction Markets',
@@ -474,8 +476,10 @@ const translations = {
     indicatorSourceFootnote: '能力验证结果：Westock 通过 13 个指标；Longbridge MCP 和 CLI 通过 14 个指标，验证范围覆盖美股、A 股和港股。Alpha Vantage 仅用于说明来源类型，不在默认技术指标链中。',
     catFundamentalsTitle: '公司财务基本面数据',
     catFundamentalsDesc: '利润表、资产负债表、现金流量表等财务数据。',
-    catNewsTitle: '新闻与社交动态舆情',
+    catNewsTitle: '新闻资讯',
     catNewsDesc: '获取个股新闻、全球宏观新闻和内幕交易信息。DuckDuckGo 是可配置的新闻搜索 fallback。',
+    catSocialTitle: '社交动态舆情',
+    catSocialDesc: '综合 X/Twitter、Reddit 和 StockTwits 讨论。Bird 是可配置的 X/Twitter 只读数据源；Reddit 与 StockTwits 是 Sentiment Analyst 使用的内置社交数据源。',
     catMacroTitle: '宏观经济数据指标',
     catMacroDesc: '美国和全球通胀、GDP、美联储利率等数据。',
     catPredictionTitle: '预测事件概率市场',
@@ -695,6 +699,7 @@ form.addEventListener('submit', async event => {
     const run = await api.startRun(payload);
     currentRunId   = run.run_id;
     runIdEl.textContent = shortId(run.run_id);
+    agentTimeline.initialize(run.selected_analysts, 'in_progress');
     setStatus(run.status, 'running');
     cancelButton.disabled = false;
     router.setRun(run.run_id, true);
@@ -1074,6 +1079,10 @@ async function selectHistoryRun(runId, options = {}) {
   loadReport.disabled      = !run.report_path;
   cancelButton.disabled    = !['pending', 'running'].includes(run.status);
   runtimeLog.clear();
+  agentTimeline.initialize(
+    run.selected_analysts,
+    ['pending', 'running'].includes(run.status) ? 'in_progress' : 'pending',
+  );
 
   eventStream.connect(run.run_id);
   if (run.report_path) await reportView.load(run.run_id);

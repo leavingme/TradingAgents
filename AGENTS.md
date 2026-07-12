@@ -25,7 +25,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 - `venv/bin/tradingagents` — Typer CLI（交互式 questionary 菜单）
 - `python -m cli.main` — 替代入口
 - `run_smoke.py` — 非交互 smoke runner（批处理/自动化优先使用）
-- `venv/bin/uvicorn web.backend.main:app --host 127.0.0.1 --port 8765 --reload` — 最小 FastAPI Web API 开发服务（默认热加载）
+- `venv/bin/tradingagents web --host 127.0.0.1 --port 8765 --reload` — 最小 FastAPI Web API 开发服务（默认开发启动方式；热加载只监听 `cli/`、`tradingagents/`、`web/`）
 - 执行 `pip install -e .` 后，入口脚本会根据 `pyproject.toml` 的
   `[project.scripts]` 自动重新生成；当前指向
   `tradingagents._cli_entry:app`（不是直接指向 `cli.main:app` —
@@ -75,7 +75,8 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 
 - 启动 Web 服务时不要先在托管沙箱内运行 uvicorn；本环境的沙箱通常无法
   bind 本地端口。直接使用受批准的沙箱外命令启动，并且默认开启热加载，例如：
-  `venv/bin/uvicorn web.backend.main:app --host 127.0.0.1 --port 8765 --reload`。
+  `venv/bin/tradingagents web --host 127.0.0.1 --port 8765 --reload`。该入口会限制
+  reload 目录，避免扫描 `venv/`、`results/` 和 `.git/`。
 - 托管沙箱内可能无法 bind 本地端口，或 8765 被外部命名空间占用。`curl`
   失败不一定表示代码坏了；先看 uvicorn 日志是否是 `could not bind`。
 - 如果 8765 不可用，不要杀未知进程。优先用临时端口（如 8766/8877/8878）

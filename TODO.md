@@ -24,6 +24,7 @@
 - [x] Runtime Agent 状态机：累积 graph snapshot 不得导致已完成 Agent 重新进入运行态；团队交接状态完整且报告事件去重。
 - [x] X/Twitter 舆情：Bird 只读结构化 adapter、统一 SocialPost 模型、日期截止/去重/垃圾推广校验、独立 `social_data` vendor 路由与 Web 配置。
 - [x] Web 舆情分类：新闻与社交数据分卡展示，Reddit、StockTwits 与 X/Twitter 统一归入“社交动态舆情”，后端仍保持 `news_data` / `social_data` 边界。
+- [x] Web 刷新性能：本地托管 Markdown renderer、移除 Google Fonts 外网阻塞，并将开发热加载范围限制到源码目录。
 - [ ] Runtime 状态：记录失败的数据域、vendor 尝试轨迹和具体校验原因。
 
 架构约束：

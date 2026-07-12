@@ -26,6 +26,10 @@ def test_web_command_starts_uvicorn(monkeypatch):
                 "host": "0.0.0.0",
                 "port": 9999,
                 "reload": True,
+                "reload_dirs": [
+                    str(m.Path(m.__file__).resolve().parents[1] / directory)
+                    for directory in ("cli", "tradingagents", "web")
+                ],
                 "app_dir": str(m.Path(m.__file__).resolve().parents[1]),
             },
         )

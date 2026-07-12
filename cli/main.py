@@ -1482,11 +1482,16 @@ def web(
         ) from exc
 
     console.print(f"[green]Starting TradingAgents WebUI:[/green] http://{host}:{port}")
+    reload_dirs = [
+        str(repo_root / directory)
+        for directory in ("cli", "tradingagents", "web")
+    ]
     uvicorn.run(
         "web.backend.main:app",
         host=host,
         port=port,
         reload=reload,
+        reload_dirs=reload_dirs if reload else None,
         app_dir=str(repo_root),
     )
 

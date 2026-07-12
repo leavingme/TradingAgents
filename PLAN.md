@@ -324,6 +324,12 @@ Known differences:
 - Classified X/Twitter, Reddit, and StockTwits under Social Sentiment while preserving the backend `news_data` and `social_data` routing boundary.
 - Clarified that Bird is the configurable X/Twitter vendor and that Reddit/StockTwits are built-in Sentiment Analyst sources.
 
+## Local Refresh Performance Update (2026-07-12)
+
+- Vendored Marked 15.0.12 and its license so initial rendering never blocks on jsDelivr.
+- Removed the Google Fonts network dependency and retained the existing system-font fallback stack.
+- Restricted CLI Web development reload watching to `cli/`, `tradingagents/`, and `web/`, excluding the virtual environment, results, and Git metadata.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

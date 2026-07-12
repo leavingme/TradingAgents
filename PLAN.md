@@ -343,6 +343,12 @@ Known differences:
 - Retained only UI language in localStorage; legacy settings/provider keys are read once, migrated to the server, and removed.
 - Server persistence allowlists known fields and vendors so credentials and unknown values cannot be stored accidentally.
 
+## Tool Argument Recovery (2026-07-12)
+
+- Added a narrow ToolNode recovery wrapper for model-generated argument schema errors.
+- The first `ToolInvocationError` is returned to the active Analyst as a structured error `ToolMessage`, allowing one corrected tool call.
+- A repeated invalid call fails the run, while vendor authentication, transport, no-data, and deterministic validation errors continue to propagate unchanged.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

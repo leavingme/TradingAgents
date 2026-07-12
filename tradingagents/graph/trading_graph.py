@@ -39,6 +39,7 @@ from .propagation import Propagator
 from .reflection import Reflector
 from .setup import GraphSetup
 from .signal_processing import SignalProcessor
+from .tool_error_handling import recover_invalid_tool_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,7 @@ class TradingAgentsGraph:
                     get_verified_market_snapshot,
                 ],
                 handle_tool_errors=False,
+                wrap_tool_call=recover_invalid_tool_arguments,
             ),
             "social": ToolNode(
                 [
@@ -179,6 +181,7 @@ class TradingAgentsGraph:
                     get_news,
                 ],
                 handle_tool_errors=False,
+                wrap_tool_call=recover_invalid_tool_arguments,
             ),
             "news": ToolNode(
                 [
@@ -190,6 +193,7 @@ class TradingAgentsGraph:
                     get_prediction_markets,
                 ],
                 handle_tool_errors=False,
+                wrap_tool_call=recover_invalid_tool_arguments,
             ),
             "fundamentals": ToolNode(
                 [
@@ -200,6 +204,7 @@ class TradingAgentsGraph:
                     get_income_statement,
                 ],
                 handle_tool_errors=False,
+                wrap_tool_call=recover_invalid_tool_arguments,
             ),
         }
 

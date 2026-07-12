@@ -11,6 +11,7 @@ import tradingagents.dataflows.westock as westock
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.ohlcv_cache import (
+    clean_canonical_daily_bars,
     filter_completed_daily_bars,
     merge_and_write_ohlcv,
     normalize_ohlcv_dates,
@@ -81,6 +82,64 @@ def test_hk_utc_daily_bar_normalizes_to_local_trading_date():
     out = normalize_ohlcv_dates(df, "0700_HK")
 
     assert out["Date"].iloc[0].strftime("%Y-%m-%d") == "2026-07-08"
+
+
+@pytest.mark.unit
+def test_equity_cache_removes_weekend_shifted_duplicate():
+    frame = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(["2025-11-30", "2025-12-01", "2025-12-02"]),
+            "Open": [174.76, 174.76, 181.76],
+            "High": [180.30, 180.30, 185.66],
+            "Low": [173.68, 173.68, 180.00],
+            "Close": [179.92, 179.92, 181.46],
+            "Volume": [188130955, 188130955, 182632230],
+        }
+    )
+
+    out = clean_canonical_daily_bars(frame, "NVDA_US")
+
+    assert out["Date"].dt.strftime("%Y-%m-%d").tolist() == [
+        "2025-12-01",
+        "2025-12-02",
+    ]
+
+
+@pytest.mark.unit
+def test_cache_removes_holiday_shifted_duplicate_and_persists_migration(tmp_path):
+    polluted = pd.DataFrame(
+        {
+            "Date": ["2025-12-24", "2025-12-25", "2025-12-26"],
+            "Open": [187.94, 189.92, 189.92],
+            "High": [188.91, 192.69, 192.69],
+            "Low": [186.59, 188.00, 188.00],
+            "Close": [188.61, 190.53, 190.53],
+            "Volume": [65528545, 139740292, 139740292],
+        }
+    )
+
+    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", polluted)
+    cached = pd.read_csv(tmp_path / "NVDA_US.csv")
+
+    assert cached["Date"].tolist() == ["2025-12-24", "2025-12-26"]
+
+
+@pytest.mark.unit
+def test_zero_volume_identical_daily_bars_are_not_deduplicated():
+    frame = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(["2026-07-08", "2026-07-09"]),
+            "Open": [10.0, 10.0],
+            "High": [10.0, 10.0],
+            "Low": [10.0, 10.0],
+            "Close": [10.0, 10.0],
+            "Volume": [0, 0],
+        }
+    )
+
+    out = clean_canonical_daily_bars(frame, "ILLIQUID_US")
+
+    assert len(out) == 2
 
 
 @pytest.mark.unit

@@ -355,6 +355,12 @@ Known differences:
 - Prevented LLM-selected lookback values from under-fetching SMA, MACD, RSI, ATR, Bollinger, and VWMA inputs.
 - Corrected validation to distinguish source K-line history from the non-null indicator values emitted after warm-up.
 
+## Canonical OHLCV Date Repair (2026-07-12)
+
+- Added shared-cache cleanup for impossible weekend equity candles and positive-volume OHLCV duplicates written under adjacent shifted dates.
+- Applied cleanup on both cache reads and merges so old polluted caches are repaired lazily and persisted on the next write.
+- Preserved legitimate zero-volume repeated bars for illiquid instruments.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

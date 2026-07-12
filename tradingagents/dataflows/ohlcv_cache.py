@@ -55,6 +55,49 @@ _DEFAULT_MARKET_CLOSE = time(16, 15)
 CANONICAL_OHLCV_COLUMNS = ["Date", "Open", "High", "Low", "Close", "Volume"]
 
 
+def _is_equity_daily_cache_key(cache_key: str) -> bool:
+    """Whether a cache key represents an exchange-listed equity-like symbol."""
+    upper = cache_key.upper()
+    if any(upper.endswith(suffix) for suffix in _MARKET_TIMEZONES):
+        return True
+    # Bare alphabetic tickers are US equities by TradingAgents convention.
+    # Structural futures/forex/crypto keys (GC_F, EURUSD_X, BTC-USD) are not.
+    return re.fullmatch(r"[A-Z]+", upper) is not None
+
+
+def clean_canonical_daily_bars(data: pd.DataFrame, cache_key: str) -> pd.DataFrame:
+    """Remove impossible dates and shifted duplicates from canonical daily bars.
+
+    Older cache writers occasionally persisted one candle twice: once on an
+    invalid weekend/holiday date and once on its real exchange trading date.
+    A positive-volume daily equity candle cannot belong to a weekend. Exact
+    adjacent OHLCV duplicates are likewise the same source candle with two
+    date labels; keep the later label, which is the exchange trading date in
+    the observed UTC-to-local shift pattern.
+    """
+    if data.empty or "Date" not in data.columns:
+        return data
+
+    out = data.copy().dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+    if _is_equity_daily_cache_key(cache_key):
+        out = out[out["Date"].dt.weekday < 5].copy().reset_index(drop=True)
+
+    value_columns = [
+        column
+        for column in ("Open", "High", "Low", "Close", "Volume")
+        if column in out.columns
+    ]
+    if len(value_columns) == 5 and len(out) > 1:
+        next_values = out[value_columns].shift(-1)
+        same_candle = out[value_columns].eq(next_values).all(axis=1)
+        next_dates = out["Date"].shift(-1)
+        adjacent = (next_dates - out["Date"]).dt.days.between(1, 4)
+        positive_volume = pd.to_numeric(out["Volume"], errors="coerce").fillna(0) > 0
+        out = out[~(same_candle & adjacent & positive_volume)].copy()
+
+    return out.reset_index(drop=True)
+
+
 def parse_ohlcv_payload(raw: object) -> pd.DataFrame:
     """Parse the CSV or text-table shapes returned by configured OHLCV vendors."""
     if isinstance(raw, pd.DataFrame):
@@ -179,6 +222,7 @@ def filter_completed_daily_bars(
     if data.empty or "Date" not in data.columns:
         return data
     out = normalize_ohlcv_dates(data, cache_key)
+    out = clean_canonical_daily_bars(out, cache_key)
     cutoff = latest_completed_daily_bar_date(cache_key, now)
     return out[out["Date"] <= cutoff].copy()
 
@@ -270,6 +314,7 @@ def read_cached_ohlcv(
         return None
 
     df = normalize_ohlcv_dates(df, cache_key)
+    df = clean_canonical_daily_bars(df, cache_key)
     df = (
         df.dropna(subset=["Date"])
         .drop_duplicates(subset=["Date"], keep="last")

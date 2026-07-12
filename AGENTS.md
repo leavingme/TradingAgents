@@ -60,6 +60,10 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
   language；UI language 只影响页面文案，`output_language` 才影响报告输出。
 - API key 不要收集或保存到浏览器 localStorage。Web 只应显示服务端环境变量
   状态（`/api/config/env-status`），密钥仍由 server-side env / `.env` 管理。
+- 浏览器 localStorage 只保存纯 UI 偏好（当前仅 UI language）。报告语言、研究深度、
+  LLM/模型/推理参数、backend URL，以及数据能力 Vendor 顺序和启停状态统一通过
+  `/api/config/web` 持久化到服务端 `~/.tradingagents/web_config.json`。旧版浏览器
+  `settings/providers` localStorage 只允许做一次性迁移，迁移后必须删除。
 - LLM/tool/token stats 属于 runtime 能力，不要让 Web 后端直接依赖 CLI 实现。
   `StatsCallbackHandler` 的 canonical 位置是 `tradingagents.runtime`；
   `cli.stats_handler` 只是兼容 re-export。

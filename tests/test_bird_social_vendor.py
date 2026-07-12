@@ -86,3 +86,21 @@ def test_social_route_returns_only_validated_unified_model(monkeypatch):
 
     assert isinstance(result, SocialFeed)
     assert [post.post_id for post in result.posts] == ["valid"]
+
+
+def test_reddit_social_setting_controls_sentiment_prefetch(monkeypatch):
+    from tradingagents.agents.analysts import sentiment_analyst
+
+    monkeypatch.setattr(
+        sentiment_analyst,
+        "get_config",
+        lambda: {"data_vendors": {"social_data": "bird, reddit"}},
+    )
+    assert sentiment_analyst._social_source_enabled("reddit") is True
+
+    monkeypatch.setattr(
+        sentiment_analyst,
+        "get_config",
+        lambda: {"data_vendors": {"social_data": "bird"}},
+    )
+    assert sentiment_analyst._social_source_enabled("reddit") is False

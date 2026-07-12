@@ -273,7 +273,7 @@ const translations = {
     catNewsTitle: 'News Data',
     catNewsDesc: 'Fetches ticker news, global market news, and insider transactions. DuckDuckGo is a configurable fallback for news search.',
     catSocialTitle: 'Social Sentiment',
-    catSocialDesc: 'Combines X/Twitter, Reddit, and StockTwits discussions. Bird is the configurable read-only X/Twitter provider; Reddit and StockTwits are built-in social sources used by the Sentiment Analyst.',
+    catSocialDesc: 'Combines X/Twitter, Reddit, and StockTwits discussions. Bird and Reddit can be enabled independently; StockTwits remains a built-in Sentiment Analyst source.',
     catMacroTitle: 'Macroeconomic Data',
     catMacroDesc: 'Economic metrics like inflation, GDP, central bank interest rates.',
     catPredictionTitle: 'Prediction Markets',
@@ -479,7 +479,7 @@ const translations = {
     catNewsTitle: '新闻资讯',
     catNewsDesc: '获取个股新闻、全球宏观新闻和内幕交易信息。DuckDuckGo 是可配置的新闻搜索 fallback。',
     catSocialTitle: '社交动态舆情',
-    catSocialDesc: '综合 X/Twitter、Reddit 和 StockTwits 讨论。Bird 是可配置的 X/Twitter 只读数据源；Reddit 与 StockTwits 是 Sentiment Analyst 使用的内置社交数据源。',
+    catSocialDesc: '综合 X/Twitter、Reddit 和 StockTwits 讨论。Bird 与 Reddit 可独立启停；StockTwits 仍是 Sentiment Analyst 的内置社交数据源。',
     catMacroTitle: '宏观经济数据指标',
     catMacroDesc: '美国和全球通胀、GDP、美联储利率等数据。',
     catPredictionTitle: '预测事件概率市场',
@@ -650,6 +650,11 @@ const settings = createSettingsController({
   },
   modelPresets,
   onProviderChange: renderApiKeyStatus,
+  onSave: serverSettings => {
+    api.saveWebConfig({ settings: serverSettings }).catch(error => {
+      console.error('Failed to persist runtime settings', error);
+    });
+  },
 });
 
 // ── Initialise date field ────────────────────────────────────────────────────
@@ -754,14 +759,24 @@ runHistory.refresh();
 
 async function loadConfigDefaults() {
   try {
-    configDefaults = await api.getConfigDefaults();
+    const [defaults, webConfig] = await Promise.all([
+      api.getConfigDefaults(),
+      api.getWebConfig(),
+    ]);
+    configDefaults = defaults;
     settings.applyDefaults(configDefaults);
-    settings.applySaved();
-    providerManager.load();
+    settings.applySaved(webConfig.settings, !webConfig.persisted);
+    providerManager.load(webConfig.providers, !webConfig.persisted);
+    if (!webConfig.persisted) {
+      await api.saveWebConfig({
+        settings: settings.current(),
+        providers: providerManager.snapshot(),
+      });
+    }
   } catch {
     // Keep the static HTML defaults when the API is unavailable.
-    settings.applySaved();
-    providerManager.load();
+    settings.applySaved(null, true);
+    providerManager.load(null, true);
   }
 }
 

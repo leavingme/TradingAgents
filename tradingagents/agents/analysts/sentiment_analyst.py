@@ -45,11 +45,17 @@ from tradingagents.agents.utils.structured import (
     invoke_structured_or_freetext,
 )
 from tradingagents.dataflows.reddit import fetch_reddit_posts
+from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
 
 def _seven_days_back(trade_date: str) -> str:
     return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+
+
+def _social_source_enabled(source: str) -> bool:
+    configured = get_config().get("data_vendors", {}).get("social_data", "")
+    return source in {item.strip() for item in configured.split(",") if item.strip()}
 
 
 def create_sentiment_analyst(llm):
@@ -80,7 +86,11 @@ def create_sentiment_analyst(llm):
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
         stocktwits_block = fetch_stocktwits_messages(sq["stocktwits"], limit=30)
-        reddit_block = fetch_reddit_posts(sq["reddit"])
+        reddit_block = (
+            fetch_reddit_posts(sq["reddit"])
+            if _social_source_enabled("reddit")
+            else "<Reddit disabled in social_data settings>"
+        )
         try:
             twitter_block = get_social_posts.func(ticker, start_date, end_date)
         except Exception as exc:

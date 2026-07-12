@@ -330,6 +330,19 @@ Known differences:
 - Removed the Google Fonts network dependency and retained the existing system-font fallback stack.
 - Restricted CLI Web development reload watching to `cli/`, `tradingagents/`, and `web/`, excluding the virtual environment, results, and Git metadata.
 
+## Reddit Social Source Configuration (2026-07-12)
+
+- Added Reddit to the visible `social_data` source settings alongside Bird/X.
+- Preserved historical behavior by migrating existing browser settings with Reddit enabled.
+- Wired the Reddit toggle to Sentiment Analyst prefetch so disabling it prevents Reddit network requests.
+
+## Server-side Web Configuration (2026-07-12)
+
+- Added `/api/config/web` GET/PUT/DELETE endpoints backed by atomic JSON persistence at `~/.tradingagents/web_config.json`.
+- Moved report language, research depth, LLM/model/reasoning settings, backend URL, and all data-vendor ordering/enabled state out of browser storage.
+- Retained only UI language in localStorage; legacy settings/provider keys are read once, migrated to the server, and removed.
+- Server persistence allowlists known fields and vendors so credentials and unknown values cannot be stored accidentally.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

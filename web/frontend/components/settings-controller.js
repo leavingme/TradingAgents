@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'tradingagents.web.settings';
 
-export function createSettingsController({ form, fields, modelPresets, onProviderChange }) {
+export function createSettingsController({ form, fields, modelPresets, onProviderChange, onSave }) {
+  let saveTimer = null;
   const {
     llmProvider, quickThinkLlm, deepThinkLlm, backendUrl, outputLanguage,
     customOutputLanguage, researchDepth, googleThinkingLevel,
@@ -34,12 +35,14 @@ export function createSettingsController({ form, fields, modelPresets, onProvide
     updateProviderOptions();
   }
 
-  function applySaved() {
-    let saved;
-    try {
-      saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || 'null');
-    } catch {
-      return;
+  function applySaved(serverSettings, allowLegacyMigration = false) {
+    let saved = serverSettings;
+    if ((!saved || !Object.keys(saved).length) && allowLegacyMigration) {
+      try {
+        saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || 'null');
+      } catch {
+        saved = null;
+      }
     }
     if (!saved) return;
     setValue(llmProvider, saved.llm_provider);
@@ -52,6 +55,9 @@ export function createSettingsController({ form, fields, modelPresets, onProvide
     setValue(anthropicEffort, saved.anthropic_effort);
     setOutputLanguage(saved.output_language);
     updateProviderOptions();
+    if (allowLegacyMigration) {
+      try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* optional */ }
+    }
   }
 
   function current() {
@@ -70,19 +76,12 @@ export function createSettingsController({ form, fields, modelPresets, onProvide
   }
 
   function save() {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(current()));
-    } catch {
-      // The visible form remains the source of truth when storage is unavailable.
-    }
+    const value = current();
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => onSave?.(value), 250);
   }
 
   function reset(defaults) {
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // Reset the visible fields even if storage is unavailable.
-    }
     if (defaults) {
       applyDefaults(defaults);
       save();

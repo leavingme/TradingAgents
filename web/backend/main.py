@@ -20,6 +20,7 @@ from .analyst_prompts import analyst_prompt_payload
 from .models import RunCreateRequest, RunRecordResponse
 from .runner_worker import start_background_run
 from .task_store import store
+from .web_config_store import web_config_store
 
 app = FastAPI(title="TradingAgents Web API")
 FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
@@ -40,6 +41,21 @@ async def get_config_defaults():
         "anthropic_effort": fields["anthropic_effort"].default,
         "data_vendors": DEFAULT_CONFIG.get("data_vendors", {}),
     }
+
+
+@app.get("/api/config/web")
+async def get_web_config():
+    return web_config_store.load()
+
+
+@app.put("/api/config/web")
+async def update_web_config(payload: dict):
+    return web_config_store.save(payload)
+
+
+@app.delete("/api/config/web")
+async def reset_web_config():
+    return web_config_store.reset()
 
 
 @app.get("/api/config/env-status")
@@ -89,6 +105,11 @@ async def get_env_status():
             os.environ.get("AUTH_TOKEN") and os.environ.get("CT0")
         ),
         "required": True,
+    }
+    data_vendors["reddit"] = {
+        "env_var": None,
+        "configured": True,
+        "required": False,
     }
     # 5. Polymarket, DuckDuckGo, and Westock do not require credentials
     for v in ["polymarket", "duckduckgo", "westock"]:

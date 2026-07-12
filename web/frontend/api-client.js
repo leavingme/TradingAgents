@@ -37,6 +37,19 @@ export const api = {
   async getConfigDefaults() {
     return (await request('/api/config/defaults')).json();
   },
+  async getWebConfig() {
+    return (await request('/api/config/web')).json();
+  },
+  async saveWebConfig(payload) {
+    return (await request('/api/config/web', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })).json();
+  },
+  async resetWebConfig() {
+    return (await request('/api/config/web', { method: 'DELETE' })).json();
+  },
   async getEnvStatus() {
     return (await request('/api/config/env-status')).json();
   },

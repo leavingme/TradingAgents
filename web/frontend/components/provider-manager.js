@@ -6,7 +6,7 @@ const CATEGORY_VENDORS = {
   technical_indicators: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   fundamental_data: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   news_data: ['westock', 'duckduckgo', 'alpha_vantage'],
-  social_data: ['bird'],
+  social_data: ['bird', 'reddit'],
   macro_data: ['fred'],
   prediction_markets: ['polymarket'],
 };
@@ -20,6 +20,7 @@ const PROVIDER_META = {
   fred: { name: 'FRED' },
   polymarket: { name: 'Polymarket' },
   bird: { name: 'Bird (X/Twitter)' },
+  reddit: { name: 'Reddit', verifiable: false },
 };
 
 const FALLBACK_DEFAULTS = {
@@ -27,7 +28,7 @@ const FALLBACK_DEFAULTS = {
   technical_indicators: 'longbridge_mcp, longbridge, westock',
   fundamental_data: 'longbridge_mcp, longbridge, westock',
   news_data: 'westock, duckduckgo, alpha_vantage',
-  social_data: 'bird',
+  social_data: 'bird, reddit',
   macro_data: 'fred',
   prediction_markets: 'polymarket',
 };
@@ -36,11 +37,9 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
   let state = {};
 
   function save() {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // Local persistence is optional.
-    }
+    api.saveWebConfig({ providers: state }).catch(error => {
+      console.error('Failed to persist provider settings', error);
+    });
   }
 
   function parseDefaults(category, value) {
@@ -67,12 +66,14 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
     return normalized;
   }
 
-  function load() {
-    let saved = null;
-    try {
-      saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || 'null');
-    } catch {
-      // Invalid local data falls back to server defaults.
+  function load(serverProviders = null, allowLegacyMigration = false) {
+    let saved = allowLegacyMigration ? null : serverProviders;
+    if (allowLegacyMigration) {
+      try {
+        saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || 'null');
+      } catch {
+        saved = null;
+      }
     }
     if (Array.isArray(saved?.core_stock_apis)) {
       const savedIds = saved.core_stock_apis.map(row => row?.id);
@@ -83,6 +84,12 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
         saved.core_stock_apis = CATEGORY_VENDORS.core_stock_apis.map(id => byId.get(id));
       }
     }
+    // Reddit was historically always fetched by Sentiment Analyst and had no
+    // visible setting. Keep it enabled when migrating an older saved config.
+    if (Array.isArray(saved?.social_data)
+      && !saved.social_data.some(row => row?.id === 'reddit')) {
+      saved.social_data.push({ id: 'reddit', enabled: true });
+    }
     const defaults = configDefaults()?.data_vendors || FALLBACK_DEFAULTS;
     state = {};
     Object.keys(CATEGORY_VENDORS).forEach(category => {
@@ -90,16 +97,16 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
         ? normalize(category, saved[category])
         : parseDefaults(category, defaults[category]);
     });
+    if (allowLegacyMigration) {
+      try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* optional */ }
+      save();
+    }
     refresh();
   }
 
   function reset() {
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // Resetting visible state still works when storage is unavailable.
-    }
-    load();
+    load(null, false);
+    save();
   }
 
   function refresh() {
@@ -145,7 +152,7 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
       <div class="provider-item-right">
         <span class="vendor-health-badge ${verificationState}">${escapeHtml(formatHealth(verificationState))}</span>
         <span class="env-status-badge ${credential.className}">${escapeHtml(credential.label)}</span>
-        <button type="button" class="btn-verify-vendor" title="${escapeHtml(t('vendorVerify'))}" aria-label="${escapeHtml(t('vendorVerify'))}">↻</button>
+        ${meta.verifiable === false ? '' : `<button type="button" class="btn-verify-vendor" title="${escapeHtml(t('vendorVerify'))}" aria-label="${escapeHtml(t('vendorVerify'))}">↻</button>`}
         <div class="provider-order-buttons">
           <button type="button" class="btn-order btn-order-up" title="Move Up" ${index === 0 ? 'disabled' : ''}>▲</button>
           <button type="button" class="btn-order btn-order-down" title="Move Down" ${index === vendors.length - 1 ? 'disabled' : ''}>▼</button>
@@ -158,7 +165,7 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
       save();
       renderOhlcvTable();
     });
-    item.querySelector('.btn-verify-vendor').addEventListener('click', event => {
+    item.querySelector('.btn-verify-vendor')?.addEventListener('click', event => {
       verify(category, vendor.id, event.currentTarget);
     });
     item.querySelector('.btn-order-up').addEventListener('click', () => move(category, index, -1));
@@ -241,7 +248,11 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
     ]));
   }
 
-  return { load, reset, refresh, current };
+  function snapshot() {
+    return JSON.parse(JSON.stringify(state));
+  }
+
+  return { load, reset, refresh, current, snapshot };
 }
 
 function escapeHtml(value) {

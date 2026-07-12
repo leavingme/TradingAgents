@@ -22,6 +22,7 @@
 - [ ] 预测市场：事件标识、到期时间和概率范围。
 - [x] Graph 硬门禁：ToolNode 不吞数据异常；失败运行不生成报告或 `run_completed`。
 - [x] Tool 参数纠错：模型生成的参数 Schema 错误返回一次结构化 `ToolMessage` 供 LLM 修正；重复错误及 vendor/数据异常仍触发 Graph 硬门禁。
+- [x] 技术指标确定性窗口：按指标预热 K 线需求统一扩展所有 vendor 的请求窗口，并区分输入历史与预热后有效输出点数。
 - [x] Runtime Agent 状态机：累积 graph snapshot 不得导致已完成 Agent 重新进入运行态；团队交接状态完整且报告事件去重。
 - [x] X/Twitter 舆情：Bird 只读结构化 adapter、统一 SocialPost 模型、日期截止/去重/垃圾推广校验、独立 `social_data` vendor 路由与 Web 配置。
 - [x] Web 舆情分类：新闻与社交数据分卡展示，Reddit、StockTwits 与 X/Twitter 统一归入“社交动态舆情”，后端仍保持 `news_data` / `social_data` 边界。

@@ -349,6 +349,12 @@ Known differences:
 - The first `ToolInvocationError` is returned to the active Analyst as a structured error `ToolMessage`, allowing one corrected tool call.
 - A repeated invalid call fails the run, while vendor authentication, transport, no-data, and deterministic validation errors continue to propagate unchanged.
 
+## Deterministic Indicator Windows (2026-07-12)
+
+- Centralized per-indicator warm-up requirements and calendar-day conversion before vendor routing.
+- Prevented LLM-selected lookback values from under-fetching SMA, MACD, RSI, ATR, Bollinger, and VWMA inputs.
+- Corrected validation to distinguish source K-line history from the non-null indicator values emitted after warm-up.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

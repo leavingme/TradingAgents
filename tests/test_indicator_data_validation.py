@@ -12,6 +12,10 @@ from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.data_validation import validate_indicator_result
 from tradingagents.dataflows.data_validation import normalize_indicator_result
 from tradingagents.dataflows.errors import NoUsableTechnicalIndicatorError
+from tradingagents.dataflows.indicator_requirements import (
+    effective_indicator_lookback_days,
+    minimum_indicator_lookback_days,
+)
 from tradingagents.dataflows.longbridge_mcp import _summarize_quant_payload
 
 
@@ -42,15 +46,60 @@ def test_invalid_indicator_values_are_rejected(indicator, payload, detail):
 
 
 @pytest.mark.unit
-def test_insufficient_summary_history_is_rejected():
+def test_indicator_output_bars_include_an_implicit_warmup_window():
     payload = (
         "Technical Indicator Report for 0700.HK\n"
         "Indicator: VWMA\nReport Date: 2026-07-10\n"
+        "2026-07-10: 460\n"
         "  vwma: last=+460.00  range=[+450.00, +470.00]  bars=10"
     )
     result = validate_indicator_result(payload, "vwma", "2026-07-10", reference_close=460)
-    assert not result.is_valid
-    assert "at least 20" in result.detail
+    assert result.is_valid
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("indicator", "minimum"),
+    [
+        ("close_200_sma", 307),
+        ("close_50_sma", 82),
+        ("macd", 60),
+        ("macdh", 60),
+        ("rsi", 28),
+    ],
+)
+def test_indicator_minimum_windows_are_deterministic(indicator, minimum):
+    assert minimum_indicator_lookback_days(indicator) == minimum
+    assert effective_indicator_lookback_days(indicator, 30) == max(30, minimum)
+
+
+@pytest.mark.unit
+def test_router_expands_indicator_window_before_calling_every_vendor():
+    set_config({
+        "data_vendors": {
+            "core_stock_apis": "prices",
+            "technical_indicators": "primary",
+        }
+    })
+    captured = []
+
+    def indicator_vendor(*args):
+        captured.append(args)
+        return "2026-07-10: 460"
+
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {
+            "get_stock_data": {"prices": lambda *args: OHLCV},
+            "get_indicators": {"primary": indicator_vendor},
+        },
+        clear=False,
+    ):
+        interface.route_to_vendor(
+            "get_indicators", "NVDA", "close_200_sma", "2026-07-10", 30
+        )
+
+    assert captured[0][3] == 307
 
 
 @pytest.mark.unit

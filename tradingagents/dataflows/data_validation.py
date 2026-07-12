@@ -9,6 +9,8 @@ import re
 
 import pandas as pd
 
+from .indicator_requirements import indicator_warmup_bars
+
 
 class ValidationStatus(str, Enum):
     VERIFIED = "verified"
@@ -140,20 +142,6 @@ _PRICE_INDICATORS = {
     "close_10_ema", "close_50_sma", "close_200_sma",
     "sma", "sma50", "ema", "vwma", "boll", "boll_ub", "boll_lb",
 }
-_MIN_BARS = {
-    "close_10_ema": 10,
-    "close_50_sma": 50,
-    "sma50": 50,
-    "close_200_sma": 200,
-    "rsi": 14,
-    "atr": 14,
-    "vwma": 20,
-    "boll": 20,
-    "boll_ub": 20,
-    "boll_lb": 20,
-}
-
-
 def _parse_indicator_payload(
     payload: object,
 ) -> tuple[list[tuple[pd.Timestamp, float]], list[float], int | None]:
@@ -243,11 +231,16 @@ def validate_indicator_result(
     report_date = re.search(r"Report Date:\s*(\d{4}-\d{2}-\d{2})", text, re.IGNORECASE)
     if report_date and pd.Timestamp(report_date.group(1)) > cutoff:
         return ValidationResult(ValidationStatus.INVALID, "indicator report date is after the analysis date")
-    minimum_bars = _MIN_BARS.get(key)
-    if bars is not None and minimum_bars is not None and bars < minimum_bars:
+    warmup_bars = indicator_warmup_bars(key)
+    # Quant engines omit warm-up nulls from their output series. Therefore a
+    # 200-SMA response with 51 values represents at least 250 source K-lines,
+    # not a deficient 51-line input history.
+    inferred_source_bars = bars + warmup_bars - 1 if bars is not None else None
+    if inferred_source_bars is not None and inferred_source_bars < warmup_bars:
         return ValidationResult(
             ValidationStatus.INVALID,
-            f"indicator history has {bars} bars; at least {minimum_bars} are required",
+            f"indicator source history has about {inferred_source_bars} bars; "
+            f"at least {warmup_bars} are required",
         )
     if key == "rsi" and ((series < 0) | (series > 100)).any():
         return ValidationResult(ValidationStatus.INVALID, "RSI must be between 0 and 100")

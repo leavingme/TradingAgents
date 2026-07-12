@@ -21,6 +21,7 @@ from .data_validation import (
     validate_indicator_result,
     validate_vendor_result,
 )
+from .indicator_requirements import effective_indicator_lookback_days
 from .errors import (
     NoMarketDataError,
     NoUsableFinancialDataError,
@@ -261,6 +262,13 @@ def get_vendor(category: str, method: str = None) -> str:
 
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
+    if method == "get_indicators" and len(args) >= 4:
+        normalized_args = list(args)
+        normalized_args[3] = effective_indicator_lookback_days(
+            str(normalized_args[1]), int(normalized_args[3])
+        )
+        args = tuple(normalized_args)
+
     category = get_category_for_method(method)
     vendor_config = get_vendor(category, method)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]

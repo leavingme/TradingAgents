@@ -34,6 +34,7 @@ from pathlib import Path
 import pandas as pd
 
 from .errors import NoMarketDataError
+from .indicator_requirements import effective_indicator_lookback_days
 
 ROOT = Path(__file__).resolve().parents[2]  # /data/disk/workspace/TradingAgents
 TOKEN_PATH = ROOT / ".longbridge_mcp_token.json"
@@ -505,16 +506,10 @@ def get_indicators(
         supported = sorted(set(_PINE_TEMPLATES) | set(_INDICATOR_ALIASES))
         raise MCPTransportError(f"unsupported indicator '{indicator}'. Supported: {supported}")
 
-    min_lookback = {
-        "close_10_ema": 30,
-        "close_50_sma": 90,
-        "sma50": 90,
-        "close_200_sma": 365,
-        "boll": 45,
-        "macd": 60,
-        "vwma": 30,
-    }.get(indicator_key, 1)
-    start = (end - timedelta(days=max(int(look_back_days), min_lookback))).strftime("%Y-%m-%d")
+    effective_lookback = effective_indicator_lookback_days(
+        indicator_key, look_back_days
+    )
+    start = (end - timedelta(days=effective_lookback)).strftime("%Y-%m-%d")
     end_s = end.strftime("%Y-%m-%d")
 
     try:
@@ -539,7 +534,7 @@ def get_indicators(
         f"Technical Indicator Report for {sym}\n"
         f"Indicator: {indicator.upper()}\n"
         f"Report Date: {curr_date}\n"
-        f"Lookback Period: {look_back_days} days\n\n"
+        f"Lookback Period: {effective_lookback} days\n\n"
         f"Series summary (over the requested range):\n{summary}\n\n"
         f"Data Source: Longbridge MCP (quant_run)"
     )

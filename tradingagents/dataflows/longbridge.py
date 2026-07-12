@@ -39,6 +39,7 @@ from typing import Any
 import pandas as pd
 
 from .errors import NoMarketDataError
+from .indicator_requirements import effective_indicator_lookback_days
 
 
 # ---- Symbol normalization (matches TradingAgents conventions) ----
@@ -435,16 +436,10 @@ def get_indicators(
     except ValueError as e:
         raise ValueError(f"invalid curr_date {curr_date!r}: {e}") from e
     indicator_key = _INDICATOR_ALIASES.get(indicator.lower().strip(), indicator.lower().strip())
-    min_lookback = {
-        "close_10_ema": 30,
-        "close_50_sma": 90,
-        "sma50": 90,
-        "close_200_sma": 365,
-        "boll": 45,
-        "macd": 60,
-        "vwma": 30,
-    }.get(indicator_key, 1)
-    start_dt = end_dt - timedelta(days=max(int(look_back_days), min_lookback))
+    effective_lookback = effective_indicator_lookback_days(
+        indicator_key, look_back_days
+    )
+    start_dt = end_dt - timedelta(days=effective_lookback)
     start_iso = start_dt.strftime("%Y-%m-%d")
     end_iso = end_dt.strftime("%Y-%m-%d")
 
@@ -466,7 +461,7 @@ def get_indicators(
         f"Technical Indicator Report for {sym}",
         f"Indicator: {indicator.upper()}",
         f"Report Date: {curr_date}",
-        f"Lookback Period: {look_back_days} days",
+        f"Lookback Period: {effective_lookback} days",
         "",
         "Series summary (over the requested range):",
     ]

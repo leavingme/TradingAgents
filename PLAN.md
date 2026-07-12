@@ -358,7 +358,8 @@ Known differences:
 ## Canonical OHLCV Date Repair (2026-07-12)
 
 - Added shared-cache cleanup for impossible weekend equity candles and positive-volume OHLCV duplicates written under adjacent shifted dates.
-- Applied cleanup on both cache reads and merges so old polluted caches are repaired lazily and persisted on the next write.
+- Cache reads are validation-only: polluted files are rejected as misses rather than silently repaired in memory.
+- Cleanup is limited to explicit migration and cache writes, keeping persistent data changes observable.
 - Preserved legitimate zero-volume repeated bars for illiquid instruments.
 
 Next recommended work:

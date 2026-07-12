@@ -314,7 +314,11 @@ def read_cached_ohlcv(
         return None
 
     df = normalize_ohlcv_dates(df, cache_key)
-    df = clean_canonical_daily_bars(df, cache_key)
+    validated = clean_canonical_daily_bars(df, cache_key)
+    if len(validated) != len(df) or validated["Date"].tolist() != df["Date"].tolist():
+        # Reads never repair persistent state. A polluted cache is a miss and
+        # must be refreshed (or rewritten by the explicit migration path).
+        return None
     df = (
         df.dropna(subset=["Date"])
         .drop_duplicates(subset=["Date"], keep="last")

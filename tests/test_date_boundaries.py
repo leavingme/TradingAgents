@@ -125,6 +125,22 @@ def test_cache_removes_holiday_shifted_duplicate_and_persists_migration(tmp_path
 
 
 @pytest.mark.unit
+def test_cache_read_rejects_pollution_instead_of_repairing_it(tmp_path):
+    (tmp_path / "NVDA_US.csv").write_text(
+        "Date,Open,High,Low,Close,Volume\n"
+        "2025-11-30,174.76,180.30,173.68,179.92,188130955\n"
+        "2025-12-01,174.76,180.30,173.68,179.92,188130955\n",
+        encoding="utf-8",
+    )
+
+    out = read_cached_ohlcv(
+        str(tmp_path), "NVDA_US", "2025-11-30", "2025-12-01"
+    )
+
+    assert out is None
+
+
+@pytest.mark.unit
 def test_zero_volume_identical_daily_bars_are_not_deduplicated():
     frame = pd.DataFrame(
         {

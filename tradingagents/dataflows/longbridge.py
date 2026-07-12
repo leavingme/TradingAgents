@@ -176,6 +176,7 @@ def get_stock_data(
         normalize_ohlcv_dates,
         filter_completed_daily_bars,
     )
+    from .ohlcv_model import batch_from_frame
 
     sym = normalize_symbol(symbol)
     cache_key = symbol_to_cache_key(sym)
@@ -226,6 +227,7 @@ def get_stock_data(
             "Low": float(k.get("low", 0)),
             "Close": float(k.get("close", 0)),
             "Volume": int(float(k.get("volume", 0))),
+            "RawTimestamp": str(ts),
         })
 
     df = pd.DataFrame(rows)
@@ -240,8 +242,17 @@ def get_stock_data(
         raise NoMarketDataError(symbol, sym, f"no completed rows between {start_date} and {end_date}")
 
     # --- cache write ---
-    merge_and_write_ohlcv(cache_dir, cache_key, df)
+    batch = batch_from_frame(
+        df,
+        symbol=sym,
+        vendor="longbridge",
+        adapter_version="longbridge_cli_ohlcv_v1",
+        timezone_semantics="utc_instant_to_exchange_trading_date",
+        raw_timestamps=df["RawTimestamp"].astype(str).tolist(),
+    )
+    merge_and_write_ohlcv(cache_dir, cache_key, batch)
 
+    df = df.drop(columns=["RawTimestamp"])
     df = df.set_index("Date")
     header = (
         f"# Stock data for {sym} from {start_date} to {end_date}\n"

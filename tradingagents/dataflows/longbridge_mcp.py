@@ -353,6 +353,7 @@ def get_stock_data(
         normalize_ohlcv_dates,
         filter_completed_daily_bars,
     )
+    from .ohlcv_model import batch_from_frame
 
     sym = normalize_symbol(symbol)
     cache_key = symbol_to_cache_key(sym)
@@ -400,14 +401,27 @@ def get_stock_data(
             b.get("Date", b.get("time", b.get("timestamp", ""))),
             b.get("Open"), b.get("High"), b.get("Low"),
             b.get("Close"), b.get("Volume"),
+            b.get("Date", b.get("time", b.get("timestamp", ""))),
         ))
 
     # --- cache write ---
-    df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+    df = pd.DataFrame(
+        rows,
+        columns=["Date", "Open", "High", "Low", "Close", "Volume", "RawTimestamp"],
+    )
     if not df.empty:
         df = normalize_ohlcv_dates(df, cache_key)
         df = filter_completed_daily_bars(df, cache_key)
-        merge_and_write_ohlcv(cache_dir, cache_key, df)
+        batch = batch_from_frame(
+            df,
+            symbol=sym,
+            vendor="longbridge_mcp",
+            adapter_version="longbridge_mcp_ohlcv_v1",
+            timezone_semantics="utc_instant_to_exchange_trading_date",
+            raw_timestamps=df["RawTimestamp"].astype(str).tolist(),
+        )
+        merge_and_write_ohlcv(cache_dir, cache_key, batch)
+        df = df.drop(columns=["RawTimestamp"])
         df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
         rows = list(df[["Date", "Open", "High", "Low", "Close", "Volume"]].itertuples(index=False, name=None))
 

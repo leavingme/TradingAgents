@@ -375,15 +375,17 @@ def read_cached_ohlcv(
 def merge_and_write_ohlcv(
     cache_dir: str,
     cache_key: str,
-    new_df: pd.DataFrame,
+    batch,
 ) -> None:
     """
     Merge new_df into the cache file (if any), deduplicate by Date, sort
     chronologically, and rewrite.
 
-    new_df must contain at least: Date, Open, High, Low, Close, Volume.
-    Extra columns are preserved but not guaranteed to survive deduplication.
+    Only a structured ``OHLCVBatch`` produced by a vendor adapter is accepted.
     """
+    from .ohlcv_model import append_ohlcv_audit, batch_to_frame
+
+    new_df = batch_to_frame(batch)
     path = cache_filepath(cache_dir, cache_key)
     frames: list[pd.DataFrame] = []
 
@@ -426,6 +428,7 @@ def merge_and_write_ohlcv(
             temp_path = handle.name
             combined.to_csv(handle, index=False)
         os.replace(temp_path, path)
+        append_ohlcv_audit(cache_dir, cache_key, batch)
     finally:
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)

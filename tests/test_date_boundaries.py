@@ -19,6 +19,18 @@ from tradingagents.dataflows.ohlcv_cache import (
     symbol_to_cache_key,
     validate_canonical_daily_bars_for_write,
 )
+from tradingagents.dataflows.ohlcv_model import batch_from_frame
+
+
+def _test_batch(frame, symbol="TEST", vendor="test"):
+    return batch_from_frame(
+        frame,
+        symbol=symbol,
+        vendor=vendor,
+        adapter_version="test_v1",
+        timezone_semantics="test_trading_date",
+        raw_timestamps=[str(value) for value in frame["Date"]],
+    )
 
 
 @pytest.mark.unit
@@ -29,7 +41,8 @@ def test_default_ohlcv_chain_prefers_longbridge():
 
 
 @pytest.mark.unit
-def test_get_westock_data_includes_requested_end(monkeypatch):
+def test_get_westock_data_includes_requested_end(monkeypatch, tmp_path):
+    set_config({"data_cache_dir": str(tmp_path)})
     monkeypatch.setattr(
         "tradingagents.dataflows.symbol_utils.is_westock_available",
         lambda: True,
@@ -122,7 +135,7 @@ def test_cache_removes_holiday_shifted_duplicate_and_persists_migration(tmp_path
     migrated = clean_canonical_daily_bars(
         normalize_ohlcv_dates(polluted, "NVDA_US"), "NVDA_US"
     )
-    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", migrated)
+    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", _test_batch(migrated, "NVDA.US"))
     cached = pd.read_csv(tmp_path / "NVDA_US.csv")
 
     assert cached["Date"].tolist() == ["2025-12-24", "2025-12-26"]
@@ -140,13 +153,15 @@ def test_cache_write_rejects_shifted_dates_without_modifying_existing_file(tmp_p
             "Volume": [188130955],
         }
     )
-    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", valid)
+    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", _test_batch(valid, "NVDA.US"))
     before = (tmp_path / "NVDA_US.csv").read_bytes()
     shifted = valid.copy()
     shifted["Date"] = "2025-11-30"
 
     with pytest.raises(ValueError, match="shifted trading dates"):
-        merge_and_write_ohlcv(str(tmp_path), "NVDA_US", shifted)
+        merge_and_write_ohlcv(
+            str(tmp_path), "NVDA_US", _test_batch(shifted, "NVDA.US")
+        )
 
     assert (tmp_path / "NVDA_US.csv").read_bytes() == before
 
@@ -166,6 +181,34 @@ def test_cache_write_rejects_invalid_ohlc():
 
     with pytest.raises(ValueError, match="OHLC"):
         validate_canonical_daily_bars_for_write(invalid, "NVDA_US")
+
+
+@pytest.mark.unit
+def test_cache_write_rejects_unstructured_dataframe(tmp_path):
+    frame = pd.DataFrame(
+        {"Date": ["2026-07-10"], "Open": [1], "High": [1], "Low": [1],
+         "Close": [1], "Volume": [1]}
+    )
+
+    with pytest.raises(TypeError, match="only OHLCVBatch"):
+        merge_and_write_ohlcv(str(tmp_path), "NVDA_US", frame)
+
+
+@pytest.mark.unit
+def test_cache_write_records_batch_provenance(tmp_path):
+    frame = pd.DataFrame(
+        {"Date": ["2026-07-10"], "Open": [202], "High": [211],
+         "Low": [201.92], "Close": [210.96], "Volume": [148421001]}
+    )
+    batch = _test_batch(frame, "NVDA.US", "longbridge_mcp")
+
+    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", batch)
+
+    records = [json.loads(line) for line in
+               (tmp_path / "ohlcv_audit.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert records[0]["vendor"] == "longbridge_mcp"
+    assert records[0]["batch_id"] == batch.batch_id
+    assert records[0]["raw_timestamps"] == ["2026-07-10"]
 
 
 @pytest.mark.unit
@@ -198,7 +241,7 @@ def test_recent_cache_missing_requested_business_day_is_refreshed(tmp_path):
             "Volume": [39624917],
         }
     )
-    merge_and_write_ohlcv(str(tmp_path), "0700_HK", cached)
+    merge_and_write_ohlcv(str(tmp_path), "0700_HK", _test_batch(cached, "0700.HK"))
 
     out = read_cached_ohlcv(str(tmp_path), "0700_HK", "2026-07-06", "2026-07-09")
 
@@ -284,8 +327,8 @@ def test_cache_merge_replaces_partial_bar_and_keeps_only_canonical_ohlcv(tmp_pat
 
     # Historical dates are used so the wall clock cannot classify the fixture
     # as a still-forming live candle.
-    merge_and_write_ohlcv(str(tmp_path), "0700_HK", partial)
-    merge_and_write_ohlcv(str(tmp_path), "0700_HK", final)
+    merge_and_write_ohlcv(str(tmp_path), "0700_HK", _test_batch(partial, "0700.HK"))
+    merge_and_write_ohlcv(str(tmp_path), "0700_HK", _test_batch(final, "0700.HK"))
     cached = pd.read_csv(tmp_path / "0700_HK.csv")
 
     assert cached.columns.tolist() == ["Date", "Open", "High", "Low", "Close", "Volume"]

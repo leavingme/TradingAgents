@@ -362,6 +362,13 @@ Known differences:
 - Cache writes enforce date/OHLCV invariants and use an atomic temporary-file replacement so invalid input cannot corrupt an existing cache.
 - Preserved legitimate zero-volume repeated bars for illiquid instruments.
 
+## Structured OHLCV Write Contract (2026-07-12)
+
+- Added vendor-neutral `OHLCVBar` / `OHLCVBatch` models with explicit trading dates and provenance.
+- Longbridge MCP, Longbridge CLI, and Westock construct structured batches before cache persistence; unstructured DataFrames are rejected.
+- Kept canonical cache CSVs unchanged and added `ohlcv_audit.jsonl` for vendor, raw timestamp, timezone semantics, adapter version, and batch ID evidence.
+- Removed the source-ambiguous secondary cache write from `stockstats_utils`; the vendor adapter that fetched the data owns the audited write.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

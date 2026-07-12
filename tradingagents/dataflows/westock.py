@@ -54,6 +54,7 @@ def get_westock_data_online(
                 })
                 if "date" in df.columns:
                     df = df.rename(columns={"date": "Date"})
+                df["RawTimestamp"] = df["Date"].astype(str)
                 df["Date"] = pd.to_datetime(df["Date"])
                 for col in ["Open", "High", "Low", "Close"]:
                     if col in df.columns:
@@ -63,10 +64,28 @@ def get_westock_data_online(
                 
                 df = df.sort_values("Date").reset_index(drop=True)
                 df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
-                from .ohlcv_cache import filter_completed_daily_bars, symbol_to_cache_key
-                df = filter_completed_daily_bars(df, symbol_to_cache_key(canonical))
+                from .ohlcv_cache import (
+                    filter_completed_daily_bars,
+                    merge_and_write_ohlcv,
+                    symbol_to_cache_key,
+                )
+                from .ohlcv_model import batch_from_frame
+                cache_key = symbol_to_cache_key(canonical)
+                df = filter_completed_daily_bars(df, cache_key)
                 
                 if not df.empty:
+                    batch = batch_from_frame(
+                        df,
+                        symbol=canonical,
+                        vendor="westock",
+                        adapter_version="westock_ohlcv_v1",
+                        timezone_semantics="exchange_local_trading_date",
+                        raw_timestamps=df["RawTimestamp"].astype(str).tolist(),
+                    )
+                    merge_and_write_ohlcv(
+                        get_config()["data_cache_dir"], cache_key, batch
+                    )
+                    df = df.drop(columns=["RawTimestamp"])
                     df = df.set_index("Date")
                     csv_string = df.to_csv()
                     header = f"# Stock data for {symbol}{resolved} (via westock-data) from {start_date} to {end_date}\n"

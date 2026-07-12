@@ -113,7 +113,6 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     from .ohlcv_cache import (
         symbol_to_cache_key,
         read_cached_ohlcv,
-        merge_and_write_ohlcv,
         normalize_ohlcv_dates,
         filter_completed_daily_bars,
         parse_ohlcv_payload,
@@ -164,9 +163,6 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
         raise NoMarketDataError(
             symbol, canonical, "No market data returned"
         )
-
-    # --- cache write ---
-    merge_and_write_ohlcv(cache_dir, cache_key, downloaded)
 
     data = _clean_dataframe(downloaded)
     data = data[data["Date"] <= curr_date_dt]

@@ -5,7 +5,6 @@ All API access is mocked, so these run without a network connection.
 """
 import copy
 import unittest
-from datetime import date
 from unittest import mock
 
 import pytest
@@ -94,24 +93,29 @@ class PolymarketFormatTests(unittest.TestCase):
 
 @pytest.mark.unit
 class PolymarketResilienceTests(unittest.TestCase):
-    def test_historical_analysis_rejects_live_snapshot_before_network(self):
+    def test_live_analysis_allows_snapshot_with_prior_market_data_date(self):
         with (
-            mock.patch.object(polymarket, "_current_analysis_date", return_value="2026-07-10"),
-            mock.patch.object(polymarket, "_utc_today", return_value=date(2026, 7, 13)),
+            mock.patch.object(
+                polymarket, "_current_temporal_context", return_value=("live", None)
+            ),
+            mock.patch.object(polymarket, "_request", return_value=_SEARCH),
+        ):
+            out = polymarket.get_prediction_markets("anything", limit=1)
+        self.assertIn("Open big?", out)
+        self.assertIn("Live snapshot observed at", out)
+
+    def test_point_in_time_analysis_rejects_live_snapshot_before_network(self):
+        with (
+            mock.patch.object(
+                polymarket,
+                "_current_temporal_context",
+                return_value=("point_in_time", "2026-07-10T20:00:00+00:00"),
+            ),
             mock.patch.object(polymarket, "_request") as request,
         ):
             with self.assertRaisesRegex(NoMarketDataError, "point-in-time evidence"):
                 polymarket.get_prediction_markets("Fed rate cut")
         request.assert_not_called()
-
-    def test_same_day_analysis_may_use_live_snapshot(self):
-        with (
-            mock.patch.object(polymarket, "_current_analysis_date", return_value="2026-07-13"),
-            mock.patch.object(polymarket, "_utc_today", return_value=date(2026, 7, 13)),
-            mock.patch.object(polymarket, "_request", return_value=_SEARCH),
-        ):
-            out = polymarket.get_prediction_markets("anything", limit=1)
-        self.assertIn("Open big?", out)
 
     def test_network_error_degrades_gracefully(self):
         # An external-service hiccup must not raise into the analyst.

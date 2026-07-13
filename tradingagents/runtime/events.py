@@ -62,6 +62,8 @@ class AnalysisRequest:
     checkpoint_enabled: bool | None = None
     results_dir: str | Path | None = None
     report_dir: str | Path | None = None
+    analysis_mode: Literal["live", "point_in_time"] = "live"
+    information_cutoff: str | None = None
     # Provider-specific reasoning/thinking configuration
     google_thinking_level: str | None = None
     openai_reasoning_effort: str | None = None
@@ -70,6 +72,13 @@ class AnalysisRequest:
     debug: bool = False
     config_overrides: dict[str, Any] = field(default_factory=dict)
     callbacks: tuple[Any, ...] = ()
+
+    def __post_init__(self) -> None:
+        from .audit_context import validate_temporal_context
+
+        validate_temporal_context(
+            self.analysis_date, self.analysis_mode, self.information_cutoff
+        )
 
 
 @dataclass(frozen=True)

@@ -19,7 +19,7 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import write_report_tree
 
 from .config_builder import build_runtime_config
-from .events import AnalysisEvent, AnalysisRequest, AnalysisResult
+from .events import AnalysisEvent, AnalysisRequest, AnalysisResult, utc_timestamp
 
 ANALYST_ORDER = ("market", "social", "news", "fundamentals")
 ANALYST_AGENT_NAMES = {
@@ -41,8 +41,12 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
     from .history import history_store
     from .audit_context import (
         bind_analysis_date,
+        bind_analysis_mode,
+        bind_information_cutoff,
         bind_run_id,
         reset_analysis_date,
+        reset_analysis_mode,
+        reset_information_cutoff,
         reset_run_id,
     )
 
@@ -60,6 +64,8 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
     history_store.mark_started(request.run_id)
     audit_token = bind_run_id(request.run_id)
     analysis_date_token = bind_analysis_date(str(request.analysis_date))
+    analysis_mode_token = bind_analysis_mode(request.analysis_mode)
+    information_cutoff_token = bind_information_cutoff(request.information_cutoff)
 
     has_error = False
     last_event = None
@@ -93,6 +99,8 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
             ):
                 status = last_event.content["decision_status"]
             history_store.mark_finished(request.run_id, status)
+        reset_information_cutoff(information_cutoff_token)
+        reset_analysis_mode(analysis_mode_token)
         reset_analysis_date(analysis_date_token)
         reset_run_id(audit_token)
 
@@ -110,6 +118,13 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
         content={
             "ticker": request.ticker,
             "analysis_date": request.analysis_date,
+            "market_data_date": request.analysis_date,
+            "analysis_mode": request.analysis_mode,
+            "information_cutoff": (
+                request.information_cutoff
+                if request.analysis_mode == "point_in_time"
+                else "live_at_call_time"
+            ),
             "asset_type": request.asset_type,
             "selected_analysts": selected_analysts,
         },
@@ -224,13 +239,16 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
         stats_event, last_stats = _stats_event(request.run_id, callbacks, last_stats, force=True)
         if stats_event is not None:
             yield stats_event
+        decision_as_of = utc_timestamp()
         yield AnalysisEvent(
             type="run_completed",
             run_id=request.run_id,
+            timestamp=decision_as_of,
             content={
                 "final_state": final_state,
                 "decision": final_state.get("final_trade_decision"),
                 "decision_status": final_state.get("decision_status", "unavailable"),
+                "decision_as_of": decision_as_of,
                 "report_path": str(report_path),
             },
         )

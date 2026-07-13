@@ -334,7 +334,14 @@ class TradingAgentsGraph:
         return build_instrument_context(ticker, asset_type, identity)
 
     def propagate(
-        self, company_name, trade_date, asset_type: str = "stock", *, run_id: str | None = None
+        self,
+        company_name,
+        trade_date,
+        asset_type: str = "stock",
+        *,
+        run_id: str | None = None,
+        analysis_mode: str = "live",
+        information_cutoff: str | None = None,
     ):
         """Run the trading agents graph for a company on a specific date.
 
@@ -349,14 +356,20 @@ class TradingAgentsGraph:
 
         from tradingagents.runtime.audit_context import (
             bind_analysis_date,
+            bind_analysis_mode,
+            bind_information_cutoff,
             bind_run_id,
             reset_analysis_date,
+            reset_analysis_mode,
+            reset_information_cutoff,
             reset_run_id,
+            validate_temporal_context,
         )
         from tradingagents.runtime.events import AnalysisEvent
         from tradingagents.runtime.history import history_store
 
         self.ticker = company_name
+        validate_temporal_context(str(trade_date), analysis_mode, information_cutoff)
         if self.config.get("checkpoint_enabled") and not run_id:
             raise ValueError(
                 "checkpoint resume requires explicit run_id; use the original run ID"
@@ -375,6 +388,8 @@ class TradingAgentsGraph:
         history_store.mark_started(run_id)
         audit_token = bind_run_id(run_id)
         analysis_date_token = bind_analysis_date(str(trade_date))
+        analysis_mode_token = bind_analysis_mode(analysis_mode)
+        information_cutoff_token = bind_information_cutoff(information_cutoff)
 
         def record_failure(exc: Exception) -> None:
             history_store.add_event(run_id, AnalysisEvent(
@@ -411,6 +426,8 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
+            reset_information_cutoff(information_cutoff_token)
+            reset_analysis_mode(analysis_mode_token)
             reset_analysis_date(analysis_date_token)
             reset_run_id(audit_token)
             raise
@@ -445,6 +462,8 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
+            reset_information_cutoff(information_cutoff_token)
+            reset_analysis_mode(analysis_mode_token)
             reset_analysis_date(analysis_date_token)
             reset_run_id(audit_token)
 

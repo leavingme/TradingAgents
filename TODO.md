@@ -20,7 +20,7 @@
 - [ ] 新闻数据：来源、发布时间、正文可用性和分析日期截止校验。
 - [ ] 宏观数据：指标名称、单位、观察期和发布日期。（部分完成：已实现 FRED 滞后非美指标 1095 天 Lookback 智能拓宽防护机制，防空回包异常）
 - [ ] 预测市场：事件标识、到期时间和概率范围。
-- [x] **P0 — 历史预测市场前视隔离**：正式 runtime 与兼容 `propagate()` 入口将 `analysis_date` 绑定为不可由 LLM 改写的运行上下文；只提供实时快照的 Polymarket 在历史分析中于网络请求前以类型化 `NoMarketDataError` fail closed，vendor ledger 记录 point-in-time 不可用原因。不得把运行日概率、伪造 `source_id` 或说明性文本作为历史证据；实时预测市场的结构化领域模型和确定性校验仍由上项继续跟踪。
+- [x] **分析时间双轴语义**：`analysis_date` 只表示最近完整 `market_data_date`；默认 `live` 分析允许使用运行时最新 Polymarket/新闻/宏观信息，并在完成事件记录 `decision_as_of`。历史复现必须显式使用 `point_in_time + information_cutoff`，当前型 Polymarket 仅在该模式下 fail closed。实时预测市场的结构化领域模型和确定性校验仍由上项继续跟踪。
 - [x] Graph 硬门禁：ToolNode 不吞数据异常；失败运行不生成报告或 `run_completed`。
 - [x] Tool 参数纠错：模型生成的参数 Schema 错误返回一次结构化 `ToolMessage` 供 LLM 修正；重复错误及 vendor/数据异常仍触发 Graph 硬门禁。
 - [x] 技术指标确定性窗口：按指标预热 K 线需求统一扩展所有 vendor 的请求窗口，并区分输入历史与预热后有效输出点数。

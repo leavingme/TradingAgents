@@ -28,35 +28,26 @@ REQUEST_TIMEOUT = 30
 DEFAULT_LIMIT = 6
 
 
-def _utc_today():
-    return datetime.now(timezone.utc).date()
-
-
-def _current_analysis_date() -> str | None:
+def _current_temporal_context() -> tuple[str, str | None]:
     # Keep runtime imports lazy: dataflows.interface imports this module while
     # runtime itself imports the graph/dataflow stack.
-    from tradingagents.runtime.audit_context import current_analysis_date
+    from tradingagents.runtime.audit_context import (
+        current_analysis_mode,
+        current_information_cutoff,
+    )
 
-    return current_analysis_date()
+    return current_analysis_mode(), current_information_cutoff()
 
 
-def _reject_historical_live_snapshot(topic: str) -> None:
-    """Fail closed when a historical run requests a current-only snapshot."""
-    analysis_date = _current_analysis_date()
-    if not analysis_date:
-        return
-    try:
-        cutoff = datetime.strptime(analysis_date, "%Y-%m-%d").date()
-    except ValueError as exc:
-        raise NoMarketDataError(
-            topic, detail=f"invalid analysis_date for prediction market: {analysis_date}"
-        ) from exc
-    if cutoff < _utc_today():
+def _reject_unavailable_point_in_time_snapshot(topic: str) -> None:
+    """Fail closed only for explicit historical point-in-time analysis."""
+    analysis_mode, information_cutoff = _current_temporal_context()
+    if analysis_mode == "point_in_time":
         raise NoMarketDataError(
             topic,
             detail=(
                 "Polymarket exposes only a live snapshot and cannot provide "
-                f"point-in-time evidence for historical analysis_date={analysis_date}"
+                f"point-in-time evidence for information_cutoff={information_cutoff}"
             ),
         )
 
@@ -114,7 +105,7 @@ def get_prediction_markets(topic: str, limit: int | None = None) -> str:
         each with its implied probability, traded volume, resolution date, and
         recent (1-week) move.
     """
-    _reject_historical_live_snapshot(topic)
+    _reject_unavailable_point_in_time_snapshot(topic)
 
     if limit is None:
         limit = DEFAULT_LIMIT
@@ -139,6 +130,7 @@ def get_prediction_markets(topic: str, limit: int | None = None) -> str:
 
     header = (
         f'## Polymarket prediction markets: "{topic}"\n'
+        f"Live snapshot observed at {now.isoformat()}.\n"
         f"Live, market-implied probabilities (higher traded volume = deeper, "
         f"more reliable). A probability is the crowd's priced odds of the event, "
         f"not a forecast you should take as certain.\n\n"

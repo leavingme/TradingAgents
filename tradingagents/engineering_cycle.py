@@ -102,6 +102,8 @@ def run_baseline(
     root: Path = DEFAULT_ROOT,
     selected_analysts: tuple[str, ...] = ("market", "social", "news", "fundamentals"),
     research_depth: int = 1,
+    analysis_mode: str = "live",
+    information_cutoff: str | None = None,
     parent_run_id: str | None = None,
 ) -> str:
     """Run the audited baseline and persist a cycle manifest."""
@@ -114,6 +116,8 @@ def run_baseline(
     request = AnalysisRequest(
         ticker=symbol.upper(),
         analysis_date=analysis_date or default_analysis_date(),
+        analysis_mode=analysis_mode,
+        information_cutoff=information_cutoff,
         selected_analysts=selected_analysts,
         research_depth=research_depth,
         callbacks=(stats_handler,),
@@ -128,6 +132,8 @@ def run_baseline(
         "request": {
             "ticker": request.ticker,
             "analysis_date": request.analysis_date,
+            "analysis_mode": request.analysis_mode,
+            "information_cutoff": request.information_cutoff,
             "selected_analysts": list(request.selected_analysts),
             "research_depth": request.research_depth,
         },
@@ -196,6 +202,8 @@ def rerun_baseline(parent_run_id: str, *, root: Path = DEFAULT_ROOT) -> str:
             or ("market", "social", "news", "fundamentals")
         ),
         research_depth=int(request.get("research_depth") or 1),
+        analysis_mode=request.get("analysis_mode", "live"),
+        information_cutoff=request.get("information_cutoff"),
         parent_run_id=parent_run_id,
         root=root,
     )

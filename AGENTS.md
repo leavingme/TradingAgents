@@ -263,6 +263,13 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - 每轮使用新的 `run_id`；原始 events/vendor ledger 来自 SQLite，生成的本地 cycle 产物位于 gitignored 的 `.tradingagents/engineering_cycles/<run_id>/`。需要长期追踪的 finding 必须同步到 `TODO.md`/`PLAN.md`。
 - 默认基准标的是 NVDA，默认日期为最近已完成工作日，避免使用仍在形成的当日日 K；需要复现历史运行时显式传 `--date`。
 
+## 分析时间轴语义
+
+- `analysis_date` / `market_data_date` 表示最近完整市场数据所属的交易日，不等于所有外部信息的截止时间。例如周一美股盘前运行时，周五可以是最新完整日 K，但周末至周一盘前的新闻、宏观和 Polymarket 实时信息仍可用于当前决策。
+- 默认 `analysis_mode="live"`：新闻、宏观、社交和预测市场允许使用各自在运行调用时可获得的最新信息，最终 `run_completed.decision_as_of` 记录决策形成时刻。
+- 历史回测或时点复现必须显式使用 `analysis_mode="point_in_time"` 并提供带时区的 `information_cutoff`；不支持历史快照的当前型 vendor 必须 fail closed，不得用运行时现值冒充历史证据。
+- 必须分别保存和解释 `market_data_date`、`decision_as_of`、`information_cutoff` 与 vendor 自身的 `observed_at`/`published_at`。禁止仅因 `analysis_date` 早于当前自然日就关闭实时信息源。
+
 ## 测试和验证注意事项
 
 - 针对 Web/CLI parity 的快速验证优先跑：

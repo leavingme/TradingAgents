@@ -164,6 +164,9 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     events = list(run_analysis_stream(request))
 
     assert events[0].type == "run_started"
+    assert events[0].content["market_data_date"] == "2026-07-05"
+    assert events[0].content["analysis_mode"] == "live"
+    assert events[0].content["information_cutoff"] == "live_at_call_time"
     assert any(event.type == "message" for event in events)
     assert any(event.type == "tool_call" for event in events)
     assert any(
@@ -176,18 +179,27 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert completed.type == "run_completed"
     assert isinstance(completed.content, dict)
     assert completed.content["decision"] == "Hold"
+    assert completed.content["decision_as_of"] == completed.timestamp
     assert Path(completed.content["report_path"]).exists()
 
 
 def test_run_analysis_stream_binds_and_resets_analysis_date(monkeypatch, tmp_path):
     from tradingagents.runtime import analysis_runner
-    from tradingagents.runtime.audit_context import current_analysis_date
+    from tradingagents.runtime.audit_context import (
+        current_analysis_date,
+        current_analysis_mode,
+        current_information_cutoff,
+    )
 
     seen = []
 
     class ContextCompiledGraph(FakeCompiledGraph):
         def stream(self, init_state, **kwargs):
-            seen.append(current_analysis_date())
+            seen.append((
+                current_analysis_date(),
+                current_analysis_mode(),
+                current_information_cutoff(),
+            ))
             yield from super().stream(init_state, **kwargs)
 
     class ContextTradingAgentsGraph(FakeTradingAgentsGraph):
@@ -206,8 +218,43 @@ def test_run_analysis_stream_binds_and_resets_analysis_date(monkeypatch, tmp_pat
         run_id="run-analysis-date-context",
     )))
 
-    assert seen == ["2026-07-05"]
+    assert seen == [("2026-07-05", "live", None)]
     assert current_analysis_date() is None
+    assert current_analysis_mode() == "live"
+    assert current_information_cutoff() is None
+
+
+def test_point_in_time_request_requires_timezone_aware_cutoff():
+    with pytest.raises(ValueError, match="requires information_cutoff"):
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-10",
+            analysis_mode="point_in_time",
+        )
+    with pytest.raises(ValueError, match="include a timezone"):
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-10",
+            analysis_mode="point_in_time",
+            information_cutoff="2026-07-10T20:00:00",
+        )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-10",
+        analysis_mode="point_in_time",
+        information_cutoff="2026-07-10T20:00:00+00:00",
+    )
+    assert request.information_cutoff == "2026-07-10T20:00:00+00:00"
+
+
+def test_live_request_uses_market_date_without_backdating_information():
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-10",
+        analysis_mode="live",
+    )
+    assert request.analysis_date == "2026-07-10"
+    assert request.information_cutoff is None
 
 
 def test_agent_statuses_are_monotonic_and_report_updates_are_deduplicated(

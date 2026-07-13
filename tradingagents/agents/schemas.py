@@ -38,17 +38,25 @@ def _coerce_optional_float(value):
 
 
 _PROSE_TRADE_MATH = re.compile(
-    r"risk\s*[/:-]?\s*reward|reward\s*[/:-]?\s*risk|风险回报|盈亏比|"
-    r"\d+(?:\.\d+)?\s*[×x]\s*atr|atr\s*(?:倍数|multiple)|"
+    r"risk\s*[/:-]?\s*reward|reward\s*[/:-]?\s*risk|"
+    r"风险\s*[/：:]?\s*回报|盈亏比|"
+    r"\d+(?:\.\d+)?\s*(?:[×x]|倍)\s*atr|atr\s*(?:倍数|multiple)|"
     r"initial portfolio risk|初始组合风险",
     re.IGNORECASE,
 )
 _PROSE_EXECUTABLE_NUMBER = re.compile(
     r"(?:entry|stop(?:[- ]loss)?|price target|position siz(?:e|ing)|"
-    r"入场|止损|目标价|仓位|建仓|加仓)"
+    r"reduce|trim|exit|(?<!not )(?<!不支持)(?<!不是)sell|buyback|hedge|strike|exposure|trigger|break(?:s)? (?:above|below)|"
+    r"入场|止损|目标价|目标位|仓位|持仓|战术仓|建仓|加仓|减仓|减持|清仓|回补|"
+    r"(?:降低|提高|调整|削减|保留)[^\n.!?。！？]{0,8}(?:仓|敞口)|"
+    r"卖出|买入|对冲|行权价|敞口|触发|跌破|突破)"
     r"[^\n.!?。！？]{0,35}(?:\$?\d+(?:\.\d+)?%?)|"
     r"(?:\$?\d+(?:\.\d+)?%?)[^\n.!?。！？]{0,20}"
-    r"(?:entry|stop(?:[- ]loss)?|price target|position|入场|止损|目标价|仓位|建仓|加仓)",
+    r"(?:entry|stop(?:[- ]loss)?|price target|position|reduce|trim|exit|(?<!not )(?<!不支持)(?<!不是)sell|buyback|"
+    r"hedge|strike|exposure|trigger|break(?:s)? (?:above|below)|"
+    r"入场|止损|目标价|目标位|仓位|持仓|战术仓|建仓|加仓|减仓|减持|清仓|回补|"
+    r"(?:降低|提高|调整|削减|保留)[^\n.!?。！？]{0,8}(?:仓|敞口)|"
+    r"卖出|买入|对冲|行权价|敞口|触发|跌破|突破)",
     re.IGNORECASE,
 )
 
@@ -63,6 +71,34 @@ def _reject_calculated_trade_math(value: str) -> str:
             "executable entry, stop, target, and position numbers must use structured fields, not prose"
         )
     return value
+
+
+def _sanitize_non_executable_prose(value: str) -> str:
+    """Remove executable-number sentences from Hold/Sell prose.
+
+    Non-long ratings are allowed to remain valid qualitative decisions, but
+    copied entry/stop/target/position math must not survive into the report.
+    Long decisions stay strict and fail instead of being silently rewritten.
+    """
+    # An ASCII dot is a sentence boundary only before whitespace/end. This
+    # preserves decimal values (214.11) inside the unsafe chunk so the whole
+    # guidance is removed instead of leaking fragments such as "11 + ...".
+    chunks = re.split(r"(?<=[!?。！？])|(?<=\.)(?=\s|$)|\n+", value)
+    safe = [
+        chunk.strip()
+        for chunk in chunks
+        if chunk.strip()
+        and not _PROSE_TRADE_MATH.search(chunk)
+        and not _PROSE_EXECUTABLE_NUMBER.search(chunk)
+    ]
+    if safe:
+        return " ".join(safe)
+    return "Executable numeric guidance was removed; no transaction is authorized."
+
+
+def contains_unverified_non_long_execution(value: str) -> bool:
+    """Return whether non-long prose still carries executable numeric guidance."""
+    return bool(_PROSE_TRADE_MATH.search(value) or _PROSE_EXECUTABLE_NUMBER.search(value))
 
 
 # ---------------------------------------------------------------------------
@@ -203,12 +239,6 @@ class TraderProposal(BaseModel):
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
 
-    @field_validator("reasoning")
-    @classmethod
-    def _no_unverified_trade_math(cls, value):
-        return _reject_calculated_trade_math(value)
-
-
 def render_trader_proposal(
     proposal: TraderProposal,
     *,
@@ -222,11 +252,14 @@ def render_trader_proposal(
     and any external code that greps for it.
     """
     metrics = None
+    reasoning = proposal.reasoning
     if proposal.action is TraderAction.BUY:
         from .trade_plan import validate_long_trade_plan
 
         if not verified_market or not risk_policy:
             raise ValueError("trusted market snapshot and server risk policy are required")
+
+        reasoning = _reject_calculated_trade_math(reasoning)
 
         metrics = validate_long_trade_plan(
             entry_price=proposal.entry_price,
@@ -253,10 +286,11 @@ def render_trader_proposal(
             target_position_pct=proposal.target_position_pct,
             initial_position_pct=proposal.initial_position_pct,
         )
+        reasoning = _sanitize_non_executable_prose(reasoning)
     parts = [
         f"**Action**: {proposal.action.value}",
         "",
-        f"**Reasoning**: {proposal.reasoning}",
+        f"**Reasoning**: {reasoning}",
     ]
     if proposal.entry_price is not None:
         parts.extend(["", f"**Entry Price**: {proposal.entry_price}"])
@@ -355,12 +389,6 @@ class PortfolioDecision(BaseModel):
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
 
-    @field_validator("executive_summary", "investment_thesis")
-    @classmethod
-    def _no_unverified_trade_math(cls, value):
-        return _reject_calculated_trade_math(value)
-
-
 def render_pm_decision(
     decision: PortfolioDecision,
     *,
@@ -375,11 +403,16 @@ def render_pm_decision(
     parsers and the report writers already handle.
     """
     metrics = None
+    executive_summary = decision.executive_summary
+    investment_thesis = decision.investment_thesis
     if decision.rating in {PortfolioRating.BUY, PortfolioRating.OVERWEIGHT}:
         from .trade_plan import validate_long_trade_plan
 
         if not verified_market or not risk_policy:
             raise ValueError("trusted market snapshot and server risk policy are required")
+
+        executive_summary = _reject_calculated_trade_math(executive_summary)
+        investment_thesis = _reject_calculated_trade_math(investment_thesis)
 
         metrics = validate_long_trade_plan(
             entry_price=decision.entry_price,
@@ -406,12 +439,14 @@ def render_pm_decision(
             target_position_pct=decision.target_position_pct,
             initial_position_pct=decision.initial_position_pct,
         )
+        executive_summary = _sanitize_non_executable_prose(executive_summary)
+        investment_thesis = _sanitize_non_executable_prose(investment_thesis)
     parts = [
         f"**Rating**: {decision.rating.value}",
         "",
-        f"**Executive Summary**: {decision.executive_summary}",
+        f"**Executive Summary**: {executive_summary}",
         "",
-        f"**Investment Thesis**: {decision.investment_thesis}",
+        f"**Investment Thesis**: {investment_thesis}",
     ]
     if decision.price_target is not None:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])

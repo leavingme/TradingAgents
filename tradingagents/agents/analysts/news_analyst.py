@@ -1,4 +1,5 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage
 
 from tradingagents.agents.analysts.prompts import (
     TOOL_CALLING_COLLABORATION_PROMPT,
@@ -13,6 +14,23 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.dataflows.evidence_models import validate_report_citations
 from tradingagents.dataflows.untrusted_content import isolate_untrusted_content
+
+
+def _validate_final_report_with_retry(chain, messages, result, evidence_texts):
+    """Give one deterministic citation error back to the LLM for correction."""
+    try:
+        return result, validate_report_citations(str(result.content), evidence_texts)
+    except ValueError as exc:
+        correction = HumanMessage(content=(
+            "Your news report was rejected by deterministic citation validation: "
+            f"{exc}. Rewrite the report once. Cite only source_id values copied "
+            "exactly from the validated tool evidence already present in this "
+            "conversation; do not invent, alter, or omit required citations."
+        ))
+        retried = chain.invoke([*messages, result, correction])
+        if retried.tool_calls:
+            return retried, ""
+        return retried, validate_report_citations(str(retried.content), evidence_texts)
 
 
 def create_news_analyst(llm):
@@ -57,7 +75,9 @@ def create_news_analyst(llm):
                 for message in state["messages"]
                 if getattr(message, "type", "") == "tool"
             ]
-            report = validate_report_citations(str(result.content), evidence_texts)
+            result, report = _validate_final_report_with_retry(
+                chain, state["messages"], result, evidence_texts
+            )
             report = isolate_untrusted_content("news_report", report).content
 
         return {

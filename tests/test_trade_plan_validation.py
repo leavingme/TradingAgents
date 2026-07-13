@@ -8,6 +8,7 @@ from tradingagents.agents.schemas import (
     PortfolioRating,
     TraderAction,
     TraderProposal,
+    contains_unverified_non_long_execution,
     render_pm_decision,
     render_trader_proposal,
 )
@@ -191,23 +192,137 @@ def test_incomplete_buy_is_retried_then_safely_downgraded():
 
 
 @pytest.mark.unit
-def test_unverified_trade_math_in_prose_is_rejected():
-    with pytest.raises(ValueError, match="must not appear in prose"):
-        PortfolioDecision(
-            rating=PortfolioRating.HOLD,
-            executive_summary="Claimed risk/reward is 1:3.",
-            investment_thesis="Wait for confirmation.",
-        )
+def test_non_long_trade_math_is_removed_without_turning_hold_into_no_decision():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="Claimed risk/reward is 1:3. Maintain the qualitative view.",
+        investment_thesis="Wait for confirmation.",
+    )
+    rendered = render_pm_decision(decision)
+    assert "**Rating**: Hold" in rendered
+    assert "risk/reward" not in rendered
+    assert "Maintain the qualitative view" in rendered
 
 
 @pytest.mark.unit
-def test_executable_numbers_cannot_be_duplicated_in_prose():
+def test_non_long_executable_numbers_are_removed_from_prose():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="Start with a 40% position near $210. Wait for confirmation.",
+        investment_thesis="Evidence remains balanced.",
+    )
+    rendered = render_pm_decision(decision)
+    assert "40%" not in rendered
+    assert "$210" not in rendered
+    assert "Wait for confirmation" in rendered
+
+
+@pytest.mark.unit
+def test_underweight_removes_reduce_rebuy_hedge_and_strike_numbers():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.UNDERWEIGHT,
+        executive_summary=(
+            "跌破201美元减仓至25%，跌破192美元清仓。基本面仍有韧性。"
+        ),
+        investment_thesis=(
+            "突破214美元回补至70%。买入Strike 200的Put对冲财报风险。"
+            "短期赔率并不理想。"
+        ),
+    )
+    rendered = render_pm_decision(decision)
+    for forbidden in ("201", "25%", "192", "214", "70%", "Strike 200"):
+        assert forbidden not in rendered
+    assert "基本面仍有韧性" in rendered
+    assert "短期赔率并不理想" in rendered
+
+
+@pytest.mark.unit
+def test_hold_removes_chinese_risk_reward_and_keeps_decimal_chunks_atomic():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="当前风险/回报比为0.7:1。基本面仍有韧性。",
+        investment_thesis=(
+            "采纳触发方案：突破214.11美元后加仓至50%。"
+            "等待方向明确后再行动。"
+        ),
+    )
+    rendered = render_pm_decision(decision)
+    for forbidden in ("风险/回报", "0.7:1", "214.11", "50%", "11美元"):
+        assert forbidden not in rendered
+    assert "基本面仍有韧性" in rendered
+    assert "等待方向明确后再行动" in rendered
+
+
+@pytest.mark.unit
+def test_hold_removes_target_level_synonym_from_prose():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="维持观察。",
+        investment_thesis="第一目标位 220-225 美元。基本面质量仍然很高。",
+    )
+    rendered = render_pm_decision(decision)
+    assert "220-225" not in rendered
+    assert "目标位" not in rendered
+    assert "基本面质量仍然很高" in rendered
+
+
+@pytest.mark.unit
+def test_underweight_removes_chinese_atr_multiple():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.UNDERWEIGHT,
+        executive_summary="等待财报后重新评估。",
+        investment_thesis="估值与1.5倍ATR波动率叠加。长期护城河仍然存在。",
+    )
+    rendered = render_pm_decision(decision)
+    assert "1.5倍ATR" not in rendered
+    assert "长期护城河仍然存在" in rendered
+
+
+@pytest.mark.unit
+def test_hold_removes_tactical_position_reduction_synonym():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="维持观察。",
+        investment_thesis=(
+            "30-60天内若政策无落地，主动降低战术仓10-15%。"
+            "等待官方政策确认。"
+        ),
+    )
+    rendered = render_pm_decision(decision)
+    assert "10-15%" not in rendered
+    assert "降低战术仓" not in rendered
+    assert "等待官方政策确认" in rendered
+
+
+@pytest.mark.unit
+def test_negative_sell_rating_context_is_not_an_execution_false_positive():
+    report = "多方证据确认（不支持Sell的论据）：FY27 Q1营收$81.6B。"
+    assert not contains_unverified_non_long_execution(report)
+
+
+@pytest.mark.unit
+def test_long_executable_math_in_prose_remains_a_hard_failure():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.BUY,
+        executive_summary="Start with a 4% position near $210.",
+        investment_thesis="Fundamentals support the long.",
+        entry_price=210, stop_loss=200, price_target=230,
+        target_position_pct=4, initial_position_pct=1,
+    )
     with pytest.raises(ValueError, match="must use structured fields"):
-        PortfolioDecision(
-            rating=PortfolioRating.HOLD,
-            executive_summary="Start with a 40% position near $210.",
-            investment_thesis="Wait for confirmation.",
-        )
+        render_pm_decision(decision, verified_market=VERIFIED, risk_policy=POLICY)
+
+
+@pytest.mark.unit
+def test_trader_hold_sanitizes_copied_executable_plan_sentences():
+    proposal = TraderProposal(
+        action=TraderAction.HOLD,
+        reasoning="Do not add at a $210 entry. Evidence remains balanced.",
+    )
+    rendered = render_trader_proposal(proposal)
+    assert "**Action**: Hold" in rendered
+    assert "$210" not in rendered
+    assert "Evidence remains balanced" in rendered
 
 
 @pytest.mark.unit

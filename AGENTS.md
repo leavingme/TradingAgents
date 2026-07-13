@@ -255,6 +255,13 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - exit code 0 表示 propagate 到达了 final decision
 - 2026-07-05 的 smoke run（NVDA）：FINAL DECISION = `Hold`
 
+## NVDA 工程闭环
+
+- 涉及“运行分析后复盘并处理 P0”的工作统一使用 `scripts/engineering_cycle.py`，详细规范见 `docs/engineering-cycle.md`。
+- 固定阶段为 `run → review → ack-review → P0 plan/implementation → resolve → verify → gate`。不得跳过全流程 review，也不得在 P0 未解决、缺少证据或验证早于修复时关闭循环。
+- 每轮使用新的 `run_id`；原始 events/vendor ledger 来自 SQLite，生成的本地 cycle 产物位于 gitignored 的 `.tradingagents/engineering_cycles/<run_id>/`。需要长期追踪的 finding 必须同步到 `TODO.md`/`PLAN.md`。
+- 默认基准标的是 NVDA，默认日期为最近已完成工作日，避免使用仍在形成的当日日 K；需要复现历史运行时显式传 `--date`。
+
 ## 测试和验证注意事项
 
 - 针对 Web/CLI parity 的快速验证优先跑：

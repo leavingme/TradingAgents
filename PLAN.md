@@ -439,3 +439,7 @@ Next recommended work:
 2. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.
 3. **SSE/Report Section Throttling**: Throttle the write/push rate of `report_section` updates to prevent SQLite database lock congestion and smooth browser UI updates.
 4. Complete deterministic validation and runtime vendor-attempt persistence for prediction-market data.
+
+## Repeatable NVDA engineering cycle (2026-07-13)
+
+Implemented `scripts/engineering_cycle.py` and `tradingagents.engineering_cycle` as the canonical run-review-remediate workflow. Every cycle owns a unique run ID and persists baseline inputs, SQLite execution/vendor evidence, deterministic and human findings, a P0 plan, implementation/verification evidence, and a final completion gate. The gate rejects unresolved P0s, unacknowledged reviews, missing evidence, failed verification, and verification performed before the latest P0 resolution.

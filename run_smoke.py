@@ -1,6 +1,6 @@
 """Non-interactive smoke runner for TradingAgents.
 
-Bypasses CLI questionary prompts; runs a single propagate() with explicit config.
+Bypasses CLI questionary prompts; runs through the audited headless runtime.
 Use this for verification, not production.
 """
 import sys
@@ -12,14 +12,16 @@ ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
 sys.path.insert(0, str(ROOT))
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.runtime import AnalysisRequest, run_analysis_once
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.dataflows.config import set_config
 
 # Build config: LLM via direct minimax (no :8642 gateway), Alpha Vantage + DuckDuckGo for data
 config = DEFAULT_CONFIG.copy()
 config["llm_provider"] = os.getenv("CUSTOM_LLM_PROVIDER", "minimax-cn")
-config["backend_url"] = os.getenv("OPENAI_API_BASE", "https://api.minimaxi.com/v1")
+config["backend_url"] = os.getenv(
+    "OPENAI_BASE_URL", os.getenv("OPENAI_API_BASE", "https://api.minimaxi.com/v1")
+)
 config["deep_think_llm"] = os.getenv("DEEP_MODEL", os.getenv("CUSTOM_DEEP_MODEL", "MiniMax-M3"))
 config["quick_think_llm"] = os.getenv("QUICK_MODEL", os.getenv("CUSTOM_QUICK_MODEL", "MiniMax-M3"))
 config["max_debate_rounds"] = 1
@@ -48,11 +50,24 @@ print(f"  deep    = {config['deep_think_llm']}")
 print(f"  vendors = {config['data_vendors']}")
 print()
 
-ta = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
 try:
-    _, decision = ta.propagate(symbol, date)
+    result = run_analysis_once(AnalysisRequest(
+        ticker=symbol,
+        analysis_date=date,
+        selected_analysts=tuple(analysts),
+        llm_provider=config["llm_provider"],
+        backend_url=config["backend_url"],
+        deep_think_llm=config["deep_think_llm"],
+        quick_think_llm=config["quick_think_llm"],
+        research_depth=1,
+        config_overrides={
+            "llm_timeout": config["llm_timeout"],
+            "data_vendors": config["data_vendors"],
+        },
+    ))
     print("\n=== FINAL DECISION ===")
-    print(decision)
+    print(result.decision if result.decision is not None else "NO_DECISION")
+    print(f"decision_status={result.decision_status} run_id={result.run_id}")
 except Exception as e:
     import traceback
     traceback.print_exc()

@@ -12,6 +12,7 @@ def test_web_command_starts_uvicorn(monkeypatch):
         run=lambda app, **kwargs: calls.append((app, kwargs))
     )
     monkeypatch.setitem(__import__("sys").modules, "uvicorn", fake_uvicorn)
+    monkeypatch.setenv("TRADINGAGENTS_WEB_AUTH_TOKEN", "test-secret")
 
     result = CliRunner().invoke(
         m.app,
@@ -34,3 +35,9 @@ def test_web_command_starts_uvicorn(monkeypatch):
             },
         )
     ]
+
+
+def test_non_loopback_web_requires_auth_token(monkeypatch):
+    monkeypatch.delenv("TRADINGAGENTS_WEB_AUTH_TOKEN", raising=False)
+    result = CliRunner().invoke(m.app, ["web", "--host", "0.0.0.0"])
+    assert result.exit_code == 2

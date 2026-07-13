@@ -3,6 +3,8 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.dataflows.untrusted_content import render_untrusted_payload
+from tradingagents.dataflows.evidence_models import render_news_feed
 
 
 @tool
@@ -22,7 +24,11 @@ def get_news(
     Returns:
         str: A formatted string containing news data
     """
-    return route_to_vendor("get_news", ticker, start_date, end_date)
+    return render_untrusted_payload({
+        "news": render_news_feed(
+            route_to_vendor("get_news", ticker, start_date, end_date)
+        )
+    })
 
 @tool
 def get_global_news(
@@ -45,7 +51,11 @@ def get_global_news(
     Returns:
         str: A formatted string containing global news data
     """
-    return route_to_vendor("get_global_news", curr_date, look_back_days, limit)
+    return render_untrusted_payload({
+        "global_news": render_news_feed(
+            route_to_vendor("get_global_news", curr_date, look_back_days, limit)
+        )
+    })
 
 @tool
 def get_insider_transactions(

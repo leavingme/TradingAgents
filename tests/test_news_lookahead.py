@@ -21,14 +21,15 @@ def test_global_news_uses_westock_when_available(monkeypatch):
     monkeypatch.setattr(
         "tradingagents.dataflows.symbol_utils.run_westock",
         lambda *a, **k: json.dumps([
-            {"news_title": "PAST EVENT", "source": "Westock", "publish_time": 1_746_400_000}
+            {"news_title": "PAST EVENT", "source": "Westock", "publish_time": 1_746_400_000,
+             "url": "https://example.com/past-event"}
         ]),
     )
 
     out = wnews.get_global_news_westock("2025-05-09", look_back_days=7, limit=10)
 
-    assert "Global Market News" in out
-    assert "PAST EVENT" in out
+    assert out.scope == "global"
+    assert out.items[0].title == "PAST EVENT"
 
 
 @pytest.mark.unit
@@ -60,6 +61,7 @@ def test_news_falls_back_to_duckduckgo_only_when_configured(monkeypatch):
                 "summary": "Fallback summary",
                 "publisher": "example.com",
                 "link": "https://example.com/news",
+                "pub_date": "2025-05-08",
             }
         ],
     )
@@ -69,8 +71,8 @@ def test_news_falls_back_to_duckduckgo_only_when_configured(monkeypatch):
     finally:
         set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
 
-    assert "DuckDuckGo Global Market News" in out
-    assert "Fallback headline" in out
+    assert out.items[0].title == "Fallback headline"
+    assert out.items[0].source_id.startswith("news_")
 
 
 @pytest.mark.unit
@@ -85,9 +87,9 @@ def test_news_does_not_fallback_to_duckduckgo_when_not_configured(monkeypatch):
     monkeypatch.setattr("tradingagents.dataflows.duckduckgo_search.ddg_search", ddg)
 
     try:
-        out = route_to_vendor("get_global_news", "2025-05-09", 7, 10)
+        with pytest.raises(NoMarketDataError) as exc:
+            route_to_vendor("get_global_news", "2025-05-09", 7, 10)
     finally:
         set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
 
-    assert "NO_DATA_AVAILABLE" in out
-    assert "westock-data CLI is not available" in out
+    assert "westock-data CLI is not available" in str(exc.value)

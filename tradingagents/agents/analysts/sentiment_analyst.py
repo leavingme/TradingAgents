@@ -6,7 +6,7 @@ only tool available was Westock news — which led LLMs to fabricate
 Reddit/X/StockTwits content under prompt pressure (verified live).
 
 The redesigned agent pre-fetches four complementary data sources before
-the LLM is invoked and injects them into the prompt as structured blocks:
+the LLM is invoked and transports them in a separate untrusted-data message:
 
   1. News headlines     — Westock (institutional framing)
   2. StockTwits messages — retail-trader posts indexed by cashtag, with
@@ -47,6 +47,10 @@ from tradingagents.agents.utils.structured import (
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
+from tradingagents.dataflows.untrusted_content import (
+    isolate_untrusted_content,
+    render_untrusted_payload,
+)
 
 
 def _seven_days_back(trade_date: str) -> str:
@@ -100,11 +104,14 @@ def create_sentiment_analyst(llm):
             ticker=ticker,
             start_date=start_date,
             end_date=end_date,
-            news_block=news_block,
-            stocktwits_block=stocktwits_block,
-            reddit_block=reddit_block,
-            twitter_block=twitter_block,
         ) + get_no_preamble_instruction()
+
+        untrusted_payload = render_untrusted_payload({
+            "news": news_block,
+            "stocktwits": stocktwits_block,
+            "reddit": reddit_block,
+            "twitter": twitter_block,
+        })
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -112,6 +119,7 @@ def create_sentiment_analyst(llm):
                     "system",
                     PREFETCHED_DATA_COLLABORATION_PROMPT,
                 ),
+                ("human", "UNTRUSTED_DATA_JSON:\n{untrusted_payload}"),
                 MessagesPlaceholder(variable_name="messages"),
             ]
         )
@@ -119,6 +127,7 @@ def create_sentiment_analyst(llm):
         prompt = prompt.partial(system_message=system_message)
         prompt = prompt.partial(current_date=end_date)
         prompt = prompt.partial(instrument_context=instrument_context)
+        prompt = prompt.partial(untrusted_payload=untrusted_payload)
 
         # Format the template into a concrete message list so the structured
         # and free-text paths receive the same input. No bind_tools — the
@@ -132,6 +141,9 @@ def create_sentiment_analyst(llm):
             render_sentiment_report,
             "Sentiment Analyst",
         )
+        report_text = isolate_untrusted_content(
+            "sentiment_report", report_text
+        ).content
 
         return {
             "messages": [AIMessage(content=report_text)],
@@ -146,20 +158,12 @@ def _build_system_message(
     ticker: str,
     start_date: str,
     end_date: str,
-    news_block: str,
-    stocktwits_block: str,
-    reddit_block: str,
-    twitter_block: str,
 ) -> str:
-    """Assemble the sentiment-analyst system message with structured data blocks."""
+    """Assemble instructions only; external content is a separate data message."""
     return build_sentiment_analyst_system_message(
         ticker=ticker,
         start_date=start_date,
         end_date=end_date,
-        news_block=news_block,
-        stocktwits_block=stocktwits_block,
-        reddit_block=reddit_block,
-        twitter_block=twitter_block,
     )
 
 

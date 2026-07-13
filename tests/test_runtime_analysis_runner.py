@@ -1,9 +1,25 @@
 from pathlib import Path
+import pytest
 
 from langchain_core.messages import AIMessage, ToolMessage
 
 from tradingagents.runtime import AnalysisRequest, run_analysis_once, run_analysis_stream
 from tradingagents.runtime.config_builder import build_runtime_config
+
+
+@pytest.fixture(autouse=True)
+def trusted_snapshot(monkeypatch):
+    from tradingagents.dataflows import market_data_validator
+
+    monkeypatch.setattr(
+        market_data_validator,
+        "verified_snapshot_dict",
+        lambda symbol, date: {
+            "symbol": symbol, "market_date": date, "close": 100.0, "atr": 5.0,
+            "vendor_call_id": "test-call", "calculation_start": "2023-07-06",
+            "row_count": 750,
+        },
+    )
 
 
 class FakePropagator:
@@ -54,6 +70,7 @@ class FakeCompiledGraph:
                 "judge_decision": "final decision",
             },
             "final_trade_decision": "Hold",
+            "decision_status": "validated",
         }
 
 
@@ -119,6 +136,16 @@ def test_build_runtime_config_applies_explicit_request_fields(tmp_path):
     assert config["max_risk_discuss_rounds"] == 2
     assert config["checkpoint_enabled"] is True
     assert config["results_dir"] == str(tmp_path)
+
+
+def test_runtime_config_rejects_per_run_risk_policy_override():
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-05",
+        config_overrides={"trade_risk_policy": {"max_portfolio_risk_pct": 99.0}},
+    )
+    with pytest.raises(ValueError, match="server-owned"):
+        build_runtime_config(request)
 
 
 def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_path):
@@ -270,6 +297,30 @@ def test_run_analysis_once_returns_final_result(monkeypatch, tmp_path):
 
     assert result.run_id == "run-2"
     assert result.decision == "Hold"
+    assert result.decision_status == "validated"
     assert result.final_state["final_trade_decision"] == "Hold"
     assert result.report_path is not None
     assert result.report_path.exists()
+
+
+def test_run_analysis_once_returns_no_decision_for_review_required(monkeypatch):
+    from tradingagents.runtime import analysis_runner
+    from tradingagents.runtime.events import AnalysisEvent
+
+    monkeypatch.setattr(
+        analysis_runner,
+        "run_analysis_stream",
+        lambda request: iter((AnalysisEvent(
+            type="run_completed",
+            run_id=request.run_id,
+            content={
+                "decision": "**Decision**: NO_DECISION",
+                "decision_status": "review_required",
+            },
+        ),)),
+    )
+    result = analysis_runner.run_analysis_once(AnalysisRequest(
+        ticker="NVDA", analysis_date="2026-07-05", run_id="review-run"
+    ))
+    assert result.decision is None
+    assert result.decision_status == "review_required"

@@ -1,4 +1,6 @@
 import asyncio
+import pytest
+from fastapi.testclient import TestClient
 
 from tradingagents.runtime import AnalysisEvent
 
@@ -112,7 +114,7 @@ def test_run_create_request_passes_webui_config():
         quick_think_llm="gpt-5.4-mini",
         deep_think_llm="gpt-5.5",
         research_depth=3,
-        backend_url="https://example.invalid/v1",
+        backend_url="https://api.openai.com/v1",
         output_language="English",
         google_thinking_level="high",
         openai_reasoning_effort="medium",
@@ -124,11 +126,57 @@ def test_run_create_request_passes_webui_config():
     assert analysis_request.quick_think_llm == "gpt-5.4-mini"
     assert analysis_request.deep_think_llm == "gpt-5.5"
     assert analysis_request.research_depth == 3
-    assert analysis_request.backend_url == "https://example.invalid/v1"
+    assert analysis_request.backend_url == "https://api.openai.com/v1"
     assert analysis_request.output_language == "English"
     assert analysis_request.google_thinking_level == "high"
     assert analysis_request.openai_reasoning_effort == "medium"
     assert analysis_request.anthropic_effort == "low"
+
+
+def test_run_request_rejects_arbitrary_backend_and_filesystem_paths():
+    from pydantic import ValidationError
+    from web.backend.models import RunCreateRequest
+
+    with pytest.raises(ValidationError, match="server allowlist"):
+        RunCreateRequest(
+            ticker="NVDA", analysis_date="2026-07-05",
+            backend_url="https://attacker.example/v1",
+        )
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        RunCreateRequest(
+            ticker="NVDA", analysis_date="2026-07-05",
+            report_dir="/tmp/exfiltrate",
+        )
+
+
+def test_run_request_rejects_hidden_config_overrides():
+    from pydantic import ValidationError
+    from web.backend.models import RunCreateRequest
+
+    with pytest.raises(ValidationError, match="non-Web settings"):
+        RunCreateRequest(
+            ticker="NVDA", analysis_date="2026-07-05",
+            config_overrides={"trade_risk_policy": {"max_position_pct": 100}},
+        )
+
+
+def test_mutating_api_requires_bearer_when_server_token_is_configured(monkeypatch):
+    from web.backend import main
+
+    monkeypatch.setenv("TRADINGAGENTS_WEB_AUTH_TOKEN", "web-secret")
+    main._RATE_EVENTS.clear()
+    client = TestClient(main.app)
+    payload = {"ticker": "NVDA", "analysis_date": "2026-07-05"}
+    assert client.post("/api/runs", json=payload).status_code == 401
+
+    monkeypatch.setattr(main, "start_background_run", lambda *args: None)
+    response = client.post(
+        "/api/runs",
+        json=payload,
+        headers={"Authorization": "Bearer web-secret"},
+    )
+    assert response.status_code == 200
+    main.store.delete(response.json()["run_id"])
 
 
 def test_run_create_request_preserves_runtime_callbacks():
@@ -173,6 +221,8 @@ def test_stream_run_events_replays_stored_events(monkeypatch):
 
 def test_get_run_report_returns_markdown(monkeypatch, tmp_path):
     from web.backend import main
+
+    monkeypatch.setitem(main.DEFAULT_CONFIG, "results_dir", str(tmp_path))
 
     report_path = tmp_path / "complete_report.md"
     report_path.write_text("# Report\n\nHold", encoding="utf-8")

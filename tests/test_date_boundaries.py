@@ -65,7 +65,9 @@ def test_get_westock_data_includes_requested_end(monkeypatch, tmp_path):
 def test_load_ohlcv_excludes_still_forming_current_daily_bar(monkeypatch, tmp_path):
     set_config({"data_cache_dir": str(tmp_path)})
     today = pd.Timestamp.today().strftime("%Y-%m-%d")
-    previous_completed = (pd.Timestamp.today() - pd.Timedelta(days=2)).strftime("%Y-%m-%d")
+    previous_completed = pd.offsets.BDay().rollback(
+        pd.Timestamp.today() - pd.Timedelta(days=1)
+    ).strftime("%Y-%m-%d")
     monkeypatch.setattr(
         "tradingagents.dataflows.interface.route_to_vendor",
         lambda *a, **k: (

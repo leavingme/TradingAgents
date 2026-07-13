@@ -90,19 +90,18 @@ class FredFormattingTests(unittest.TestCase):
     def test_report_has_header_latest_change_and_table(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):
             out = fred.get_macro_data("unemployment", "2025-09-30", 365)
-        self.assertIn("## FRED: Unemployment Rate (UNRATE)", out)
-        self.assertIn("Units: %", out)
-        self.assertIn("Frequency: Monthly (SA)", out)
-        self.assertIn("**Latest:** 4.4 (2025-09-01)", out)
-        # change over the window: 4.4 - 4.1 = +0.30
-        self.assertIn("+0.30", out)
-        self.assertIn("| 2025-06-01 | 4.1 |", out)
+        self.assertEqual(out.series_id, "UNRATE")
+        self.assertEqual(out.title, "Unemployment Rate")
+        self.assertEqual(out.units, "%")
+        self.assertEqual(out.frequency, "Monthly (SA)")
+        self.assertEqual(out.observations[-1].value, 4.4)
+        self.assertTrue(out.observations[-1].source_id.startswith("macro_"))
 
     def test_missing_value_is_skipped(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):
             out = fred.get_macro_data("unemployment", "2025-09-30", 365)
         # the "." observation must not appear as a row
-        self.assertNotIn("2025-08-01", out)
+        self.assertNotIn("2025-08-01", [item.observed_at for item in out.observations])
 
     def test_empty_window_raises_no_data(self):
         empty = {"observations": []}
@@ -126,10 +125,9 @@ class FredFormattingTests(unittest.TestCase):
         }
         with mock.patch.object(fred, "_request", side_effect=_request_stub(obs=obs)):
             out = fred.get_macro_data("unemployment", "2025-12-31", 365)
-        self.assertIn(f"most recent {fred.MAX_ROWS}", out)
-        # change-over-window must reference the true first (0) and last value
-        self.assertIn("from 0 ", out)
-        body_rows = [ln for ln in out.splitlines() if ln.startswith("| 2025")]
+        from tradingagents.dataflows.evidence_models import render_macro_series
+        rendered = render_macro_series(out)
+        body_rows = [ln for ln in rendered.splitlines() if ln.startswith("| macro_")]
         self.assertEqual(len(body_rows), fred.MAX_ROWS)
 
     def test_window_is_lookahead_safe(self):
@@ -162,16 +160,24 @@ class FredRoutingTests(unittest.TestCase):
         set_config({"data_vendors": {"macro_data": "fred"}})
         with mock.patch.dict(
             interface.VENDOR_METHODS,
-            {"get_macro_indicators": {"fred": lambda *a, **k: "MACRO_OK"}},
+            {"get_macro_indicators": {"fred": lambda *a, **k: fred.MacroSeries(
+                series_id="CPI", title="CPI", units="Index", frequency="Monthly",
+                requested_start="2025-06-01", requested_end="2026-06-01",
+                observations=(fred.MacroObservation(
+                    source_id=fred.macro_source_id("CPI", "2026-05-01"),
+                    series_id="CPI", title="CPI",
+                    units="Index", frequency="Monthly", observed_at="2026-05-01",
+                    value=100.0, vendor="fred",
+                ),),
+            )}},
             clear=False,
         ):
             out = interface.route_to_vendor("get_macro_indicators", "cpi", "2026-06-01", 365)
-        self.assertEqual(out, "MACRO_OK")
+        self.assertEqual(out.series_id, "CPI")
 
-    def test_not_configured_degrades_gracefully(self):
-        # macro_data is optional: with only fred and no key, the router degrades
-        # to a sentinel instead of aborting the run — a missing optional key must
-        # not crash an analysis.
+    def test_not_configured_remains_a_typed_failure(self):
+        # Macro is decision evidence: missing credentials must never be returned
+        # as a successful-looking text sentinel.
         set_config({"data_vendors": {"macro_data": "fred"}})
 
         def _unconfigured(*a, **k):
@@ -181,9 +187,8 @@ class FredRoutingTests(unittest.TestCase):
             interface.VENDOR_METHODS,
             {"get_macro_indicators": {"fred": _unconfigured}},
             clear=False,
-        ):
-            out = interface.route_to_vendor("get_macro_indicators", "cpi", "2026-06-01", 365)
-        self.assertIn("DATA_UNAVAILABLE", out)
+        ), self.assertRaises(fred.FredNotConfiguredError):
+            interface.route_to_vendor("get_macro_indicators", "cpi", "2026-06-01", 365)
 
 
 if __name__ == "__main__":

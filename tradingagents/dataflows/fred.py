@@ -15,6 +15,11 @@ from datetime import datetime, timedelta
 import requests
 
 from .errors import NoMarketDataError, VendorNotConfiguredError
+from .evidence_models import (
+    MacroObservation,
+    MacroSeries,
+    macro_source_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +148,7 @@ def get_macro_data(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
-) -> str:
+) -> MacroSeries:
     """Fetch a FRED macroeconomic series as a formatted markdown report.
 
     Args:
@@ -207,14 +212,6 @@ def get_macro_data(
         if o.get("value") not in (".", None, "")
     ]
 
-    header = (
-        f"## FRED: {title} ({series_id})\n"
-        f"- Units: {units}\n"
-        f"- Frequency: {frequency}"
-        f"{f' ({seasonal})' if seasonal else ''}\n"
-        f"- Window: {start_date} to {curr_date}\n"
-    )
-
     if not points:
         raise NoMarketDataError(
             indicator,
@@ -222,30 +219,27 @@ def get_macro_data(
             "no observations in the requested window",
         )
 
-    first_date, first_val = points[0]
-    last_date, last_val = points[-1]
-    try:
-        delta = float(last_val) - float(first_val)
-        base = float(first_val)
-        pct = f" ({delta / base * 100:+.2f}%)" if base != 0 else ""
-        summary = (
-            f"\n**Latest:** {last_val} ({last_date}) | "
-            f"**Change over window:** {delta:+.2f}{pct} "
-            f"from {first_val} ({first_date})\n"
-        )
-    except ValueError:
-        summary = f"\n**Latest:** {last_val} ({last_date})\n"
-
-    shown = points
-    note = ""
-    if len(points) > MAX_ROWS:
-        shown = points[-MAX_ROWS:]
-        note = f"\n_(showing the most recent {MAX_ROWS} of {len(points)} observations)_\n"
-
-    table = (
-        "\n| Date | Value |\n| --- | --- |\n"
-        + "\n".join(f"| {d} | {v} |" for d, v in shown)
-        + "\n"
+    structured = []
+    for observed_at, raw_value in points:
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        structured.append(MacroObservation(
+            source_id=macro_source_id(series_id, observed_at),
+            series_id=series_id,
+            title=title,
+            units=units,
+            frequency=frequency + (f" ({seasonal})" if seasonal else ""),
+            observed_at=observed_at,
+            value=value,
+            vendor="fred",
+        ))
+    if not structured:
+        raise NoMarketDataError(indicator, series_id, "no numeric observations")
+    return MacroSeries(
+        series_id=series_id, title=title, units=units,
+        frequency=frequency + (f" ({seasonal})" if seasonal else ""),
+        requested_start=start_date, requested_end=curr_date,
+        observations=tuple(structured),
     )
-
-    return header + summary + note + table

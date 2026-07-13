@@ -27,17 +27,17 @@
 - [x] OHLCV 写入溯源：Longbridge MCP/CLI 与 Westock adapter 统一构造 `OHLCVBatch`，缓存拒绝裸 DataFrame，并以 JSONL sidecar 记录原始时间戳、时区语义、vendor、adapter 版本和批次 ID。
 - [x] 技术指标计算起点统一：Longbridge Pine 与 Westock/stockstats 使用相同的三年 calculation_start；Pine 输出按权威 OHLCV 最新交易日校验，服务端 quant 数据滞后时自动 fallback。
 - [x] 运行级 vendor 审计：新增按 run/call/attempt 追加且不可覆盖的 fallback 调用账本与查询 API；审计落盘失败时禁止继续生成可执行报告。
-- [x] 交易计划确定性门禁：Buy/Overweight 的价格、ATR、仓位与最大风险必须结构化；收益风险比、ATR 倍数和组合损失由代码计算，重复校验失败降级为 `Hold / REVIEW_REQUIRED`。
+- [x] 交易计划确定性门禁：Buy/Overweight 的价格与仓位必须结构化；可信 ATR/Close 与服务端风险政策由运行时注入，收益风险比、ATR 倍数和组合损失由代码计算；重复校验失败生成 `NO_DECISION / REVIEW_REQUIRED`，不得伪装成 Hold。
 - [ ] 空头与衍生品交易校验：新增显式 `side=long|short|flat` 和 `validate_short_trade_plan`，不得从 Sell/Underweight 推断开空；期权（含 Put）使用独立的权利金、行权价、到期日、乘数与 Greeks 风险模型。
 - [ ] 仓位引擎解耦：将 `PositionSizingEngine`（固定风险、ATR 风险、波动率目标、分数凯利、账户权益、最大名义敞口）与 `TradePlanValidator` 分层；仓位引擎生成建议仓位，验证器统一执行组合风险、集中度和账户限制硬门禁。
-- [ ] 可信市场输入绑定：ATR、最新 Close、market date 与 vendor `call_id` 由 verified market snapshot 注入交易校验器，不再允许 LLM 自行填写或转抄权威风控输入。
-- [ ] **P0 — 服务端风险政策**：`max_portfolio_risk_pct`、单标的集中度、最大名义敞口和账户约束必须来自服务端配置/账户策略，不得由 LLM 自行设定；交易价还需相对最新可信 Close 做区间校验。
-- [ ] **P0 — 无决策状态**：新增 `validated|review_required|unavailable` 决策状态；`REVIEW_REQUIRED` 不得编码成普通 Hold、不得生成交易信号、不得写入绩效记忆，Web/API 必须明确显示“无有效决策”。
-- [ ] **P0 — 外部内容提示注入隔离**：新闻、StockTwits、Reddit、X 等攻击者可控内容必须作为 `untrusted_data` 注入，不得拼入 system instruction；增加指令隔离、注入检测和结构化事实提取。
-- [ ] **P0 — Web API 安全边界**：backend URL 使用服务端 allowlist，Web 请求禁止提交任意文件系统路径，`config_overrides` 改为白名单字段；非 loopback 部署强制认证，并为启动/删除/配置修改增加权限与频率限制。
-- [ ] **P0 — 新闻与宏观证据模型**：统一为结构化 `NewsItem`/宏观观测模型，校验日期、来源、URL、标的相关性与重复转载；重要报告事实必须绑定可审计 `source_id`，不得仅以非空文本冒充已验证数据。
-- [ ] **条件性 P0 — Checkpoint 并发隔离**：checkpoint thread ID 纳入 `run_id`，同 ticker/日期的并发任务不得共享或互删状态；恢复必须显式指定原 run。
-- [ ] **条件性 P0 — 审计存储与执行入口**：SQLite 启用 WAL、busy timeout、foreign keys 和有限写入重试；正式 CLI/Web/Python 入口统一经过 runtime，直接 `propagate()` 不得静默绕过 run-scoped vendor 审计。
+- [x] 可信市场输入绑定：ATR、最新 Close、market date 与 vendor `call_id` 由 verified market snapshot 注入交易校验器，不再允许 LLM 自行填写或转抄权威风控输入。
+- [x] **P0 — 服务端风险政策**：`max_portfolio_risk_pct`、单标的集中度、最大名义敞口、购买力和是否允许新增长仓均来自服务端配置/账户策略，不得由 LLM 自行设定；交易价相对最新可信 Close 做区间校验。
+- [x] **P0 — 无决策状态**：新增 `validated|review_required|unavailable` 决策状态；`REVIEW_REQUIRED` 不编码成普通 Hold、不生成交易信号、不写入绩效记忆，SQLite/Web/API 明确显示“无有效决策”。
+- [x] **P0 — 外部内容提示注入隔离**：新闻、StockTwits、Reddit、X 等攻击者可控内容作为独立 `untrusted_data` JSON 注入，不拼入 system instruction；增加控制令牌/指令检测、行级清除、输出再净化和结构化事实提取。
+- [x] **P0 — Web API 安全边界**：backend URL 使用服务端 allowlist，Web 请求禁止提交任意文件系统路径，`config_overrides` 使用白名单字段；非 loopback 部署强制 bearer 认证，并为启动/删除/配置修改增加权限、频率和并发限制。
+- [x] **P0 — 新闻与宏观证据模型**：统一为结构化 `NewsItem`/`NewsFeed`/`MacroObservation`/`MacroSeries`，校验日期、来源、URL、标的相关性与重复转载；重要报告事实绑定可审计 `source_id`，不再以非空文本冒充已验证数据。
+- [x] **条件性 P0 — Checkpoint 并发隔离**：checkpoint thread ID 纳入 `run_id`，同 ticker/日期的并发任务不共享或互删状态；恢复必须显式指定原 run。
+- [x] **条件性 P0 — 审计存储与执行入口**：SQLite 启用 WAL、busy timeout、foreign keys 和有限写入重试；正式 CLI/Web/Python 示例入口统一经过 runtime，直接 `propagate()` 也创建 run context，不再静默绕过 run-scoped vendor 审计。
 - [x] Runtime Agent 状态机：累积 graph snapshot 不得导致已完成 Agent 重新进入运行态；团队交接状态完整且报告事件去重。
 - [x] X/Twitter 舆情：Bird 只读结构化 adapter、统一 SocialPost 模型、日期截止/去重/垃圾推广校验、独立 `social_data` vendor 路由与 Web 配置。
 - [x] Web 舆情分类：新闻与社交数据分卡展示，Reddit、StockTwits 与 X/Twitter 统一归入“社交动态舆情”，后端仍保持 `news_data` / `social_data` 边界。

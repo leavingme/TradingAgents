@@ -146,15 +146,16 @@ class VendorRoutingTests(unittest.TestCase):
         return mock.patch.dict(interface.VENDOR_METHODS, {method: vendors}, clear=False)
 
     def test_optional_category_degrades_instead_of_raising(self):
-        # An optional enrichment vendor (FRED macro) that raises must NOT abort
+        # An optional prediction-market enrichment that raises must NOT abort
         # the run — the router returns a sentinel so the analysis proceeds.
-        set_config({"data_vendors": {"macro_data": "fred"}})
+        set_config({"data_vendors": {"prediction_markets": "polymarket"}})
         with self._route_method(
-            "get_macro_indicators", {"fred": _raises(ValueError("FRED 400: bad series"))}
+            "get_prediction_markets",
+            {"polymarket": _raises(ValueError("prediction API unavailable"))},
         ):
-            result = interface.route_to_vendor("get_macro_indicators", "cpi", "2026-01-01")
+            result = interface.route_to_vendor("get_prediction_markets", "Fed cut", 5)
         self.assertIn("DATA_UNAVAILABLE", result)
-        self.assertIn("macro_data", result)
+        self.assertIn("prediction_markets", result)
 
     def test_core_category_still_raises_on_error(self):
         # A core category (single configured vendor) propagates the error so a

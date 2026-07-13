@@ -166,12 +166,10 @@ VENDOR_LIST = [
     "bird",
 ]
 
-# Optional enrichment categories. These add macro/event context to the news
-# analyst but are not core to a decision, so a vendor failure here degrades to a
-# sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
-# key, or a network blip should not crash an analysis over flavour data). Core
-# categories (prices, fundamentals, news) still raise so a broken primary is loud.
-OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
+# Prediction markets remain optional enrichment. Macro observations are
+# decision evidence and therefore fail with typed errors instead of a text
+# sentinel that could be mistaken for validated data.
+OPTIONAL_CATEGORIES = {"prediction_markets"}
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
@@ -695,6 +693,23 @@ def route_to_vendor(method: str, *args, **kwargs):
                 except (TypeError, ValueError) as exc:
                     raise NoMarketDataError(str(args[0]), detail=str(exc)) from exc
                 validation = type("Validation", (), {"is_valid": True, "detail": ""})()
+            elif method in {"get_news", "get_global_news"}:
+                from .evidence_models import validate_news_feed
+                try:
+                    normalized_result = validate_news_feed(
+                        result,
+                        symbol=str(args[0]) if method == "get_news" else None,
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise NoMarketDataError(str(args[0]), detail=str(exc)) from exc
+                validation = type("Validation", (), {"is_valid": True, "detail": ""})()
+            elif method == "get_macro_indicators":
+                from .evidence_models import validate_macro_series
+                try:
+                    normalized_result = validate_macro_series(result)
+                except (TypeError, ValueError) as exc:
+                    raise NoMarketDataError(str(args[0]), detail=str(exc)) from exc
+                validation = type("Validation", (), {"is_valid": True, "detail": ""})()
             else:
                 validation = validate_vendor_result(method, result)
             if not validation.is_valid:
@@ -755,7 +770,10 @@ def route_to_vendor(method: str, *args, **kwargs):
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
                 method, first_error,
             )
-        if method in {"get_stock_data", "get_indicators", "get_social_posts"} | FINANCIAL_METHODS:
+        if method in {
+            "get_stock_data", "get_indicators", "get_social_posts",
+            "get_news", "get_global_news", "get_macro_indicators",
+        } | FINANCIAL_METHODS:
             raise last_no_data
         sym = last_no_data.symbol
         canonical = last_no_data.canonical

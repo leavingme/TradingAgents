@@ -53,7 +53,14 @@ def test_report_agent_applies_language_instruction(rel):
     path = _AGENTS_DIR / rel
     assert path.exists(), f"missing agent module: {rel}"
     src = path.read_text(encoding="utf-8")
-    assert "get_language_instruction()" in src, (
+    shared_prompt_applies_language = (
+        rel.startswith("analysts/")
+        and "build_" in src
+        and "get_language_instruction()" in (
+            _AGENTS_DIR / "analysts" / "prompts.py"
+        ).read_text(encoding="utf-8")
+    )
+    assert "get_language_instruction()" in src or shared_prompt_applies_language, (
         f"{rel} does not apply get_language_instruction(); its output would "
         f"ignore the configured output_language (#740/#801)."
     )

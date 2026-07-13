@@ -21,7 +21,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 import re
 
 # LLMs sometimes write a placeholder string ("None", "N/A", ...) into an optional
@@ -108,6 +108,8 @@ class ResearchPlan(BaseModel):
     instructions the trader can execute against.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     recommendation: PortfolioRating = Field(
         description=(
             "The investment recommendation. Exactly one of Buy / Overweight / "
@@ -156,6 +158,8 @@ class TraderProposal(BaseModel):
     entry, stop-loss, and sizing.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     action: TraderAction = Field(
         description="The transaction direction. Exactly one of Buy / Hold / Sell.",
     )
@@ -177,10 +181,6 @@ class TraderProposal(BaseModel):
         default=None,
         description="Required target price for Buy proposals.",
     )
-    atr: float | None = Field(
-        default=None,
-        description="Required latest ATR used to validate stop distance for Buy proposals.",
-    )
     target_position_pct: float | None = Field(
         default=None,
         description="Required final target position as percent of portfolio for Buy proposals.",
@@ -189,18 +189,14 @@ class TraderProposal(BaseModel):
         default=None,
         description="Required initial position as percent of portfolio for Buy proposals.",
     )
-    max_portfolio_risk_pct: float | None = Field(
-        default=None,
-        description="Required maximum allowed initial portfolio loss percent for Buy proposals.",
-    )
     position_sizing: str | None = Field(
         default=None,
         description="Optional sizing guidance, e.g. '5% of portfolio'.",
     )
 
     @field_validator(
-        "entry_price", "stop_loss", "price_target", "atr",
-        "target_position_pct", "initial_position_pct", "max_portfolio_risk_pct",
+        "entry_price", "stop_loss", "price_target",
+        "target_position_pct", "initial_position_pct",
         mode="before",
     )
     @classmethod
@@ -213,7 +209,12 @@ class TraderProposal(BaseModel):
         return _reject_calculated_trade_math(value)
 
 
-def render_trader_proposal(proposal: TraderProposal) -> str:
+def render_trader_proposal(
+    proposal: TraderProposal,
+    *,
+    verified_market: dict | None = None,
+    risk_policy: dict | None = None,
+) -> str:
     """Render a TraderProposal to markdown.
 
     The trailing ``FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**`` line is
@@ -224,14 +225,23 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
     if proposal.action is TraderAction.BUY:
         from .trade_plan import validate_long_trade_plan
 
+        if not verified_market or not risk_policy:
+            raise ValueError("trusted market snapshot and server risk policy are required")
+
         metrics = validate_long_trade_plan(
             entry_price=proposal.entry_price,
             stop_loss=proposal.stop_loss,
             price_target=proposal.price_target,
-            atr=proposal.atr,
             target_position_pct=proposal.target_position_pct,
             initial_position_pct=proposal.initial_position_pct,
-            max_portfolio_risk_pct=proposal.max_portfolio_risk_pct,
+            verified_close=verified_market["close"],
+            verified_atr=verified_market["atr"],
+            max_portfolio_risk_pct=risk_policy["max_portfolio_risk_pct"],
+            max_position_pct=risk_policy["max_position_pct"],
+            max_notional_exposure_pct=risk_policy["max_notional_exposure_pct"],
+            available_buying_power_pct=risk_policy["available_buying_power_pct"],
+            allow_new_long_positions=risk_policy["allow_new_long_positions"],
+            max_entry_deviation_pct=risk_policy["max_entry_deviation_pct"],
         )
     else:
         from .trade_plan import reject_numeric_plan_fields
@@ -240,10 +250,8 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
             entry_price=proposal.entry_price,
             stop_loss=proposal.stop_loss,
             price_target=proposal.price_target,
-            atr=proposal.atr,
             target_position_pct=proposal.target_position_pct,
             initial_position_pct=proposal.initial_position_pct,
-            max_portfolio_risk_pct=proposal.max_portfolio_risk_pct,
         )
     parts = [
         f"**Action**: {proposal.action.value}",
@@ -292,6 +300,8 @@ class PortfolioDecision(BaseModel):
     the rating-scale guidance.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     rating: PortfolioRating = Field(
         description=(
             "The final position rating. Exactly one of Buy / Overweight / Hold / "
@@ -323,10 +333,6 @@ class PortfolioDecision(BaseModel):
         default=None,
         description="Required hard stop price for Buy or Overweight decisions.",
     )
-    atr: float | None = Field(
-        default=None,
-        description="Required latest ATR for Buy or Overweight stop validation.",
-    )
     target_position_pct: float | None = Field(
         default=None,
         description="Required final target position percent for Buy or Overweight.",
@@ -335,18 +341,14 @@ class PortfolioDecision(BaseModel):
         default=None,
         description="Required initial position percent for Buy or Overweight.",
     )
-    max_portfolio_risk_pct: float | None = Field(
-        default=None,
-        description="Required maximum allowed initial portfolio risk percent.",
-    )
     time_horizon: str | None = Field(
         default=None,
         description="Optional recommended holding period, e.g. '3-6 months'.",
     )
 
     @field_validator(
-        "price_target", "entry_price", "stop_loss", "atr",
-        "target_position_pct", "initial_position_pct", "max_portfolio_risk_pct",
+        "price_target", "entry_price", "stop_loss",
+        "target_position_pct", "initial_position_pct",
         mode="before",
     )
     @classmethod
@@ -359,7 +361,12 @@ class PortfolioDecision(BaseModel):
         return _reject_calculated_trade_math(value)
 
 
-def render_pm_decision(decision: PortfolioDecision) -> str:
+def render_pm_decision(
+    decision: PortfolioDecision,
+    *,
+    verified_market: dict | None = None,
+    risk_policy: dict | None = None,
+) -> str:
     """Render a PortfolioDecision back to the markdown shape the rest of the system expects.
 
     Memory log, CLI display, and saved report files all read this markdown,
@@ -371,14 +378,23 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     if decision.rating in {PortfolioRating.BUY, PortfolioRating.OVERWEIGHT}:
         from .trade_plan import validate_long_trade_plan
 
+        if not verified_market or not risk_policy:
+            raise ValueError("trusted market snapshot and server risk policy are required")
+
         metrics = validate_long_trade_plan(
             entry_price=decision.entry_price,
             stop_loss=decision.stop_loss,
             price_target=decision.price_target,
-            atr=decision.atr,
             target_position_pct=decision.target_position_pct,
             initial_position_pct=decision.initial_position_pct,
-            max_portfolio_risk_pct=decision.max_portfolio_risk_pct,
+            verified_close=verified_market["close"],
+            verified_atr=verified_market["atr"],
+            max_portfolio_risk_pct=risk_policy["max_portfolio_risk_pct"],
+            max_position_pct=risk_policy["max_position_pct"],
+            max_notional_exposure_pct=risk_policy["max_notional_exposure_pct"],
+            available_buying_power_pct=risk_policy["available_buying_power_pct"],
+            allow_new_long_positions=risk_policy["allow_new_long_positions"],
+            max_entry_deviation_pct=risk_policy["max_entry_deviation_pct"],
         )
     else:
         from .trade_plan import reject_numeric_plan_fields
@@ -387,10 +403,8 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
             entry_price=decision.entry_price,
             stop_loss=decision.stop_loss,
             price_target=decision.price_target,
-            atr=decision.atr,
             target_position_pct=decision.target_position_pct,
             initial_position_pct=decision.initial_position_pct,
-            max_portfolio_risk_pct=decision.max_portfolio_risk_pct,
         )
     parts = [
         f"**Rating**: {decision.rating.value}",
@@ -408,7 +422,13 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
             "",
             f"**Stop Loss**: {decision.stop_loss}",
             "",
-            f"**ATR**: {decision.atr}",
+            f"**Verified Market Date**: {verified_market['market_date']}",
+            "",
+            f"**Verified Close**: {verified_market['close']}",
+            "",
+            f"**Verified ATR**: {verified_market['atr']}",
+            "",
+            f"**Market Data Call ID**: {verified_market['vendor_call_id']}",
             "",
             f"**Reward/Risk (calculated)**: {metrics.reward_risk_ratio:.2f}",
             "",
@@ -420,11 +440,32 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
             "",
             f"**Initial Portfolio Risk (calculated)**: {metrics.initial_portfolio_risk_pct:.4f}%",
             "",
-            f"**Maximum Portfolio Risk**: {decision.max_portfolio_risk_pct:.4f}%",
+            f"**Maximum Portfolio Risk**: {risk_policy['max_portfolio_risk_pct']:.4f}%",
+            "",
+            f"**Maximum Notional Exposure**: {risk_policy['max_notional_exposure_pct']:.2f}%",
         ])
     if decision.time_horizon:
         parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
     return "\n".join(parts)
+
+
+def render_review_required(*, stage: str, reason: str) -> str:
+    """Render an operational no-decision without disguising it as Hold.
+
+    A genuine Hold is an investment conclusion. Validation or structured-output
+    failure is instead a first-class absence of an authorised decision.
+    """
+    return "\n".join([
+        "**Decision Status**: REVIEW_REQUIRED",
+        "",
+        "**Decision**: NO_DECISION",
+        "",
+        f"**Failed Stage**: {stage}",
+        "",
+        f"**Reason**: {reason}",
+        "",
+        "**Trading Authorization**: DENIED",
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +498,8 @@ class SentimentReport(BaseModel):
     rich source-by-source analysis; ``render_sentiment_report`` prepends a
     deterministic header so the saved report stays human-readable.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     overall_band: SentimentBand = Field(
         description=(

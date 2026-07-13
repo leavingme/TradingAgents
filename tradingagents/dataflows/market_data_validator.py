@@ -15,11 +15,24 @@ the shared vendor router.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import asdict, dataclass
 from io import StringIO
 import pandas as pd
 from stockstats import wrap
 
 from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.dataflows.indicator_requirements import INDICATOR_CALCULATION_HISTORY_DAYS
+
+
+@dataclass(frozen=True)
+class VerifiedMarketSnapshot:
+    symbol: str
+    market_date: str
+    close: float
+    atr: float
+    vendor_call_id: str
+    calculation_start: str
+    row_count: int
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
 DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
@@ -81,12 +94,11 @@ def _load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     ``longbridge_mcp, longbridge, westock``). The shared router validates each
     result and controls all fallback behavior.
     """
-    # Pull a 365-day window ending at curr_date for indicator coverage.
-    # 200 SMA needs 200+ trading days ≈ 280 calendar days; 365 days gives
-    # a comfortable buffer for simple averages and convergence room for EMAs.
+    # Use the same deterministic calculation horizon as routed indicators so
+    # trusted ATR/EMA values cannot silently use a different seed window.
     import datetime as _dt
     end = _dt.datetime.strptime(curr_date, "%Y-%m-%d")
-    start = (end - _dt.timedelta(days=365)).strftime("%Y-%m-%d")
+    start = (end - _dt.timedelta(days=INDICATOR_CALCULATION_HISTORY_DAYS)).strftime("%Y-%m-%d")
     raw = route_to_vendor("get_stock_data", symbol, start, curr_date)
     return _parse_vendor_csv(raw)
 
@@ -141,8 +153,9 @@ def build_verified_market_snapshot(
     # `df` keeps the original capitalized OHLCV columns (Open/High/Low/Close/
     # Volume); stockstats `wrap()` lowercases columns and adds indicator
     # columns, so read raw prices from `df` and indicators from `stock_df`.
-    df = _verified_rows(symbol, curr_date)
-    stock_df = wrap(df.copy())
+    _, df, stock_df = build_verified_market_snapshot_data(
+        symbol, curr_date, require_audit=False
+    )
 
     selected = tuple(indicators or DEFAULT_SNAPSHOT_INDICATORS)
     indicator_values: dict[str, str] = {}
@@ -193,3 +206,58 @@ def build_verified_market_snapshot(
         "dates and prices.",
     ]
     return "\n".join(lines)
+
+
+def build_verified_market_snapshot_data(
+    symbol: str,
+    curr_date: str,
+    *,
+    require_audit: bool = True,
+) -> tuple[VerifiedMarketSnapshot, pd.DataFrame, pd.DataFrame]:
+    """Build the structured trusted snapshot used by trade validation."""
+    df = _verified_rows(symbol, curr_date)
+    stock_df = wrap(df.copy())
+    stock_df["atr"]
+    latest = df.iloc[-1]
+    atr = float(stock_df.iloc[-1]["atr"])
+    close = float(latest["Close"])
+    if not pd.notna(atr) or atr <= 0 or close <= 0:
+        raise ValueError("Verified snapshot has invalid Close or ATR")
+
+    from tradingagents.runtime.audit_context import current_run_id
+    from tradingagents.runtime.history import history_store
+
+    run_id = current_run_id()
+    vendor_call_id = ""
+    if run_id:
+        calls = history_store.get_vendor_calls(run_id)
+        selected = [
+            call for call in calls
+            if call.get("method") == "get_stock_data"
+            and call.get("selected")
+            and str(call.get("symbol", "")).upper() == symbol.upper()
+        ]
+        if selected:
+            vendor_call_id = str(selected[-1]["call_id"])
+    if require_audit and not vendor_call_id:
+        raise ValueError("Verified snapshot is not bound to an audited vendor call")
+
+    market_date = pd.Timestamp(latest["Date"]).strftime("%Y-%m-%d")
+    calculation_start = (
+        pd.Timestamp(curr_date) - pd.Timedelta(days=INDICATOR_CALCULATION_HISTORY_DAYS)
+    ).strftime("%Y-%m-%d")
+    snapshot = VerifiedMarketSnapshot(
+        symbol=symbol.upper(),
+        market_date=market_date,
+        close=close,
+        atr=atr,
+        vendor_call_id=vendor_call_id,
+        calculation_start=calculation_start,
+        row_count=len(df),
+    )
+    return snapshot, df, stock_df
+
+
+def verified_snapshot_dict(symbol: str, curr_date: str) -> dict:
+    snapshot, _, _ = build_verified_market_snapshot_data(symbol, curr_date)
+    return asdict(snapshot)

@@ -4,6 +4,7 @@ from langchain_core.tools import tool
 
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.dataflows.social_data import render_social_feed
+from tradingagents.dataflows.untrusted_content import render_untrusted_payload
 
 
 @tool
@@ -14,4 +15,8 @@ def get_social_posts(
     **kwargs,
 ) -> str:
     """Retrieve validated X/Twitter posts for a ticker."""
-    return render_social_feed(route_to_vendor("get_social_posts", ticker, start_date, end_date))
+    return render_untrusted_payload({
+        "social_posts": render_social_feed(
+            route_to_vendor("get_social_posts", ticker, start_date, end_date)
+        )
+    })

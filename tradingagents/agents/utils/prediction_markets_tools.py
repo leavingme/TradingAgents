@@ -3,6 +3,7 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.dataflows.untrusted_content import render_untrusted_payload
 
 
 @tool
@@ -29,4 +30,6 @@ def get_prediction_markets(
     Returns:
         str: A formatted markdown report of matching prediction markets
     """
-    return route_to_vendor("get_prediction_markets", topic, limit)
+    return render_untrusted_payload({
+        "prediction_markets": route_to_vendor("get_prediction_markets", topic, limit)
+    })

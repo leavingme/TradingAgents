@@ -1468,6 +1468,13 @@ def web(
     ),
 ):
     """Start the TradingAgents WebUI backend."""
+    loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+    if host.strip().lower() not in loopback_hosts:
+        if not os.environ.get("TRADINGAGENTS_WEB_AUTH_TOKEN"):
+            raise typer.BadParameter(
+                "Non-loopback WebUI binding requires TRADINGAGENTS_WEB_AUTH_TOKEN."
+            )
+        os.environ["TRADINGAGENTS_WEB_REQUIRE_AUTH"] = "1"
     # The console-script shim makes importing ``cli.main`` robust even when the
     # agent sandbox injects a conflicting PYTHONPATH entry. Uvicorn imports the
     # ASGI app from a string separately, so give it the repository root

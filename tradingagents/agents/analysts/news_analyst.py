@@ -11,6 +11,8 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
     get_prediction_markets,
 )
+from tradingagents.dataflows.evidence_models import validate_report_citations
+from tradingagents.dataflows.untrusted_content import isolate_untrusted_content
 
 
 def create_news_analyst(llm):
@@ -50,7 +52,13 @@ def create_news_analyst(llm):
         report = ""
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            evidence_texts = [
+                getattr(message, "content", "")
+                for message in state["messages"]
+                if getattr(message, "type", "") == "tool"
+            ]
+            report = validate_report_citations(str(result.content), evidence_texts)
+            report = isolate_untrusted_content("news_report", report).content
 
         return {
             "messages": [result],

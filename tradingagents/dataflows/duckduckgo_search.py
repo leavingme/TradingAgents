@@ -11,6 +11,7 @@ from parsel import Selector
 from .config import get_config
 from .errors import NoMarketDataError
 from .symbol_utils import resolve_social_query
+from .evidence_models import NewsFeed, NewsItem
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,9 @@ def ddg_search(query: str, limit: int = 10) -> list[dict]:
                 "summary": snippet.strip() if snippet else "",
                 "publisher": urllib.parse.urlparse(link).netloc or "Web",
                 "link": link,
-                "pub_date": datetime.now(),  # Fallback date
+                # HTML Lite does not expose publication time. Never substitute
+                # retrieval time because that defeats look-ahead validation.
+                "pub_date": None,
             })
 
     return results
@@ -71,7 +74,7 @@ def _format_results(title: str, results: list[dict]) -> str:
     return f"{title}\n\n{news_str}"
 
 
-def get_news_duckduckgo(ticker: str, start_date: str, end_date: str) -> str:
+def get_news_duckduckgo(ticker: str, start_date: str, end_date: str) -> NewsFeed:
     """Retrieve ticker news through DuckDuckGo when it is in the configured chain."""
     limit = get_config()["news_article_limit"]
     query = resolve_social_query(ticker)["news_query"]
@@ -82,9 +85,16 @@ def get_news_duckduckgo(ticker: str, start_date: str, end_date: str) -> str:
             detail=f"DuckDuckGo returned no news results for query {query!r}",
         )
 
-    return _format_results(
-        f"## DuckDuckGo News for query '{query}', from {start_date} to {end_date}:",
-        results,
+    return NewsFeed(
+        items=tuple(NewsItem(
+            source_id="", title=item["title"], publisher=item["publisher"],
+            # DuckDuckGo HTML does not expose a trustworthy publication time.
+            published_at=str(item.get("pub_date") or ""),
+            url=item["link"], summary=item["summary"],
+            symbols=(ticker.upper(),), vendor="duckduckgo",
+        ) for item in results),
+        scope="ticker", requested_start=start_date, requested_end=end_date,
+        query=query,
     )
 
 
@@ -92,7 +102,7 @@ def get_global_news_duckduckgo(
     curr_date: str,
     look_back_days: int | None = None,
     limit: int | None = None,
-) -> str:
+) -> NewsFeed:
     """Retrieve global market news through DuckDuckGo when configured."""
     config = get_config()
     if look_back_days is None:
@@ -113,7 +123,13 @@ def get_global_news_duckduckgo(
             detail=f"DuckDuckGo returned no global news results for query {query!r}",
         )
 
-    return _format_results(
-        f"## DuckDuckGo Global Market News, from {start_date} to {curr_date}:",
-        results,
+    return NewsFeed(
+        items=tuple(NewsItem(
+            source_id="", title=item["title"], publisher=item["publisher"],
+            published_at=str(item.get("pub_date") or ""),
+            url=item["link"], summary=item["summary"],
+            symbols=(), vendor="duckduckgo",
+        ) for item in results),
+        scope="global", requested_start=start_date, requested_end=curr_date,
+        query=query,
     )

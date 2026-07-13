@@ -11,6 +11,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_income_statement,
     get_instrument_context_from_state,
 )
+from tradingagents.dataflows.untrusted_content import isolate_untrusted_content
 
 
 def create_fundamentals_analyst(llm):
@@ -49,7 +50,9 @@ def create_fundamentals_analyst(llm):
         report = ""
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            report = isolate_untrusted_content(
+                "fundamentals_report", result.content
+            ).content
 
         return {
             "messages": [result],

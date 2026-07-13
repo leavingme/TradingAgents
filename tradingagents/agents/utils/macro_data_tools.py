@@ -3,6 +3,8 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.dataflows.untrusted_content import render_untrusted_payload
+from tradingagents.dataflows.evidence_models import render_macro_series
 
 
 @tool
@@ -66,4 +68,10 @@ def get_macro_indicators(
             if indicator.lower() in mapping:
                 indicator_mapped = mapping[indicator.lower()]
 
-    return route_to_vendor("get_macro_indicators", indicator_mapped, curr_date, look_back_days)
+    return render_untrusted_payload({
+        "macro_observations": render_macro_series(
+            route_to_vendor(
+                "get_macro_indicators", indicator_mapped, curr_date, look_back_days
+            )
+        )
+    })

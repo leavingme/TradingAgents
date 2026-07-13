@@ -73,6 +73,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
   selector 切换，不要等最终 `run_completed` 才渲染全部报告。
 - 服务商与底层能力配置页面使用 `#providers` 路由。前端应提供各个底层能力（OHLCV、技术指标、基本面、新闻舆情、宏观数据、预测市场）的优先级重排（生成以逗号分隔的优先级字符串，例如 `"longbridge_mcp, longbridge"`）和开关，且通过 `config_overrides.data_vendors` 将修改后的服务商优先级传递给后端运行。后端 `build_runtime_config` 应当对 `config_overrides` 进行嵌套深度合并以防止局部键覆盖整个 data_vendors 字典。
 - 服务端 API 密钥及证书状态查询（`/api/config/env-status`）已拓展以兼容底层能力数据源（如 FRED, Alpha Vantage, Longbridge MCP 等）的状态展示。前端无需保存或输入 API Key，通过后端环境变量和本地文件存在性推断其可用性。
+- Web API 非 loopback 绑定必须设置 `TRADINGAGENTS_WEB_AUTH_TOKEN`；正式入口会同时启用全 API bearer 认证。浏览器请求不得提交 `results_dir`/`report_dir`，backend URL 只能来自内置服务商端点或服务端 `TRADINGAGENTS_ALLOWED_BACKEND_URLS` 白名单。并发与每分钟启动上限分别由 `TRADINGAGENTS_WEB_MAX_ACTIVE_RUNS`（默认 2）和 `TRADINGAGENTS_WEB_RUN_RATE_LIMIT`（默认 10）控制。
 
 
 ### Web 服务和布局验证
@@ -173,6 +174,8 @@ get_cashflow(symbol, freq=None, curr_date=None)
 - vendor 只能返回其原始接口实际提供并可规范化的数据。禁止用 Web Search、新闻摘要、估算值、静态说明或低信息摘要替代请求的数据类型。
 - 同一 vendor 内部的网络重试可以保留，但必须保持同一数据源、同一能力和同一语义；缓存命中也必须经过与在线响应相同的规范化和校验。
 - 若某个 fallback 来源需要独立配置、可观测性或质量判断，必须注册为独立 vendor，不得隐藏在另一个 vendor 实现内部。
+- 新闻和宏观 vendor 必须返回 `NewsFeed` / `MacroSeries` 结构化领域对象；发布时间、URL、标的关联、观察期、单位与稳定 `source_id` 在 router 层验证后才能渲染给 LLM。DuckDuckGo 等不提供真实发布时间的结果不得用抓取时间冒充发布时间。
+- 新闻、社交和外部工具文本必须使用 `untrusted_data` JSON 数据消息传输，不得插入 system instruction；检测到的中英文指令行和控制令牌必须在进入后续辩论前清除。
 
 ## `_cli_entry.py` shim（调试 CLI 失败前先读）
 

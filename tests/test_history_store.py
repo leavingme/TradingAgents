@@ -24,6 +24,7 @@ def test_history_store_crud(tmp_path: Path):
     assert run["run_id"] == "test_run_1"
     assert run["ticker"] == "AAPL"
     assert run["status"] == "pending"
+    assert run["decision_status"] == "unavailable"
 
     # 2. Test mark_started
     store.mark_started("test_run_1")
@@ -52,6 +53,28 @@ def test_history_store_crud(tmp_path: Path):
     runs = store.list_runs()
     assert len(runs) == 1
     assert runs[0]["run_id"] == "test_run_1"
+
+    with store._conn() as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
+
+
+def test_history_persists_review_required_as_no_decision(tmp_path: Path):
+    store = RunHistoryStore(tmp_path / "review.db")
+    store.create_run(
+        run_id="review-run", ticker="NVDA", analysis_date="2026-07-10",
+        asset_type="stock", selected_analysts=("market",),
+        llm_provider="openai", research_depth=1,
+    )
+    store.add_event("review-run", AnalysisEvent(
+        type="run_completed",
+        run_id="review-run",
+        content={"decision_status": "review_required", "decision": "NO_DECISION"},
+    ))
+    run = store.get_run("review-run")
+    assert run["status"] == "review_required"
+    assert run["decision_status"] == "review_required"
 
 
 def test_analysis_runner_binds_run_id_to_vendor_audit(monkeypatch, tmp_path: Path):

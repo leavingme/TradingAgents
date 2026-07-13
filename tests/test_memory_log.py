@@ -88,6 +88,18 @@ def _make_pm_state(past_context=""):
         "fundamentals_report": "Fundamentals report.",
         "investment_plan": "Research plan.",
         "trader_investment_plan": "Trader plan.",
+        "verified_market_snapshot": {
+            "market_date": "2026-01-10", "close": 200.0, "atr": 7.0,
+            "vendor_call_id": "call-verified",
+        },
+        "trade_risk_policy": {
+            "max_portfolio_risk_pct": 0.8,
+            "max_position_pct": 5.0,
+            "max_notional_exposure_pct": 5.0,
+            "available_buying_power_pct": 100.0,
+            "allow_new_long_positions": True,
+            "max_entry_deviation_pct": 20.0,
+        },
     }
 
 
@@ -712,10 +724,8 @@ class TestPortfolioManagerInjection:
             entry_price=200.0,
             stop_loss=190.0,
             price_target=215.0,
-            atr=7.0,
             target_position_pct=4.0,
             initial_position_pct=1.5,
-            max_portfolio_risk_pct=0.8,
             time_horizon="3-6 months",
         )
         llm = _structured_pm_llm(captured, decision)
@@ -738,7 +748,8 @@ class TestPortfolioManagerInjection:
         llm.invoke.return_value = MagicMock(content=plain_response)
         pm_node = create_portfolio_manager(llm)
         result = pm_node(_make_pm_state())
-        assert "**Rating**: Hold" in result["final_trade_decision"]
+        assert "**Decision**: NO_DECISION" in result["final_trade_decision"]
+        assert "**Rating**: Hold" not in result["final_trade_decision"]
         assert "REVIEW_REQUIRED" in result["final_trade_decision"]
         llm.invoke.assert_not_called()
 
@@ -753,17 +764,16 @@ class TestPortfolioManagerInjection:
                 entry_price=200,
                 stop_loss=190,
                 price_target=230,
-                atr=7,
                 target_position_pct=4,
                 initial_position_pct=1.5,
-                max_portfolio_risk_pct=0.8,
             ),
         )
         pm_node = create_portfolio_manager(llm)
         state = _make_pm_state()
         state["trader_investment_plan"] = "HOLD REVIEW_REQUIRED"
         result = pm_node(state)
-        assert "**Rating**: Hold" in result["final_trade_decision"]
+        assert "**Decision**: NO_DECISION" in result["final_trade_decision"]
+        assert "**Rating**: Hold" not in result["final_trade_decision"]
         assert "REVIEW_REQUIRED" in result["final_trade_decision"]
         llm.with_structured_output.return_value.invoke.assert_not_called()
 
@@ -853,12 +863,13 @@ class TestLegacyRemoval:
         with pytest.raises(TypeError):
             create_portfolio_manager(mock_llm, memory=MagicMock())
 
-    def test_full_pipeline_no_regression(self, tmp_path):
+    def test_full_pipeline_no_regression(self, tmp_path, monkeypatch):
         """propagate() completes and stores the decision after the redesign."""
         import functools
 
         fake_state = {
             "final_trade_decision": "Rating: Buy\nBuy NVDA.",
+            "decision_status": "validated",
             "company_of_interest": "NVDA",
             "trade_date": "2026-01-10",
             "market_report": "",
@@ -882,7 +893,24 @@ class TestLegacyRemoval:
         mock_graph.memory_log = TradingMemoryLog({"memory_log_path": str(tmp_path / "mem.md")})
         mock_graph.log_states_dict = {}
         mock_graph.debug = False
-        mock_graph.config = {"results_dir": str(tmp_path)}
+        mock_graph.config = {
+            "results_dir": str(tmp_path),
+            "trade_risk_policy": {
+                "max_portfolio_risk_pct": 0.8,
+                "max_position_pct": 5.0,
+                "max_notional_exposure_pct": 5.0,
+                "available_buying_power_pct": 100.0,
+                "allow_new_long_positions": True,
+                "max_entry_deviation_pct": 20.0,
+            },
+        }
+        monkeypatch.setattr(
+            "tradingagents.dataflows.market_data_validator.verified_snapshot_dict",
+            lambda *args: {
+                "market_date": "2026-01-09", "close": 100.0, "atr": 5.0,
+                "vendor_call_id": "test-call",
+            },
+        )
         mock_graph.graph.invoke.return_value = fake_state
         mock_graph.propagator.create_initial_state.return_value = fake_state
         mock_graph.propagator.get_graph_args.return_value = {}

@@ -37,6 +37,7 @@ class RunRecord:
     finished_at: str | None = None
     report_path: str | None = None
     error: str | None = None
+    decision_status: str = "unavailable"
     events: list[AnalysisEvent] = field(default_factory=list)
     event_queue: queue.Queue[AnalysisEvent | None] = field(
         default_factory=queue.Queue
@@ -56,6 +57,7 @@ class RunRecord:
             "finished_at": self.finished_at,
             "report_path": self.report_path,
             "error": self.error,
+            "decision_status": self.decision_status,
             "event_count": len(self.events),
         }
 
@@ -117,6 +119,7 @@ class TaskStore:
             finished_at=run_dict["finished_at"],
             report_path=run_dict["report_path"],
             error=run_dict["error"],
+            decision_status=run_dict.get("decision_status", "unavailable"),
             events=events,
             event_queue=q,
         )
@@ -188,6 +191,11 @@ class TaskStore:
             # Update in-memory state derived from event type
             if event.type == "run_completed" and isinstance(event.content, dict):
                 record.report_path = event.content.get("report_path")
+                record.decision_status = event.content.get(
+                    "decision_status", "unavailable"
+                )
+                if record.decision_status in {"review_required", "unavailable"}:
+                    record.status = record.decision_status
             if event.type == "error" and record.status != "cancelled":
                 record.status = "failed"
                 if isinstance(event.content, dict):
@@ -219,7 +227,9 @@ class TaskStore:
                 record = self.get(run_id)
             if record is None:
                 return False
-            if record.status in ("completed", "failed", "cancelled"):
+            if record.status in (
+                "completed", "review_required", "unavailable", "failed", "cancelled"
+            ):
                 return True
             record.cancel_requested = True
             record.status = "cancelled"

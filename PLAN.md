@@ -429,6 +429,10 @@ Known differences:
 
 The following remain P1 rather than P0: duplicate report-section events, excessive report/token size, missing per-LLM-call detail, Longbridge Pine lag, small cross-engine SMA/Bollinger differences, and UI/history performance.
 
+### P0 implementation status (2026-07-13)
+
+All seven items above are implemented. The acceptance suite covers trusted snapshot call binding and calculation horizon, server-owned account/risk limits, no-decision persistence and UI semantics, prompt-injection redaction and role separation, Web allowlist/auth/rate/concurrency boundaries, structured news/macro evidence with source-ID citation gates, run-isolated checkpoints, and WAL/busy-timeout/foreign-key storage settings. Production examples now use `tradingagents.runtime`; the compatibility `propagate()` path creates its own audited run context.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

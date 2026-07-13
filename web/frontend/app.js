@@ -157,6 +157,7 @@ const translations = {
     failedToStart: 'Failed to start',
     cancelRequested: 'Cancel requested',
     runCompleted: 'Run completed',
+    reviewRequired: 'No valid decision — review required',
     runCancelled: 'Run cancelled',
     runFailed: 'Run failed',
     reportUnavailable: 'Report is not available yet.',
@@ -164,6 +165,8 @@ const translations = {
     statusPending: 'pending',
     statusRunning: 'running',
     statusCompleted: 'completed',
+    statusReviewRequired: 'review required (no valid decision)',
+    statusUnavailable: 'decision unavailable',
     statusFailed: 'failed',
     statusCancelled: 'cancelled',
     eventRunStarted: 'run started',
@@ -363,6 +366,7 @@ const translations = {
     failedToStart: '启动失败',
     cancelRequested: '已请求取消',
     runCompleted: '运行完成',
+    reviewRequired: '无有效决策，需要人工复核',
     runCancelled: '运行已取消',
     runFailed: '运行失败',
     reportUnavailable: '报告尚不可用。',
@@ -370,6 +374,8 @@ const translations = {
     statusPending: '等待中',
     statusRunning: '运行中',
     statusCompleted: '已完成',
+    statusReviewRequired: '需要复核（无有效决策）',
+    statusUnavailable: '决策不可用',
     statusFailed: '失败',
     statusCancelled: '已取消',
     eventRunStarted: '运行开始',
@@ -833,6 +839,8 @@ function formatStatus(status) {
     pending: 'statusPending',
     running: 'statusRunning',
     completed: 'statusCompleted',
+    review_required: 'statusReviewRequired',
+    unavailable: 'statusUnavailable',
     failed: 'statusFailed',
     cancelled: 'statusCancelled',
     ready: 'statusReady',
@@ -1020,10 +1028,19 @@ function handleRuntimeEvent(type, event) {
   }
 
   if (type === 'run_completed') {
-    setStatus('completed', 'done');
+    const decisionStatus = event.content?.decision_status ?? 'unavailable';
+    const reviewRequired = decisionStatus !== 'validated';
+    setStatus(
+      reviewRequired ? decisionStatus : 'completed',
+      reviewRequired ? 'error' : 'done',
+    );
     loadReport.disabled = false;
     cancelButton.disabled = true;
-    runtimeLog.append(type, event.agent, event.content?.decision ?? t('runCompleted'));
+    runtimeLog.append(
+      type,
+      event.agent,
+      reviewRequired ? t('reviewRequired') : (event.content?.decision ?? t('runCompleted')),
+    );
     reportView.load(currentRunId);
     runHistory.refresh();
     loadEnvStatus();
@@ -1153,6 +1170,6 @@ function setStatus(text, state) {
 function statusClass(status) {
   if (status === 'completed') return 'done';
   if (status === 'running')   return 'running';
-  if (status === 'failed' || status === 'cancelled') return 'error';
+  if (status === 'failed' || status === 'cancelled' || status === 'review_required' || status === 'unavailable') return 'error';
   return 'ready';
 }

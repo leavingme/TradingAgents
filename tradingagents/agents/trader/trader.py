@@ -6,7 +6,11 @@ import functools
 
 from langchain_core.messages import AIMessage
 
-from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
+from tradingagents.agents.schemas import (
+    TraderProposal,
+    render_review_required,
+    render_trader_proposal,
+)
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
@@ -24,6 +28,8 @@ def create_trader(llm):
         company_name = state["company_of_interest"]
         instrument_context = get_instrument_context_from_state(state)
         investment_plan = state["investment_plan"]
+        verified_market = state["verified_market_snapshot"]
+        risk_policy = state["trade_risk_policy"]
 
         messages = [
             {
@@ -51,18 +57,19 @@ def create_trader(llm):
         ]
 
         def safe_trader_plan(exc: Exception) -> str:
-            return render_trader_proposal(TraderProposal(
-                action="Hold",
-                reasoning=(
-                    "REVIEW_REQUIRED: executable trade-plan validation failed; "
-                    f"no transaction is authorized ({type(exc).__name__}: {exc})."
-                ),
-            ))
+            return render_review_required(
+                stage="Trader",
+                reason=f"Validation failure: {type(exc).__name__}: {exc}",
+            )
 
         trader_plan = invoke_structured_or_safe(
             structured_llm,
             messages,
-            render_trader_proposal,
+            lambda proposal: render_trader_proposal(
+                proposal,
+                verified_market=verified_market,
+                risk_policy=risk_policy,
+            ),
             safe_trader_plan,
             "Trader",
         )

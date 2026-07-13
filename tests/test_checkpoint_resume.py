@@ -47,12 +47,13 @@ class TestCheckpointResume(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp()
         self.ticker = "TEST"
         self.date = "2026-04-20"
+        self.run_id = "run-original"
 
     def test_crash_and_resume(self):
         """Crash at 'trader' node, then resume from checkpoint."""
         global _should_crash
         builder = _build_graph()
-        tid = thread_id(self.ticker, self.date)
+        tid = thread_id(self.ticker, self.date, self.run_id)
         cfg = {"configurable": {"thread_id": tid}}
 
         # Run 1: crash at trader node
@@ -63,8 +64,8 @@ class TestCheckpointResume(unittest.TestCase):
                 graph.invoke({"count": 0}, config=cfg)
 
         # Checkpoint should exist at step 1 (analyst completed)
-        self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date))
-        step = checkpoint_step(self.tmpdir, self.ticker, self.date)
+        self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date, self.run_id))
+        step = checkpoint_step(self.tmpdir, self.ticker, self.date, self.run_id)
         self.assertEqual(step, 1)
 
         # Run 2: resume — trader succeeds this time
@@ -80,7 +81,7 @@ class TestCheckpointResume(unittest.TestCase):
         """After clearing, the graph starts from scratch."""
         global _should_crash
         builder = _build_graph()
-        tid = thread_id(self.ticker, self.date)
+        tid = thread_id(self.ticker, self.date, self.run_id)
         cfg = {"configurable": {"thread_id": tid}}
 
         # Create a checkpoint by crashing
@@ -90,11 +91,11 @@ class TestCheckpointResume(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 graph.invoke({"count": 0}, config=cfg)
 
-        self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date))
+        self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date, self.run_id))
 
         # Clear it
-        clear_checkpoint(self.tmpdir, self.ticker, self.date)
-        self.assertFalse(has_checkpoint(self.tmpdir, self.ticker, self.date))
+        clear_checkpoint(self.tmpdir, self.ticker, self.date, self.run_id)
+        self.assertFalse(has_checkpoint(self.tmpdir, self.ticker, self.date, self.run_id))
 
         # Fresh run succeeds from scratch
         _should_crash = False
@@ -113,20 +114,20 @@ class TestCheckpointResume(unittest.TestCase):
 
         # Run with date1 — crash to leave a checkpoint
         _should_crash = True
-        tid1 = thread_id(self.ticker, self.date)
+        tid1 = thread_id(self.ticker, self.date, self.run_id)
         with get_checkpointer(self.tmpdir, self.ticker) as saver:
             graph = builder.compile(checkpointer=saver)
             with self.assertRaises(RuntimeError):
                 graph.invoke({"count": 0}, config={"configurable": {"thread_id": tid1}})
 
-        self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date))
+        self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date, self.run_id))
 
         # date2 should have no checkpoint
-        self.assertFalse(has_checkpoint(self.tmpdir, self.ticker, date2))
+        self.assertFalse(has_checkpoint(self.tmpdir, self.ticker, date2, self.run_id))
 
         # Run with date2 — should start fresh and succeed
         _should_crash = False
-        tid2 = thread_id(self.ticker, date2)
+        tid2 = thread_id(self.ticker, date2, self.run_id)
         self.assertNotEqual(tid1, tid2)
 
         with get_checkpointer(self.tmpdir, self.ticker) as saver:
@@ -137,7 +138,14 @@ class TestCheckpointResume(unittest.TestCase):
         self.assertEqual(result["count"], 11)
 
         # Original date checkpoint still exists (untouched)
-        self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date))
+        self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date, self.run_id))
+
+    def test_same_ticker_and_date_different_run_is_isolated(self):
+        self.assertNotEqual(
+            thread_id(self.ticker, self.date, "run-a"),
+            thread_id(self.ticker, self.date, "run-b"),
+        )
+        self.assertFalse(has_checkpoint(self.tmpdir, self.ticker, self.date, "run-b"))
 
 
 if __name__ == "__main__":

@@ -28,4 +28,6 @@ class SignalProcessor:
 
     def process_signal(self, full_signal: str) -> str:
         """Return one of Buy / Overweight / Hold / Underweight / Sell."""
+        if "REVIEW_REQUIRED" in full_signal or "DECISION_UNAVAILABLE" in full_signal:
+            return "NO_DECISION"
         return parse_rating(full_signal)

@@ -10,6 +10,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
     get_verified_market_snapshot,
 )
+from tradingagents.dataflows.untrusted_content import isolate_untrusted_content
 
 
 def create_market_analyst(llm):
@@ -48,7 +49,9 @@ def create_market_analyst(llm):
         report = ""
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            report = isolate_untrusted_content(
+                "market_report", result.content
+            ).content
 
         return {
             "messages": [result],

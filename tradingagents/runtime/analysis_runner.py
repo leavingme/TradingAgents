@@ -79,6 +79,13 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
                 status = "failed"
             elif last_event and last_event.type == "run_cancelled":
                 status = "cancelled"
+            elif (
+                last_event
+                and last_event.type == "run_completed"
+                and isinstance(last_event.content, dict)
+                and last_event.content.get("decision_status") in {"review_required", "unavailable"}
+            ):
+                status = last_event.content["decision_status"]
             history_store.mark_finished(request.run_id, status)
         reset_run_id(audit_token)
 
@@ -130,11 +137,18 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
             asset_type=request.asset_type,
             instrument_context=instrument_context,
         )
+        from tradingagents.dataflows.market_data_validator import verified_snapshot_dict
+
+        init_agent_state["verified_market_snapshot"] = verified_snapshot_dict(
+            request.ticker, request.analysis_date
+        )
+        init_agent_state["trade_risk_policy"] = dict(config["trade_risk_policy"])
         args = graph.propagator.get_graph_args(callbacks=callbacks)
         if config.get("checkpoint_enabled"):
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = thread_id(
                 request.ticker,
                 str(request.analysis_date),
+                request.run_id,
             )
 
         initial_analysts = {ANALYST_AGENT_NAMES[key] for key in selected_analysts}
@@ -179,7 +193,10 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
 
         graph.curr_state = final_state
         graph._log_state(request.analysis_date, final_state)
-        if final_state.get("final_trade_decision"):
+        if (
+            final_state.get("final_trade_decision")
+            and final_state.get("decision_status") == "validated"
+        ):
             graph.memory_log.store_decision(
                 ticker=request.ticker,
                 trade_date=request.analysis_date,
@@ -206,6 +223,7 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
             content={
                 "final_state": final_state,
                 "decision": final_state.get("final_trade_decision"),
+                "decision_status": final_state.get("decision_status", "unavailable"),
                 "report_path": str(report_path),
             },
         )
@@ -232,10 +250,13 @@ def run_analysis_once(request: AnalysisRequest) -> AnalysisResult:
 
     completed = next((event for event in reversed(events) if event.type == "run_completed"), None)
     content = completed.content if completed and isinstance(completed.content, dict) else {}
+    decision_status = content.get("decision_status", "unavailable")
+    decision = content.get("decision") if decision_status == "validated" else None
     return AnalysisResult(
         run_id=request.run_id,
         final_state=content.get("final_state") or {"final_trade_decision": content.get("decision")},
-        decision=content.get("decision"),
+        decision=decision,
+        decision_status=decision_status,
         report_path=Path(content["report_path"]) if content.get("report_path") else None,
         events=events,
     )

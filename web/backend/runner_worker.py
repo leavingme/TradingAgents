@@ -28,8 +28,6 @@ def to_analysis_request(
         backend_url=request.backend_url,
         output_language=request.output_language,
         checkpoint_enabled=request.checkpoint_enabled,
-        results_dir=request.results_dir,
-        report_dir=request.report_dir,
         google_thinking_level=request.google_thinking_level,
         openai_reasoning_effort=request.openai_reasoning_effort,
         anthropic_effort=request.anthropic_effort,
@@ -73,6 +71,12 @@ def _run(run_id: str, request: RunCreateRequest, task_store: TaskStore) -> None:
             if event.type == "error":
                 final_status = "failed"
                 break
+            if (
+                event.type == "run_completed"
+                and isinstance(event.content, dict)
+                and event.content.get("decision_status") in {"review_required", "unavailable"}
+            ):
+                final_status = event.content["decision_status"]
     except Exception as exc:
         final_status = "failed"
         task_store.add_event(

@@ -79,5 +79,6 @@ class AnalysisResult:
     run_id: str
     final_state: dict[str, Any]
     decision: Any
+    decision_status: Literal["validated", "review_required", "unavailable"]
     report_path: Path | None
     events: tuple[AnalysisEvent, ...]

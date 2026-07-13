@@ -105,6 +105,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
+    # Server-owned executable risk policy. These values are never accepted
+    # from LLM structured output or untrusted per-run config overrides.
+    "trade_risk_policy": {
+        "max_portfolio_risk_pct": 0.8,
+        "max_position_pct": 5.0,
+        "max_notional_exposure_pct": 5.0,
+        "available_buying_power_pct": 100.0,
+        "allow_new_long_positions": True,
+        "max_entry_deviation_pct": 20.0,
+    },
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.

@@ -28,6 +28,19 @@ from tradingagents.agents.schemas import (
 )
 from tradingagents.agents.trader.trader import create_trader
 
+VERIFIED = {
+    "market_date": "2026-07-10", "close": 190.0, "atr": 6.0,
+    "vendor_call_id": "call-verified",
+}
+POLICY = {
+    "max_portfolio_risk_pct": 1.0,
+    "max_position_pct": 6.0,
+    "max_notional_exposure_pct": 6.0,
+    "available_buying_power_pct": 100.0,
+    "allow_new_long_positions": True,
+    "max_entry_deviation_pct": 20.0,
+}
+
 # ---------------------------------------------------------------------------
 # Render functions
 # ---------------------------------------------------------------------------
@@ -51,13 +64,11 @@ class TestRenderTraderProposal:
             entry_price=189.5,
             stop_loss=178.0,
             price_target=215.0,
-            atr=6.0,
             target_position_pct=6.0,
             initial_position_pct=3.0,
-            max_portfolio_risk_pct=1.0,
             position_sizing="6% of portfolio",
         )
-        md = render_trader_proposal(p)
+        md = render_trader_proposal(p, verified_market=VERIFIED, risk_policy=POLICY)
         assert "**Action**: Buy" in md
         assert "**Entry Price**: 189.5" in md
         assert "**Stop Loss**: 178.0" in md
@@ -138,6 +149,8 @@ def _make_trader_state():
     return {
         "company_of_interest": "NVDA",
         "investment_plan": "**Recommendation**: Buy\n**Rationale**: ...\n**Strategic Actions**: ...",
+        "verified_market_snapshot": VERIFIED,
+        "trade_risk_policy": POLICY,
     }
 
 
@@ -187,10 +200,8 @@ class TestTraderAgent:
             entry_price=189.5,
             stop_loss=178.0,
             price_target=215.0,
-            atr=6.0,
             target_position_pct=6.0,
             initial_position_pct=3.0,
-            max_portfolio_risk_pct=1.0,
             position_sizing="6% of portfolio",
         )
         llm = _structured_trader_llm(captured, proposal)
@@ -222,7 +233,8 @@ class TestTraderAgent:
         llm.invoke.return_value = MagicMock(content=plain_response)
         trader = create_trader(llm)
         result = trader(_make_trader_state())
-        assert "**Action**: Hold" in result["trader_investment_plan"]
+        assert "**Decision**: NO_DECISION" in result["trader_investment_plan"]
+        assert "**Action**: Hold" not in result["trader_investment_plan"]
         assert "REVIEW_REQUIRED" in result["trader_investment_plan"]
         llm.invoke.assert_not_called()
 
@@ -361,6 +373,21 @@ def _make_sentiment_state():
     }
 
 
+@pytest.fixture
+def mock_sentiment_sources(monkeypatch):
+    import types
+    import tradingagents.agents.analysts.sentiment_analyst as module
+
+    monkeypatch.setattr(
+        module, "get_news", types.SimpleNamespace(func=lambda *args: "validated news")
+    )
+    monkeypatch.setattr(
+        module, "get_social_posts", types.SimpleNamespace(func=lambda *args: "validated social")
+    )
+    monkeypatch.setattr(module, "fetch_stocktwits_messages", lambda *args, **kwargs: "posts")
+    monkeypatch.setattr(module, "fetch_reddit_posts", lambda *args, **kwargs: "posts")
+
+
 def _structured_sentiment_llm(captured: dict, report: SentimentReport | None = None):
     """MagicMock LLM whose structured binding captures the prompt and returns
     a real SentimentReport so render_sentiment_report works."""
@@ -380,6 +407,7 @@ def _structured_sentiment_llm(captured: dict, report: SentimentReport | None = N
 
 
 @pytest.mark.unit
+@pytest.mark.usefixtures("mock_sentiment_sources")
 class TestSentimentAnalystAgent:
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}

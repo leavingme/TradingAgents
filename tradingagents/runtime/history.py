@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from .events import AnalysisEvent
+from tradingagents.sqlite_utils import configure_wal, connect_sqlite
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -42,13 +43,12 @@ class RunHistoryStore:
         self._init_db()
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return connect_sqlite(self._db_path)
 
     def _init_db(self) -> None:
         with self._lock:
             with self._conn() as conn:
+                configure_wal(conn)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS runs (
                         run_id            TEXT PRIMARY KEY,
@@ -64,6 +64,7 @@ class RunHistoryStore:
                         finished_at       TEXT,
                         report_path       TEXT,
                         error             TEXT,
+                        decision_status   TEXT NOT NULL DEFAULT 'unavailable',
                         event_count       INTEGER NOT NULL DEFAULT 0
                     )
                 """)
@@ -113,6 +114,14 @@ class RunHistoryStore:
                 existing_columns = {
                     row["name"] for row in conn.execute("PRAGMA table_info(run_vendor_calls)")
                 }
+                run_columns = {
+                    row["name"] for row in conn.execute("PRAGMA table_info(runs)")
+                }
+                if "decision_status" not in run_columns:
+                    conn.execute(
+                        "ALTER TABLE runs ADD COLUMN decision_status "
+                        "TEXT NOT NULL DEFAULT 'unavailable'"
+                    )
                 for column in (
                     "symbol TEXT",
                     "agent TEXT",
@@ -210,8 +219,12 @@ class RunHistoryStore:
                 status = "running"
                 report_path = None
                 error = None
+                decision_status = None
                 if event.type == "run_completed" and isinstance(event.content, dict):
-                    status = "completed"
+                    decision_status = event.content.get("decision_status", "unavailable")
+                    status = (
+                        "completed" if decision_status == "validated" else decision_status
+                    )
                     report_path = event.content.get("report_path")
                 elif event.type == "error":
                     status = "failed"
@@ -224,10 +237,11 @@ class RunHistoryStore:
                     SET event_count=?,
                         status=CASE WHEN ? = 'running' THEN status ELSE ? END,
                         report_path=COALESCE(?, report_path),
-                        error=COALESCE(?, error)
+                        error=COALESCE(?, error),
+                        decision_status=COALESCE(?, decision_status)
                     WHERE run_id=?
                     """,
-                    (cnt, status, status, report_path, error, run_id),
+                    (cnt, status, status, report_path, error, decision_status, run_id),
                 )
 
     def mark_finished(self, run_id: str, status: str, finished_at: str | None = None) -> None:
@@ -322,7 +336,9 @@ class RunHistoryStore:
                 row = conn.execute("SELECT status FROM runs WHERE run_id=?", (run_id,)).fetchone()
                 if not row:
                     return False
-                if row["status"] in ("completed", "failed", "cancelled"):
+                if row["status"] in (
+                    "completed", "review_required", "unavailable", "failed", "cancelled"
+                ):
                     return True
                 conn.execute(
                     "UPDATE runs SET status='cancelled' WHERE run_id=?", (run_id,)

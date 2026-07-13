@@ -43,6 +43,13 @@ def build_runtime_config(request: AnalysisRequest) -> dict[str, Any]:
         config["anthropic_effort"] = request.anthropic_effort
 
     # Merge config_overrides (1-level deep for dict-valued keys like data_vendors)
+    protected_keys = {"trade_risk_policy"}
+    forbidden = protected_keys.intersection(request.config_overrides)
+    if forbidden:
+        raise ValueError(
+            "Per-run overrides cannot modify server-owned settings: "
+            + ", ".join(sorted(forbidden))
+        )
     for key, val in request.config_overrides.items():
         if isinstance(val, dict) and isinstance(config.get(key), dict):
             config[key] = config[key].copy()

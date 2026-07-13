@@ -65,6 +65,7 @@ class TradingAgentsGraph:
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+        self.selected_analysts = tuple(selected_analysts)
 
         # Update the interface's config
         set_config(self.config)
@@ -332,7 +333,9 @@ class TradingAgentsGraph:
         identity = resolve_instrument_identity(ticker)
         return build_instrument_context(ticker, asset_type, identity)
 
-    def propagate(self, company_name, trade_date, asset_type: str = "stock"):
+    def propagate(
+        self, company_name, trade_date, asset_type: str = "stock", *, run_id: str | None = None
+    ):
         """Run the trading agents graph for a company on a specific date.
 
         ``asset_type`` selects between the stock pipeline (default) and the
@@ -342,36 +345,100 @@ class TradingAgentsGraph:
         a per-ticker SqliteSaver so a crashed run can resume from the last
         successful node on a subsequent invocation with the same ticker+date.
         """
+        from uuid import uuid4
+
+        from tradingagents.runtime.audit_context import bind_run_id, reset_run_id
+        from tradingagents.runtime.events import AnalysisEvent
+        from tradingagents.runtime.history import history_store
+
         self.ticker = company_name
-
-        # Resolve any pending memory-log entries for this ticker before the pipeline runs.
-        self._resolve_pending_entries(company_name)
-
-        # Recompile with a checkpointer if the user opted in.
-        if self.config.get("checkpoint_enabled"):
-            self._checkpointer_ctx = get_checkpointer(
-                self.config["data_cache_dir"], company_name
+        if self.config.get("checkpoint_enabled") and not run_id:
+            raise ValueError(
+                "checkpoint resume requires explicit run_id; use the original run ID"
             )
-            saver = self._checkpointer_ctx.__enter__()
-            self.graph = self.workflow.compile(checkpointer=saver)
+        run_id = run_id or f"{safe_ticker_component(company_name)}-{uuid4().hex[:12]}"
 
-            step = checkpoint_step(
-                self.config["data_cache_dir"], company_name, str(trade_date)
-            )
-            if step is not None:
-                logger.info(
-                    "Resuming from step %d for %s on %s", step, company_name, trade_date
-                )
-            else:
-                logger.info("Starting fresh for %s on %s", company_name, trade_date)
+        history_store.create_run(
+            run_id=run_id,
+            ticker=company_name,
+            analysis_date=str(trade_date),
+            asset_type=asset_type,
+            selected_analysts=tuple(self.selected_analysts),
+            llm_provider=self.config.get("llm_provider"),
+            research_depth=self.config.get("max_debate_rounds"),
+        )
+        history_store.mark_started(run_id)
+        audit_token = bind_run_id(run_id)
+
+        def record_failure(exc: Exception) -> None:
+            history_store.add_event(run_id, AnalysisEvent(
+                type="error",
+                run_id=run_id,
+                content={"error": str(exc), "error_type": type(exc).__name__},
+            ))
+            history_store.mark_finished(run_id, "failed")
 
         try:
-            return self._run_graph(company_name, trade_date, asset_type=asset_type)
+            # Resolve pending outcomes only after the audited run context exists.
+            self._resolve_pending_entries(company_name)
+
+            if self.config.get("checkpoint_enabled"):
+                self._checkpointer_ctx = get_checkpointer(
+                    self.config["data_cache_dir"], company_name
+                )
+                saver = self._checkpointer_ctx.__enter__()
+                self.graph = self.workflow.compile(checkpointer=saver)
+
+                step = checkpoint_step(
+                    self.config["data_cache_dir"], company_name, str(trade_date), run_id
+                )
+                if step is not None:
+                    logger.info(
+                        "Resuming from step %d for %s on %s",
+                        step, company_name, trade_date,
+                    )
+                else:
+                    logger.info("Starting fresh for %s on %s", company_name, trade_date)
+        except Exception as exc:
+            record_failure(exc)
+            if self._checkpointer_ctx is not None:
+                self._checkpointer_ctx.__exit__(None, None, None)
+                self._checkpointer_ctx = None
+                self.graph = self.workflow.compile()
+            reset_run_id(audit_token)
+            raise
+
+        try:
+            result = self._run_graph(
+                company_name, trade_date, asset_type=asset_type, run_id=run_id
+            )
+            final_state = result[0]
+            decision_status = final_state.get("decision_status", "unavailable")
+            history_store.add_event(run_id, AnalysisEvent(
+                type="run_completed",
+                run_id=run_id,
+                content={
+                    "decision": (
+                        final_state.get("final_trade_decision")
+                        if decision_status == "validated" else None
+                    ),
+                    "decision_status": decision_status,
+                },
+            ))
+            history_store.mark_finished(
+                run_id,
+                "completed" if decision_status == "validated" else decision_status,
+            )
+            return result
+        except Exception as exc:
+            record_failure(exc)
+            raise
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
+            reset_run_id(audit_token)
 
     def save_reports(self, final_state, ticker, save_path=None) -> Path:
         """Write the markdown report tree for a completed run, like the CLI does.
@@ -388,7 +455,9 @@ class TradingAgentsGraph:
             )
         return write_report_tree(final_state, ticker, save_path)
 
-    def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
+    def _run_graph(
+        self, company_name, trade_date, asset_type: str = "stock", *, run_id: str | None = None
+    ):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
@@ -401,11 +470,17 @@ class TradingAgentsGraph:
             past_context=past_context,
             instrument_context=instrument_context,
         )
+        from tradingagents.dataflows.market_data_validator import verified_snapshot_dict
+
+        init_agent_state["verified_market_snapshot"] = verified_snapshot_dict(
+            company_name, str(trade_date)
+        )
+        init_agent_state["trade_risk_policy"] = dict(self.config["trade_risk_policy"])
         args = self.propagator.get_graph_args()
 
         # Inject thread_id so same ticker+date resumes, different date starts fresh.
         if self.config.get("checkpoint_enabled"):
-            tid = thread_id(company_name, str(trade_date))
+            tid = thread_id(company_name, str(trade_date), run_id)
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
         if self.debug:
@@ -437,16 +512,17 @@ class TradingAgentsGraph:
         self._log_state(trade_date, final_state)
 
         # Store decision for deferred reflection on the next same-ticker run.
-        self.memory_log.store_decision(
-            ticker=company_name,
-            trade_date=trade_date,
-            final_trade_decision=final_state["final_trade_decision"],
-        )
+        if final_state.get("decision_status") == "validated":
+            self.memory_log.store_decision(
+                ticker=company_name,
+                trade_date=trade_date,
+                final_trade_decision=final_state["final_trade_decision"],
+            )
 
         # Clear checkpoint on successful completion to avoid stale state.
         if self.config.get("checkpoint_enabled"):
             clear_checkpoint(
-                self.config["data_cache_dir"], company_name, str(trade_date)
+                self.config["data_cache_dir"], company_name, str(trade_date), run_id
             )
 
         return final_state, self.process_signal(final_state["final_trade_decision"])

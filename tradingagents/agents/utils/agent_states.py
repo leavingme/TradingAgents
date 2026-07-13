@@ -49,6 +49,8 @@ class AgentState(MessagesState):
     asset_type: Annotated[str, "Asset type under analysis such as stock or crypto"]
     instrument_context: Annotated[str, "Deterministic ticker identity resolved at run start"]
     trade_date: Annotated[str, "What date we are trading at"]
+    verified_market_snapshot: Annotated[dict, "Server-generated trusted market inputs"]
+    trade_risk_policy: Annotated[dict, "Server-owned executable risk limits"]
 
     sender: Annotated[str, "Agent that sent this message"]
 
@@ -73,4 +75,5 @@ class AgentState(MessagesState):
         RiskDebateState, "Current state of the debate on evaluating risk"
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
+    decision_status: Annotated[str, "validated, review_required, or unavailable"]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]

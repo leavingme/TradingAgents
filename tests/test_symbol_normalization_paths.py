@@ -31,14 +31,20 @@ def test_identity_lookup_normalizes_symbol(monkeypatch):
     assert identity.get("company_name") == "Gold Futures"
 
 
-def test_fetch_returns_normalizes_symbol(monkeypatch):
+def test_fetch_returns_normalizes_symbol(monkeypatch, tmp_path):
+    from tradingagents.dataflows import config as config_module
+    config = dict(config_module.get_config())
+    config["data_cache_dir"] = str(tmp_path)
+    monkeypatch.setattr(config_module, "_config", config)
     queried = []
     monkeypatch.setattr("tradingagents.dataflows.symbol_utils.is_westock_available", lambda: True)
     monkeypatch.setattr(
         "tradingagents.dataflows.symbol_utils.run_westock",
         lambda args, raw=True: queried.append(args[1]) or json.dumps([
-            {"date": f"2025-01-{day:02d}", "open": 100, "high": 100, "low": 100, "last": 100 + day, "volume": 1}
-            for day in range(2, 9)
+            {"date": date, "open": 100, "high": 120, "low": 99, "last": 100 + i, "volume": 1}
+            for i, date in enumerate(
+                ("2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07", "2025-01-08", "2025-01-09")
+            )
         ]),
     )
 
@@ -65,8 +71,8 @@ def test_news_lookup_normalizes_symbol(monkeypatch):
     out = wnews.get_news_westock("XAUUSD", "2025-01-01", "2025-01-10")
 
     assert seen[0] == "gc=f"   # news queried with the canonical symbol
-    assert "XAUUSD" in out            # the user's ticker stays in the report
-    assert "GC=F" in out              # provenance noted
+    assert out.query == "XAUUSD (resolved to GC=F)"
+    assert out.items[0].symbols == ("XAUUSD",)
 
 
 def test_longbridge_normalize_symbol_preserves_a_share_code():

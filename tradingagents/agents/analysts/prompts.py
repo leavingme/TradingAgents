@@ -12,6 +12,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_no_preamble_instruction,
 )
+from tradingagents.dataflows.untrusted_content import UNTRUSTED_DATA_INSTRUCTION
 
 
 TOOL_CALLING_COLLABORATION_PROMPT = (
@@ -22,6 +23,7 @@ TOOL_CALLING_COLLABORATION_PROMPT = (
     " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
     " You have access to the following tools: {tool_names}."
+    f" {UNTRUSTED_DATA_INSTRUCTION}"
     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
     "{system_message}"
 )
@@ -31,6 +33,7 @@ PREFETCHED_DATA_COLLABORATION_PROMPT = (
     "You are a helpful AI assistant, collaborating with other assistants."
     " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
     " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
+    f" {UNTRUSTED_DATA_INSTRUCTION}"
     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}"
     "\n{system_message}"
 )
@@ -79,6 +82,7 @@ def build_news_analyst_system_message(asset_label: str) -> str:
         f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days, symbol) to ground macro commentary in actual data from FRED (e.g. 'cpi', 'core_pce', 'unemployment', 'fed_funds_rate', '10y_treasury', 'yield_curve')."
         + " IMPORTANT: When retrieving macro indicators, always supply the `symbol` parameter (e.g. the current ticker you are analyzing, such as '0700.HK' or '600519.SS') to enable the tool to automatically resolve local/domestic macroeconomic indicators. For Hong Kong equities (.HK) and other offshore assets, make sure to analyze BOTH local domestic macroeconomic indicators (e.g., China CPI, GDP) for corporate fundamentals and US macroeconomic indicators (e.g. Fed funds rate, Treasury yields) for currency/liquidity pressures, as HKD assets are tightly bound to USD interest rates."
         + " Use get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events). Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+        + " Every decision-material factual claim must cite the exact bracketed source_id from validated tool evidence (for example [news_ab12...] or [macro_cd34...]). Never invent a source_id."
         + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
         + get_language_instruction()
         + get_no_preamble_instruction()
@@ -100,42 +104,17 @@ def build_sentiment_analyst_system_message(
     ticker: str,
     start_date: str,
     end_date: str,
-    news_block: str,
-    stocktwits_block: str,
-    reddit_block: str,
-    twitter_block: str,
 ) -> str:
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on four complementary data sources that have already been collected for you.
+    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on four complementary data sources supplied separately in a human-role `untrusted_data` JSON envelope. The system message intentionally contains no external content.
 
-## Data sources (pre-fetched, in this prompt)
+## Data sources
 
-### News headlines — Westock, past 7 days
-Institutional framing. Fact-driven, slower-moving signal.
+- News headlines: institutional framing and event evidence.
+- StockTwits: fast-moving retail sentiment with user labels.
+- Reddit: community discussion weighted by engagement.
+- X/Twitter: validated public posts after date/spam/duplicate filtering.
 
-<start_of_news>
-{news_block}
-<end_of_news>
-
-### StockTwits messages — retail-trader social platform indexed by cashtag
-Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
-
-<start_of_stocktwits>
-{stocktwits_block}
-<end_of_stocktwits>
-
-### Reddit posts — r/wallstreetbets, r/stocks, r/investing (past 7 days)
-Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
-
-<start_of_reddit>
-{reddit_block}
-<end_of_reddit>
-
-### X/Twitter posts — validated bird search results (past 7 days)
-Fast-moving public discussion. Spam, duplicates, and posts outside the analysis window have been removed deterministically.
-
-<start_of_twitter>
-{twitter_block}
-<end_of_twitter>
+{UNTRUSTED_DATA_INSTRUCTION}
 
 ## How to analyze this data (best practices)
 

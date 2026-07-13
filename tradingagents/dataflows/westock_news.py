@@ -11,6 +11,7 @@ from dateutil.relativedelta import relativedelta
 from .config import get_config
 from .errors import NoMarketDataError
 from .symbol_utils import normalize_symbol
+from .evidence_models import NewsFeed, NewsItem, parse_external_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ def get_news_westock(
     ticker: str,
     start_date: str,
     end_date: str,
-) -> str:
+) -> NewsFeed:
     """
     Retrieve news for a specific stock ticker from Westock only.
 
@@ -52,25 +53,33 @@ def get_news_westock(
     if not articles or not isinstance(articles, list):
         raise NoMarketDataError(ticker, canonical, detail="westock-data returned no news articles")
 
-    news_str = ""
+    items = []
     for a in articles:
         title = a.get("title", a.get("news_title", "No title"))
         src = a.get("src", a.get("source", "Unknown"))
         time_str = a.get("time", "")
-        link = a.get("url", "")
-        news_str += f"### {title} (source: {src})\n"
-        news_str += f"Published: {time_str}\n"
-        if link:
-            news_str += f"Link: {link}\n"
-        news_str += "\n"
-    return f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n{news_str}"
+        link = a.get("url") or a.get("news_url") or a.get("link") or ""
+        try:
+            published_at = parse_external_datetime(time_str)
+        except ValueError:
+            published_at = ""
+        items.append(NewsItem(
+            source_id="", title=str(title), publisher=str(src),
+            published_at=published_at, url=str(link),
+            summary=str(a.get("summary") or a.get("digest") or ""),
+            symbols=(ticker.upper(),), vendor="westock",
+        ))
+    return NewsFeed(
+        items=tuple(items), scope="ticker", requested_start=start_date,
+        requested_end=end_date, query=f"{ticker}{resolved}",
+    )
 
 
 def get_global_news_westock(
     curr_date: str,
     look_back_days: int | None = None,
     limit: int | None = None,
-) -> str:
+) -> NewsFeed:
     """
     Retrieve global/macro economic news from Westock only.
 
@@ -106,19 +115,26 @@ def get_global_news_westock(
     if not articles or not isinstance(articles, list):
         raise NoMarketDataError(curr_date, detail="westock-data returned no global news articles")
 
-    news_str = ""
+    items = []
     for a in articles:
         title = a.get("news_title", "No title")
         src = a.get("source", "Unknown")
         ts = a.get("publish_time")
-        time_str = ""
-        if ts:
-            time_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-        news_str += f"### {title} (source: {src})\n"
-        if time_str:
-            news_str += f"Published: {time_str}\n"
-        news_str += "\n"
+        try:
+            time_str = parse_external_datetime(ts)
+        except ValueError:
+            time_str = ""
+        items.append(NewsItem(
+            source_id="", title=str(title), publisher=str(src),
+            published_at=time_str,
+            url=str(a.get("url") or a.get("news_url") or a.get("link") or ""),
+            summary=str(a.get("summary") or a.get("digest") or ""),
+            symbols=(), vendor="westock",
+        ))
     curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_dt = curr_dt - relativedelta(days=look_back_days)
     start_date = start_dt.strftime("%Y-%m-%d")
-    return f"## Global Market News, from {start_date} to {curr_date}:\n\n{news_str}"
+    return NewsFeed(
+        items=tuple(items), scope="global", requested_start=start_date,
+        requested_end=curr_date, query="global market news",
+    )

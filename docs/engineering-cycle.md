@@ -19,6 +19,30 @@
 
 该目录位于已 gitignore 的 `.tradingagents/` 下。需要长期保留的结论应同步到 `TODO.md`/`PLAN.md`，代码和文档一起提交。
 
+## LLM 与 Codex 的职责边界
+
+分析运行中的 Analyst、Researcher、Trader 和 Portfolio Manager 使用运行配置中的
+分析模型（当前通常为 MiniMax-M3）。工具或输出校验失败时，允许原生成模型根据
+确定性错误纠正一次；模型不能自行判定数据有效、伪造来源或放松交易数字门禁。
+
+Codex 当前作为仓库外部的工程 Reviewer/实施者参与闭环，负责读取不可变执行证据、
+完成人工语义复盘、填写 P0 根因与方案、修改代码、补测试和发起同输入重跑。
+`ack-review --reviewer codex` 只记录这次职责履行，并不表示仓库后端已自动调用 Codex。
+最终完成权始终属于确定性的 `gate`。
+
+当前尚未实现自动 `review-model` 阶段。未来若接入独立 Reviewer 模型，必须只读取
+持久化 evidence，输出带 event/vendor/source 证据引用的结构化 findings，且不能直接
+修改历史记录或绕过人工确认和工程 gate。
+
+## 首次真实闭环记录（2026-07-13）
+
+- 最终验收 run：`827ade0962dc42f0a7f16a5ee1cd9064`，NVDA，分析日 `2026-07-10`。
+- 最终状态：`validated`；自动复盘 P0 为 0；固定验收 76 项测试通过。
+- 闭环处理的 P0：工程入口 LLM/数据库配置错配、非多头报告夹带未经验证的执行数字、
+  News Analyst 幻觉 `source_id` 后缺少受限纠错路径。
+- 保留的 P1：vendor fallback 频繁、上下文 token 成本过高。
+- 对应提交：`92b5bdd feat: add audited NVDA engineering cycle`。
+
 ## 1. 运行 NVDA 基准分析
 
 默认选择最近一个已完成的工作日，避免把仍在形成的当日日 K 线作为完整数据：

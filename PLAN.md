@@ -443,3 +443,7 @@ Next recommended work:
 ## Repeatable NVDA engineering cycle (2026-07-13)
 
 Implemented `scripts/engineering_cycle.py` and `tradingagents.engineering_cycle` as the canonical run-review-remediate workflow. Every cycle owns a unique run ID and persists baseline inputs, SQLite execution/vendor evidence, deterministic and human findings, a P0 plan, implementation/verification evidence, and a final completion gate. The gate rejects unresolved P0s, unacknowledged reviews, missing evidence, failed verification, and verification performed before the latest P0 resolution.
+
+The first real cycle closed on run `827ade0962dc42f0a7f16a5ee1cd9064` after resolving three P0 classes: engineering-entry LLM/database configuration drift, unverified executable numbers in non-long decisions, and hallucinated news `source_id` values without a bounded correction path. Codex performed the semantic execution review and remediation as the external engineering agent; the repository does not yet invoke Codex or another reviewer model automatically. Deterministic validators and `gate`, not the reviewing LLM, retain completion authority.
+
+Next evolution: add an optional independent `review-model` job that consumes immutable execution evidence and emits schema-validated findings with event/vendor/source references. It must remain advisory, must not edit history, and must still require review acknowledgement, deterministic verification, and the existing gate.

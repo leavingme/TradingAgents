@@ -39,7 +39,12 @@ ANALYST_REPORT_MAP = {
 def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
     """Run a TradingAgents analysis, yield structured events, and persist history."""
     from .history import history_store
-    from .audit_context import bind_run_id, reset_run_id
+    from .audit_context import (
+        bind_analysis_date,
+        bind_run_id,
+        reset_analysis_date,
+        reset_run_id,
+    )
 
     # 1. Register the run in SQLite history
     history_store.create_run(
@@ -54,6 +59,7 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
     # Mark the run as started in the database
     history_store.mark_started(request.run_id)
     audit_token = bind_run_id(request.run_id)
+    analysis_date_token = bind_analysis_date(str(request.analysis_date))
 
     has_error = False
     last_event = None
@@ -87,6 +93,7 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
             ):
                 status = last_event.content["decision_status"]
             history_store.mark_finished(request.run_id, status)
+        reset_analysis_date(analysis_date_token)
         reset_run_id(audit_token)
 
 

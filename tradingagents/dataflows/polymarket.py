@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 
 import requests
 
+from tradingagents.dataflows.errors import NoMarketDataError
+
 logger = logging.getLogger(__name__)
 
 GAMMA_BASE = "https://gamma-api.polymarket.com"
@@ -24,6 +26,39 @@ REQUEST_TIMEOUT = 30
 
 # Default number of markets to return, ranked by traded volume.
 DEFAULT_LIMIT = 6
+
+
+def _utc_today():
+    return datetime.now(timezone.utc).date()
+
+
+def _current_analysis_date() -> str | None:
+    # Keep runtime imports lazy: dataflows.interface imports this module while
+    # runtime itself imports the graph/dataflow stack.
+    from tradingagents.runtime.audit_context import current_analysis_date
+
+    return current_analysis_date()
+
+
+def _reject_historical_live_snapshot(topic: str) -> None:
+    """Fail closed when a historical run requests a current-only snapshot."""
+    analysis_date = _current_analysis_date()
+    if not analysis_date:
+        return
+    try:
+        cutoff = datetime.strptime(analysis_date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise NoMarketDataError(
+            topic, detail=f"invalid analysis_date for prediction market: {analysis_date}"
+        ) from exc
+    if cutoff < _utc_today():
+        raise NoMarketDataError(
+            topic,
+            detail=(
+                "Polymarket exposes only a live snapshot and cannot provide "
+                f"point-in-time evidence for historical analysis_date={analysis_date}"
+            ),
+        )
 
 
 def _request(path: str, params: dict) -> dict:
@@ -79,6 +114,8 @@ def get_prediction_markets(topic: str, limit: int | None = None) -> str:
         each with its implied probability, traded volume, resolution date, and
         recent (1-week) move.
     """
+    _reject_historical_live_snapshot(topic)
+
     if limit is None:
         limit = DEFAULT_LIMIT
 

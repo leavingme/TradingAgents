@@ -5,6 +5,7 @@ All API access is mocked, so these run without a network connection.
 """
 import copy
 import unittest
+from datetime import date
 from unittest import mock
 
 import pytest
@@ -14,6 +15,7 @@ import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface, polymarket
 from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.errors import NoMarketDataError
 
 
 def _market(question, prob, *, volume, end_date, closed=False, wk=None):
@@ -92,6 +94,25 @@ class PolymarketFormatTests(unittest.TestCase):
 
 @pytest.mark.unit
 class PolymarketResilienceTests(unittest.TestCase):
+    def test_historical_analysis_rejects_live_snapshot_before_network(self):
+        with (
+            mock.patch.object(polymarket, "_current_analysis_date", return_value="2026-07-10"),
+            mock.patch.object(polymarket, "_utc_today", return_value=date(2026, 7, 13)),
+            mock.patch.object(polymarket, "_request") as request,
+        ):
+            with self.assertRaisesRegex(NoMarketDataError, "point-in-time evidence"):
+                polymarket.get_prediction_markets("Fed rate cut")
+        request.assert_not_called()
+
+    def test_same_day_analysis_may_use_live_snapshot(self):
+        with (
+            mock.patch.object(polymarket, "_current_analysis_date", return_value="2026-07-13"),
+            mock.patch.object(polymarket, "_utc_today", return_value=date(2026, 7, 13)),
+            mock.patch.object(polymarket, "_request", return_value=_SEARCH),
+        ):
+            out = polymarket.get_prediction_markets("anything", limit=1)
+        self.assertIn("Open big?", out)
+
     def test_network_error_degrades_gracefully(self):
         # An external-service hiccup must not raise into the analyst.
         with mock.patch.object(

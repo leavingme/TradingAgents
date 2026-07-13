@@ -301,6 +301,18 @@ def test_negative_sell_rating_context_is_not_an_execution_false_positive():
 
 
 @pytest.mark.unit
+def test_hold_with_triggers_heading_and_calendar_number_is_not_execution():
+    report = "最终决策：Hold with Triggers。关键观察点：Q2 财报在 8 月发布。"
+    assert not contains_unverified_non_long_execution(report)
+
+
+@pytest.mark.unit
+def test_explicit_trigger_price_remains_executable_guidance():
+    report = "Hold, but trigger at $200 and reduce exposure."
+    assert contains_unverified_non_long_execution(report)
+
+
+@pytest.mark.unit
 def test_long_executable_math_in_prose_remains_a_hard_failure():
     decision = PortfolioDecision(
         rating=PortfolioRating.BUY,

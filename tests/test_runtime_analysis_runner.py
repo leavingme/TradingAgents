@@ -179,6 +179,37 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert Path(completed.content["report_path"]).exists()
 
 
+def test_run_analysis_stream_binds_and_resets_analysis_date(monkeypatch, tmp_path):
+    from tradingagents.runtime import analysis_runner
+    from tradingagents.runtime.audit_context import current_analysis_date
+
+    seen = []
+
+    class ContextCompiledGraph(FakeCompiledGraph):
+        def stream(self, init_state, **kwargs):
+            seen.append(current_analysis_date())
+            yield from super().stream(init_state, **kwargs)
+
+    class ContextTradingAgentsGraph(FakeTradingAgentsGraph):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.graph = ContextCompiledGraph()
+
+    monkeypatch.setattr(
+        analysis_runner, "TradingAgentsGraph", ContextTradingAgentsGraph
+    )
+    list(run_analysis_stream(AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-05",
+        selected_analysts=("market",),
+        report_dir=tmp_path / "reports",
+        run_id="run-analysis-date-context",
+    )))
+
+    assert seen == ["2026-07-05"]
+    assert current_analysis_date() is None
+
+
 def test_agent_statuses_are_monotonic_and_report_updates_are_deduplicated(
     monkeypatch, tmp_path
 ):

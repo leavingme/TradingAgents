@@ -46,14 +46,16 @@ _PROSE_TRADE_MATH = re.compile(
 )
 _PROSE_EXECUTABLE_NUMBER = re.compile(
     r"(?:entry|stop(?:[- ]loss)?|price target|position siz(?:e|ing)|"
-    r"reduce|trim|exit|(?<!not )(?<!不支持)(?<!不是)sell|buyback|hedge|strike|exposure|trigger|break(?:s)? (?:above|below)|"
+    r"reduce|trim|exit|(?<!not )(?<!不支持)(?<!不是)sell|buyback|hedge|strike|exposure|"
+    r"trigger(?:ed|s)?\s+(?:at|above|below|price|level)|break(?:s)? (?:above|below)|"
     r"入场|止损|目标价|目标位|仓位|持仓|战术仓|建仓|加仓|减仓|减持|清仓|回补|"
     r"(?:降低|提高|调整|削减|保留)[^\n.!?。！？]{0,8}(?:仓|敞口)|"
     r"卖出|买入|对冲|行权价|敞口|触发|跌破|突破)"
     r"[^\n.!?。！？]{0,35}(?:\$?\d+(?:\.\d+)?%?)|"
     r"(?:\$?\d+(?:\.\d+)?%?)[^\n.!?。！？]{0,20}"
     r"(?:entry|stop(?:[- ]loss)?|price target|position|reduce|trim|exit|(?<!not )(?<!不支持)(?<!不是)sell|buyback|"
-    r"hedge|strike|exposure|trigger|break(?:s)? (?:above|below)|"
+    r"hedge|strike|exposure|trigger(?:ed|s)?\s+(?:at|above|below|price|level)|"
+    r"break(?:s)? (?:above|below)|"
     r"入场|止损|目标价|目标位|仓位|持仓|战术仓|建仓|加仓|减仓|减持|清仓|回补|"
     r"(?:降低|提高|调整|削减|保留)[^\n.!?。！？]{0,8}(?:仓|敞口)|"
     r"卖出|买入|对冲|行权价|敞口|触发|跌破|突破)",

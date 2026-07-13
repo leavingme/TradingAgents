@@ -20,6 +20,7 @@
 - [ ] 新闻数据：来源、发布时间、正文可用性和分析日期截止校验。
 - [ ] 宏观数据：指标名称、单位、观察期和发布日期。（部分完成：已实现 FRED 滞后非美指标 1095 天 Lookback 智能拓宽防护机制，防空回包异常）
 - [ ] 预测市场：事件标识、到期时间和概率范围。
+- [x] **P0 — 历史预测市场前视隔离**：正式 runtime 与兼容 `propagate()` 入口将 `analysis_date` 绑定为不可由 LLM 改写的运行上下文；只提供实时快照的 Polymarket 在历史分析中于网络请求前以类型化 `NoMarketDataError` fail closed，vendor ledger 记录 point-in-time 不可用原因。不得把运行日概率、伪造 `source_id` 或说明性文本作为历史证据；实时预测市场的结构化领域模型和确定性校验仍由上项继续跟踪。
 - [x] Graph 硬门禁：ToolNode 不吞数据异常；失败运行不生成报告或 `run_completed`。
 - [x] Tool 参数纠错：模型生成的参数 Schema 错误返回一次结构化 `ToolMessage` 供 LLM 修正；重复错误及 vendor/数据异常仍触发 Graph 硬门禁。
 - [x] 技术指标确定性窗口：按指标预热 K 线需求统一扩展所有 vendor 的请求窗口，并区分输入历史与预热后有效输出点数。
@@ -45,12 +46,13 @@
 - [x] Reddit 社交配置：在 `social_data` 中提供独立开关，旧浏览器配置自动迁移为启用，并让开关实际控制 Sentiment Analyst 抓取。
 - [x] Web 配置归属：客户端仅保留 UI language；报告、模型、推理和数据 Vendor 配置迁移到服务端原子持久化，并兼容旧 localStorage 一次性迁移。
 - [ ] Runtime 状态：记录失败的数据域、vendor 尝试轨迹和具体校验原因。
+- [ ] **P1 — 运行上下文成本**：NVDA depth=1 工程闭环连续两次输入 token 分别为 254,861 与 252,244；审计基础 Analyst 报告、工具结果、Bull/Bear/Risk 辩论之间的重复传递并设计保留来源证据的确定性压缩边界。
 - [ ] **安全测试加固 — OpenAI-compatible 密钥隔离**：`test_keyless_local_uses_placeholder_and_chat_completions` 必须同时临时清除 `OPENAI_COMPATIBLE_API_KEY` 与通用 fallback `OPENAI_API_KEY`，并避免在断言差异、pytest 输出或 CI 日志中读取/打印真实密钥明文；测试结束后由 `monkeypatch` 自动恢复原环境。
 - [x] **NVDA 工程闭环**：提供受审计的基准运行、完整执行证据导出、结构化 findings/P0 方案、人工 review 确认、P0 实现证据、修改后固定验收和不可绕过的完成 gate。
 - [x] **Longbridge 结构化新闻接入**：个股新闻按 `longbridge_mcp → longbridge` 优先，全球宏观新闻使用 Longbridge CLI 结构化搜索；原始响应直接映射 `NewsFeed` 并通过统一来源、时间、URL、标的和截止校验。MCP `news_search` 在时间字段恢复前不得冒充有效全球新闻。
 - [x] **技术指标默认路由**：默认使用 Westock/stockstats 基于规范 OHLCV 做确定性计算，Longbridge MCP 仅作 fallback；Longbridge CLI 保留可选能力但不进入默认指标链。旧 Web 默认配置自动迁移，自定义顺序保持不变。
 - [ ] **P1 — Longbridge 前瞻研究数据域**：接入 `consensus`、`forecast_eps`、`finance_calendar`、`institution_rating`、`filings`、`short_positions` 和 `short_trades`；建立带 `as_of`、发布日期、事件日期、标的、币种、期间、稳定 `source_id` 与 vendor `call_id` 的统一领域模型和确定性 validator，分别供 Fundamentals、News、Bull/Bear 与 Risk Agent 使用。
-- [ ] **P1 — Longbridge 可信市场上下文**：将 `quote`、`market_status`、`trading_days` 以及可验证的盘前/盘后/隔夜字段接入 `verified_market_snapshot`；明确盘中形成中数据、最新完整交易日和分析截止时间，不允许当日数据冒充历史快照。
+- [ ] **P1 — Longbridge 可信市场上下文与跨市场 Session Engine**：将 `quote`、`market_status`、`trading_days` 以及可验证的盘前/盘后/隔夜字段接入 `verified_market_snapshot`；按交易所时区、夏令时、节假日、半日市和 `pre|regular|post` session 动态计算中美市场窗口，分别保存 `market_date`、`observed_at`、`published_at` 与 `available_at`。建立 A/H/ADR、汇率、换股比例和产业链映射，支持“中港收盘 → 美股盘前”及“美股收盘/盘后 → 次日中港开盘”的只读证据生成、价差/异常检测和开盘前增量刷新。盘前盘后数据不得覆盖规范日 K，盘中数据不得冒充完整收盘快照；历史运行只允许使用 `available_at <= analysis_cutoff` 的 point-in-time 证据，所有跨市场 lead-lag 信号必须先经历史稳定性、流动性、点差、交易成本和可转换性验证，不得表述为无风险套利。
 - [ ] **P2 — Longbridge 基本面与持仓拥挤增强**：评估并接入 `business_segments`、估值历史/同行、`shareholder`、`fund_holder`、内部人交易、`capital_flow`、`trade_stats`、`market_temperature` 和异动数据；逐项审计真实 schema，禁止依据工具描述批量生成 adapter。
 - [ ] **P2 — Longbridge 只读账户风险输入**：以最小 OAuth 权限接入账户余额、持仓、保证金、购买力估算和汇率，将验证后的账户约束注入服务端风险政策；不得向分析 Agent 暴露下单、撤单、改单、DCA、提醒或 Watchlist 写操作。
 - [ ] **P2 — Longbridge 宏观数据独立 vendor**：将 Longbridge `macrodata` 与宏观事件日历注册为独立 vendor，映射到 `MacroSeries` 并校验单位、观察期、发布日期和分析截止时间；不得隐藏在 FRED vendor 内部。

@@ -347,7 +347,12 @@ class TradingAgentsGraph:
         """
         from uuid import uuid4
 
-        from tradingagents.runtime.audit_context import bind_run_id, reset_run_id
+        from tradingagents.runtime.audit_context import (
+            bind_analysis_date,
+            bind_run_id,
+            reset_analysis_date,
+            reset_run_id,
+        )
         from tradingagents.runtime.events import AnalysisEvent
         from tradingagents.runtime.history import history_store
 
@@ -369,6 +374,7 @@ class TradingAgentsGraph:
         )
         history_store.mark_started(run_id)
         audit_token = bind_run_id(run_id)
+        analysis_date_token = bind_analysis_date(str(trade_date))
 
         def record_failure(exc: Exception) -> None:
             history_store.add_event(run_id, AnalysisEvent(
@@ -405,6 +411,7 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
+            reset_analysis_date(analysis_date_token)
             reset_run_id(audit_token)
             raise
 
@@ -438,6 +445,7 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
+            reset_analysis_date(analysis_date_token)
             reset_run_id(audit_token)
 
     def save_reports(self, final_state, ticker, save_path=None) -> Path:

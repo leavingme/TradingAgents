@@ -392,6 +392,43 @@ Known differences:
 - Split position generation from validation. `PositionSizingEngine` may implement fixed-risk, ATR-risk, volatility-target, fractional-Kelly, account-equity, and max-notional policies; `TradePlanValidator` must independently recompute and enforce portfolio loss, concentration, and account limits.
 - Bind authoritative market inputs (`verified_atr`, latest Close, market date, and vendor `call_id`) from the verified snapshot directly into validation. LLMs should propose trade levels but must not supply or transcribe trusted risk inputs.
 
+## P0 Safety and Integrity Audit Backlog (2026-07-13)
+
+### Confirmed P0
+
+1. **Trusted market inputs and server risk policy**
+   - Rebuild the verified market snapshot on the same canonical calculation horizon used by indicator routing.
+   - Inject verified ATR, latest Close, market date, and vendor call ID directly into trade validation.
+   - Move maximum trade risk, concentration, notional exposure, and account constraints into server-owned policy. LLM output must not be able to raise those limits.
+   - Acceptance: a fabricated ATR, stale Close, out-of-range entry, or model-selected permissive risk limit cannot produce a validated decision.
+2. **First-class no-decision semantics**
+   - Add `decision_status = validated | review_required | unavailable` instead of representing operational/validation failure as Hold.
+   - `review_required` must not produce a market signal, enter performance memory, or appear as a normally completed investment decision.
+   - Acceptance: structured-output outage and trade-plan validation failure remain distinguishable from a genuine investment Hold through runtime, SQLite, API, UI, reports, and memory.
+3. **Untrusted external-content isolation**
+   - News and social content must be transported as explicitly untrusted data, never interpolated into system instructions.
+   - Add prompt-injection detection/marking and extract structured facts before downstream debate.
+   - Acceptance: instructions embedded in a post/article cannot alter tool calls, agent control flow, or decision schema fields.
+4. **Web API trust boundary**
+   - Allowlist LLM backend endpoints; reject client-provided arbitrary filesystem paths and arbitrary configuration keys.
+   - Require authentication/authorization outside loopback and protect run creation, deletion, verification, and config mutation with rate/concurrency limits.
+   - Acceptance: an API caller cannot redirect server credentials, write reports outside approved roots, mutate hidden runtime settings, or launch unbounded costly jobs.
+5. **Structured news/macro evidence and claim provenance**
+   - Normalize vendor responses into source/date/URL/symbol-aware models, then validate freshness, relevance, duplicates, and error payloads before rendering.
+   - Bind material report claims to auditable source IDs.
+   - Acceptance: every decision-material event can be traced to a validated source record whose timestamp does not exceed the analysis cutoff.
+
+### Conditional P0 when enabled or concurrently deployed
+
+6. **Checkpoint run isolation**
+   - Include run ID in checkpoint identity; concurrent runs for the same symbol/date must not share, resume, or delete each other's state.
+7. **Audit-store concurrency and entry-point completeness**
+   - Enable SQLite WAL, busy timeout, foreign keys, and bounded retry for multi-process writers.
+   - Route all production CLI/Web/Python execution through the audited runtime; direct graph propagation must be explicitly non-production or create its own run context.
+   - Acceptance: concurrent Web/CLI runs preserve complete append-only provenance without lock-induced false failures or unaudited execution paths.
+
+The following remain P1 rather than P0: duplicate report-section events, excessive report/token size, missing per-LLM-call detail, Longbridge Pine lag, small cross-engine SMA/Bollinger differences, and UI/history performance.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

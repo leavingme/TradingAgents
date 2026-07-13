@@ -459,3 +459,23 @@ Existing Web provider configurations matching the former untouched default are m
 - The default indicator route is `westock → longbridge_mcp`. Westock/stockstats computes indicators deterministically from the shared canonical OHLCV series, while MCP remains a validated fallback.
 - Longbridge CLI stays registered for explicit opt-in and diagnostics, but is disabled in the default indicator chain because its summary response cannot satisfy the same dated-series validation contract.
 - Existing Web configurations matching the former untouched indicator default are migrated; custom provider ordering and enablement are preserved.
+
+## Longbridge capability expansion roadmap (2026-07-13)
+
+Live inventory evidence:
+
+- Longbridge CLI v0.24.0 is authenticated; both CN and global OpenAPI endpoints passed connectivity checks.
+- The hosted MCP currently exposes 147 tools, while `longbridge_mcp.py` explicitly resolves only eight capabilities: OHLCV history/recent bars, static reference data, valuation indexes, financial reports, Pine indicators, symbol news, and quotes.
+- Read-only NVDA probes confirmed structured extended-hours quotes, 11 consensus periods, 50 filing records with publication/file metadata, short-interest observations including days-to-cover, business-segment fields, market temperature, and future finance-calendar events.
+- Tool discovery is not sufficient evidence of adapter safety: a live `top_movers` probe exposed a parameter-type mismatch between its description and server behavior. Every addition therefore requires inspection of the live schema and representative raw responses.
+
+Delivery order:
+
+1. **P1 — Forward-looking research evidence**: add consensus/EPS forecasts, finance calendar, institution ratings, filings, and short-interest/short-volume data. Route these through new structured evidence models and deterministic cutoff, currency, fiscal-period, symbol, source-ID, and freshness validation before rendering them to Fundamentals, News, Bull/Bear, or Risk agents.
+2. **P1 — Verified market context**: enrich the trusted market snapshot with quote, extended-hours quote, market status, and authoritative trading days. Intraday-only observations must never be reused as historical snapshots unless they were persisted with an auditable timestamp.
+3. **P2 — Fundamental, ownership, and microstructure enrichment**: add business segments, valuation history/peers, institutional/fund holders, insider activity, capital flow, trade statistics, market temperature, and anomaly evidence only after each response has a domain model and validator.
+4. **P2 — Read-only account risk**: use account balance, positions, margin, buying-power estimation, and FX as server-owned portfolio constraints under least-privilege OAuth. Keep all order, DCA, alert, and watchlist mutations outside the analysis graph.
+5. **P2 — Macro vendor**: register Longbridge macro observations and event calendar as an independent vendor mapped to `MacroSeries`; do not hide cross-vendor fallback inside FRED or another adapter.
+6. **P3 — Derivatives and universe selection**: defer option-chain/IV/Greeks integration until the separate derivative payoff and risk validator exists. Defer screeners, rankings, and movers to a future universe-selection stage rather than expanding the current single-symbol prompt surface.
+
+All new integrations retain the mandatory pipeline `raw Longbridge JSON → Longbridge adapter → unified domain model → deterministic validator → LLM renderer`. Current-only consensus, rating, flow, sentiment, and account snapshots must be explicitly marked as such; they cannot be used for historical runs without point-in-time evidence because doing so would introduce look-ahead bias.

@@ -49,6 +49,12 @@
 - [x] **NVDA 工程闭环**：提供受审计的基准运行、完整执行证据导出、结构化 findings/P0 方案、人工 review 确认、P0 实现证据、修改后固定验收和不可绕过的完成 gate。
 - [x] **Longbridge 结构化新闻接入**：个股新闻按 `longbridge_mcp → longbridge` 优先，全球宏观新闻使用 Longbridge CLI 结构化搜索；原始响应直接映射 `NewsFeed` 并通过统一来源、时间、URL、标的和截止校验。MCP `news_search` 在时间字段恢复前不得冒充有效全球新闻。
 - [x] **技术指标默认路由**：默认使用 Westock/stockstats 基于规范 OHLCV 做确定性计算，Longbridge MCP 仅作 fallback；Longbridge CLI 保留可选能力但不进入默认指标链。旧 Web 默认配置自动迁移，自定义顺序保持不变。
+- [ ] **P1 — Longbridge 前瞻研究数据域**：接入 `consensus`、`forecast_eps`、`finance_calendar`、`institution_rating`、`filings`、`short_positions` 和 `short_trades`；建立带 `as_of`、发布日期、事件日期、标的、币种、期间、稳定 `source_id` 与 vendor `call_id` 的统一领域模型和确定性 validator，分别供 Fundamentals、News、Bull/Bear 与 Risk Agent 使用。
+- [ ] **P1 — Longbridge 可信市场上下文**：将 `quote`、`market_status`、`trading_days` 以及可验证的盘前/盘后/隔夜字段接入 `verified_market_snapshot`；明确盘中形成中数据、最新完整交易日和分析截止时间，不允许当日数据冒充历史快照。
+- [ ] **P2 — Longbridge 基本面与持仓拥挤增强**：评估并接入 `business_segments`、估值历史/同行、`shareholder`、`fund_holder`、内部人交易、`capital_flow`、`trade_stats`、`market_temperature` 和异动数据；逐项审计真实 schema，禁止依据工具描述批量生成 adapter。
+- [ ] **P2 — Longbridge 只读账户风险输入**：以最小 OAuth 权限接入账户余额、持仓、保证金、购买力估算和汇率，将验证后的账户约束注入服务端风险政策；不得向分析 Agent 暴露下单、撤单、改单、DCA、提醒或 Watchlist 写操作。
+- [ ] **P2 — Longbridge 宏观数据独立 vendor**：将 Longbridge `macrodata` 与宏观事件日历注册为独立 vendor，映射到 `MacroSeries` 并校验单位、观察期、发布日期和分析截止时间；不得隐藏在 FRED vendor 内部。
+- [ ] **P3 — Longbridge 衍生品与选股能力**：期权链、IV、Greeks 仅在独立衍生品风险模型完成后接入；screener、rank、top movers 等仅在新增 universe/选股阶段后接入，不直接塞入现有单标的 Agent 工具集。
 - [ ] **独立工程 Reviewer 模型**：增加可选 `review-model` 阶段，仅读取不可变 execution evidence，输出带 event/vendor/source 引用的结构化 findings；Codex/其他 Reviewer 不得直接修改历史或决定通过，仍需人工确认、确定性验证和现有 gate。
 
 架构约束：

@@ -385,6 +385,13 @@ Known differences:
 - Buy/Overweight decisions require structured entry, stop, target, ATR, initial/target position, and maximum portfolio-risk fields. Reward/risk, ATR distance, and portfolio loss are calculated only by deterministic code.
 - Invalid structured plans receive one correction attempt containing the validator error. A second failure, missing structured-output support, or upstream Trader `REVIEW_REQUIRED` deterministically produces `Hold / REVIEW_REQUIRED`; free-text executable fallback is prohibited.
 
+### Follow-up execution-risk architecture
+
+- Add an explicit trade side (`long`, `short`, `flat`). A future short-equity validator must enforce `price_target < entry_price < stop_loss`; `Sell` and `Underweight` remain position-reduction ratings and must never implicitly open a short.
+- Model options separately from short stock. Long puts require premium, strike, expiry, contract multiplier, implied volatility, and Greeks-aware payoff/risk validation rather than linear short-equity arithmetic.
+- Split position generation from validation. `PositionSizingEngine` may implement fixed-risk, ATR-risk, volatility-target, fractional-Kelly, account-equity, and max-notional policies; `TradePlanValidator` must independently recompute and enforce portfolio loss, concentration, and account limits.
+- Bind authoritative market inputs (`verified_atr`, latest Close, market date, and vendor `call_id`) from the verified snapshot directly into validation. LLMs should propose trade levels but must not supply or transcribe trusted risk inputs.
+
 Next recommended work:
 
 1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.

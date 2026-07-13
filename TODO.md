@@ -28,6 +28,9 @@
 - [x] 技术指标计算起点统一：Longbridge Pine 与 Westock/stockstats 使用相同的三年 calculation_start；Pine 输出按权威 OHLCV 最新交易日校验，服务端 quant 数据滞后时自动 fallback。
 - [x] 运行级 vendor 审计：新增按 run/call/attempt 追加且不可覆盖的 fallback 调用账本与查询 API；审计落盘失败时禁止继续生成可执行报告。
 - [x] 交易计划确定性门禁：Buy/Overweight 的价格、ATR、仓位与最大风险必须结构化；收益风险比、ATR 倍数和组合损失由代码计算，重复校验失败降级为 `Hold / REVIEW_REQUIRED`。
+- [ ] 空头与衍生品交易校验：新增显式 `side=long|short|flat` 和 `validate_short_trade_plan`，不得从 Sell/Underweight 推断开空；期权（含 Put）使用独立的权利金、行权价、到期日、乘数与 Greeks 风险模型。
+- [ ] 仓位引擎解耦：将 `PositionSizingEngine`（固定风险、ATR 风险、波动率目标、分数凯利、账户权益、最大名义敞口）与 `TradePlanValidator` 分层；仓位引擎生成建议仓位，验证器统一执行组合风险、集中度和账户限制硬门禁。
+- [ ] 可信市场输入绑定：ATR、最新 Close、market date 与 vendor `call_id` 由 verified market snapshot 注入交易校验器，不再允许 LLM 自行填写或转抄权威风控输入。
 - [x] Runtime Agent 状态机：累积 graph snapshot 不得导致已完成 Agent 重新进入运行态；团队交接状态完整且报告事件去重。
 - [x] X/Twitter 舆情：Bird 只读结构化 adapter、统一 SocialPost 模型、日期截止/去重/垃圾推广校验、独立 `social_data` vendor 路由与 Web 配置。
 - [x] Web 舆情分类：新闻与社交数据分卡展示，Reddit、StockTwits 与 X/Twitter 统一归入“社交动态舆情”，后端仍保持 `news_data` / `social_data` 边界。

@@ -28,11 +28,13 @@ ALLOWED_VENDORS = {
     "core_stock_apis": ["longbridge_mcp", "longbridge", "westock", "alpha_vantage"],
     "technical_indicators": ["longbridge_mcp", "longbridge", "westock", "alpha_vantage"],
     "fundamental_data": ["longbridge_mcp", "longbridge", "westock", "alpha_vantage"],
-    "news_data": ["westock", "duckduckgo", "alpha_vantage"],
+    "news_data": ["longbridge_mcp", "longbridge", "westock", "duckduckgo", "alpha_vantage"],
     "social_data": ["bird", "reddit"],
     "macro_data": ["fred"],
     "prediction_markets": ["polymarket"],
 }
+
+LEGACY_NEWS_DEFAULT = ("westock", "duckduckgo", "alpha_vantage")
 
 
 def _default_path() -> Path:
@@ -55,12 +57,26 @@ def _default_vendor_rows() -> dict[str, list[dict[str, Any]]]:
     return result
 
 
-def _normalize_vendor_rows(payload: Any) -> dict[str, list[dict[str, Any]]]:
+def _normalize_vendor_rows(
+    payload: Any, *, migrate_legacy_defaults: bool = False
+) -> dict[str, list[dict[str, Any]]]:
     source = payload if isinstance(payload, dict) else {}
     defaults = _default_vendor_rows()
     result = {}
     for category, allowed in ALLOWED_VENDORS.items():
         rows = source.get(category)
+        legacy_news_ids = (
+            tuple(row.get("id") for row in rows if isinstance(row, dict))
+            if isinstance(rows, list)
+            else ()
+        )
+        if (
+            migrate_legacy_defaults
+            and category == "news_data"
+            and legacy_news_ids == LEGACY_NEWS_DEFAULT
+            and all(row.get("enabled") is not False for row in rows if isinstance(row, dict))
+        ):
+            rows = defaults[category]
         if not isinstance(rows, list):
             result[category] = defaults[category]
             continue
@@ -92,7 +108,9 @@ class WebConfigStore:
             settings = stored.get("settings") if isinstance(stored.get("settings"), dict) else {}
             return {
                 "settings": {key: deepcopy(value) for key, value in settings.items() if key in SETTING_KEYS},
-                "providers": _normalize_vendor_rows(stored.get("providers")),
+                "providers": _normalize_vendor_rows(
+                    stored.get("providers"), migrate_legacy_defaults=True
+                ),
                 "persisted": self.path.exists(),
             }
 

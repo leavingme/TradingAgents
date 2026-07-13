@@ -28,6 +28,7 @@ def test_longbridge_vendor_registration():
         "get_balance_sheet",
         "get_cashflow",
         "get_income_statement",
+        "get_news",
     }
     missing = expected - set(VENDOR_METHODS)
     assert not missing, f"vendor routes missing longbridge entry: {missing}"
@@ -53,6 +54,7 @@ if __name__ == "__main__":
         "get_balance_sheet",
         "get_cashflow",
         "get_income_statement",
+        "get_news",
     }
     for method, vendors in VENDOR_METHODS.items():
         if "longbridge" in vendors:

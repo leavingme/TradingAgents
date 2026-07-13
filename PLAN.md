@@ -447,3 +447,9 @@ Implemented `scripts/engineering_cycle.py` and `tradingagents.engineering_cycle`
 The first real cycle closed on run `827ade0962dc42f0a7f16a5ee1cd9064` after resolving three P0 classes: engineering-entry LLM/database configuration drift, unverified executable numbers in non-long decisions, and hallucinated news `source_id` values without a bounded correction path. Codex performed the semantic execution review and remediation as the external engineering agent; the repository does not yet invoke Codex or another reviewer model automatically. Deterministic validators and `gate`, not the reviewing LLM, retain completion authority.
 
 Next evolution: add an optional independent `review-model` job that consumes immutable execution evidence and emits schema-validated findings with event/vendor/source references. It must remain advisory, must not edit history, and must still require review acknowledgement, deterministic verification, and the existing gate.
+
+## Longbridge structured news routing (2026-07-13)
+
+Longbridge news is now part of the default validated news chain. Per-symbol news prefers MCP's structured `news` response and falls back to the CLI's structured `news` JSON before Westock, DuckDuckGo, and Alpha Vantage. Global macro headlines use the CLI's structured `news search` response; the hosted MCP `news_search` tool is deliberately not registered for global news because its live response currently reports epoch timestamps, which cannot satisfy deterministic publication-time validation. Both adapters map raw JSON directly to `NewsFeed`; router-level validation remains responsible for source IDs, requested-window enforcement, URLs, symbol binding, and deduplication.
+
+Existing Web provider configurations matching the former untouched default are migrated to enable the two Longbridge news vendors. Explicitly customized news-provider lists retain their chosen ordering and enabled state.

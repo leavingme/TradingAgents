@@ -15,6 +15,7 @@ Supported vendor slots (see interface.py):
     core_stock_apis       -> longbridge kline (OHLCV)
     technical_indicators  -> longbridge quant run (PineScript V6 server-side)
     fundamental_data      -> longbridge static + calc-index + financial-report
+    news_data             -> longbridge news / news search
 
 CLI subcommands used:
     kline <sym>                       -- daily OHLCV
@@ -39,6 +40,7 @@ from typing import Any
 import pandas as pd
 
 from .errors import NoMarketDataError
+from .evidence_models import NewsFeed, NewsItem, parse_external_datetime
 from .indicator_requirements import (
     effective_indicator_lookback_days,
     indicator_calculation_lookback_days,
@@ -151,6 +153,105 @@ def _require_env(name: str) -> str:
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
+
+
+# ---- news_data: structured latest/search results ----
+
+def _news_rows_to_feed(
+    rows: object,
+    *,
+    vendor: str,
+    scope: str,
+    start_date: str,
+    end_date: str,
+    query: str,
+    symbol: str | None = None,
+) -> NewsFeed:
+    """Map Longbridge JSON rows directly into the auditable news model."""
+    if not isinstance(rows, list):
+        raise NoMarketDataError(query, detail="Longbridge news returned a non-list payload")
+    items: list[NewsItem] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            published_at = parse_external_datetime(
+                row.get("published_at") or row.get("publish_time") or row.get("time")
+            )
+        except ValueError:
+            published_at = ""
+        related = row.get("related_symbols") or []
+        related_symbols = tuple(
+            str(value).upper()
+            for value in related
+            if isinstance(value, str) and value.strip()
+        )
+        requested_symbols = (str(symbol).upper(),) if symbol else ()
+        symbols = tuple(dict.fromkeys((*requested_symbols, *related_symbols)))
+        items.append(NewsItem(
+            source_id="",
+            title=str(row.get("title") or ""),
+            publisher=str(
+                row.get("source_name") or row.get("source") or "Longbridge"
+            ),
+            published_at=published_at,
+            url=str(row.get("url") or ""),
+            summary=str(
+                row.get("description") or row.get("excerpt") or row.get("summary") or ""
+            ),
+            symbols=symbols,
+            vendor=vendor,
+        ))
+    if not items:
+        raise NoMarketDataError(query, detail="Longbridge returned no news articles")
+    return NewsFeed(
+        items=tuple(items),
+        scope=scope,
+        requested_start=start_date,
+        requested_end=end_date,
+        query=query,
+    )
+
+
+def get_news(
+    ticker: Annotated[str, "ticker symbol"],
+    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
+    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+) -> NewsFeed:
+    """Fetch latest symbol news; the router enforces the requested date window."""
+    from .config import get_config
+
+    rows = _run_cli_json_list([
+        "news", normalize_symbol(ticker), "--count",
+        str(get_config()["news_article_limit"]),
+    ])
+    return _news_rows_to_feed(
+        rows, vendor="longbridge", scope="ticker", start_date=start_date,
+        end_date=end_date, query=ticker, symbol=ticker,
+    )
+
+
+def get_global_news(
+    curr_date: str,
+    look_back_days: int | None = None,
+    limit: int | None = None,
+) -> NewsFeed:
+    """Search Longbridge's structured news index for current macro headlines."""
+    from .config import get_config
+
+    config = get_config()
+    look_back_days = int(look_back_days or config["global_news_lookback_days"])
+    limit = int(limit or config["global_news_article_limit"])
+    end = datetime.strptime(curr_date, "%Y-%m-%d")
+    start_date = (end - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
+    query = " ".join(config.get("global_news_queries") or []).strip()
+    if not query:
+        query = "Federal Reserve inflation GDP market outlook"
+    rows = _run_cli_json_list(["news", "search", query, "--count", str(limit)])
+    return _news_rows_to_feed(
+        rows, vendor="longbridge", scope="global", start_date=start_date,
+        end_date=curr_date, query=query,
+    )
 
 
 # ---- core_stock_apis: OHLCV via `longbridge kline` ----

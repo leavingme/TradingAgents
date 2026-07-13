@@ -65,6 +65,8 @@ from .longbridge import (
     get_balance_sheet as get_longbridge_balance_sheet,
     get_cashflow as get_longbridge_cashflow,
     get_income_statement as get_longbridge_income_statement,
+    get_news as get_longbridge_news,
+    get_global_news as get_longbridge_global_news,
 )
 try:
     from .longbridge_mcp import (
@@ -74,6 +76,7 @@ try:
         get_balance_sheet as get_longbridge_mcp_balance_sheet,
         get_cashflow as get_longbridge_mcp_cashflow,
         get_income_statement as get_longbridge_mcp_income_statement,
+        get_news as get_longbridge_mcp_news,
     )
     MCP_AVAILABLE = True
 except ImportError:
@@ -85,6 +88,7 @@ except ImportError:
     get_longbridge_mcp_balance_sheet = _LBMCP_NONE
     get_longbridge_mcp_cashflow = _LBMCP_NONE
     get_longbridge_mcp_income_statement = _LBMCP_NONE
+    get_longbridge_mcp_news = _LBMCP_NONE
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .westock import (
     get_balance_sheet as get_westock_balance_sheet,
@@ -214,11 +218,14 @@ VENDOR_METHODS = {
     },
     # news_data
     "get_news": {
+        "longbridge_mcp": get_longbridge_mcp_news,
+        "longbridge": get_longbridge_news,
         "westock": get_news_westock,
         "duckduckgo": get_news_duckduckgo,
         "alpha_vantage": get_alpha_vantage_news,
     },
     "get_global_news": {
+        "longbridge": get_longbridge_global_news,
         "westock": get_global_news_westock,
         "duckduckgo": get_global_news_duckduckgo,
         "alpha_vantage": get_alpha_vantage_global_news,

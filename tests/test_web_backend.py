@@ -407,7 +407,7 @@ def test_build_runtime_config_merges_nested_overrides():
 
     assert config["data_vendors"]["core_stock_apis"] == "westock"
     # Ensure other default values in data_vendors are NOT lost
-    assert config["data_vendors"]["news_data"] == "westock, duckduckgo, alpha_vantage"
+    assert config["data_vendors"]["news_data"] == "longbridge_mcp, longbridge, westock, duckduckgo, alpha_vantage"
 
 
 def test_manual_vendor_verification_endpoint(monkeypatch):

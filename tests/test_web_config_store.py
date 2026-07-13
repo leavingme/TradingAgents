@@ -1,5 +1,6 @@
 from web.backend.web_config_store import WebConfigStore
 import asyncio
+import json
 
 
 def test_web_config_store_persists_runtime_and_provider_settings(tmp_path):
@@ -48,6 +49,25 @@ def test_web_config_store_partial_save_preserves_other_section(tmp_path):
         "id": "duckduckgo",
         "enabled": True,
     }
+
+
+def test_web_config_store_migrates_legacy_default_news_chain(tmp_path):
+    path = tmp_path / "legacy-news.json"
+    path.write_text(json.dumps({
+        "settings": {},
+        "providers": {
+            "news_data": [
+                {"id": "westock", "enabled": True},
+                {"id": "duckduckgo", "enabled": True},
+                {"id": "alpha_vantage", "enabled": True},
+            ],
+        },
+    }))
+
+    news = WebConfigStore(path).load()["providers"]["news_data"]
+
+    assert [row["id"] for row in news[:2]] == ["longbridge_mcp", "longbridge"]
+    assert all(row["enabled"] for row in news)
 
 
 def test_web_config_api_round_trip(monkeypatch, tmp_path):

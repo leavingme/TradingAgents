@@ -34,6 +34,7 @@ from pathlib import Path
 import pandas as pd
 
 from .errors import NoMarketDataError
+from .evidence_models import NewsFeed, NewsItem, parse_external_datetime
 from .indicator_requirements import (
     effective_indicator_lookback_days,
     indicator_calculation_lookback_days,
@@ -269,7 +270,7 @@ _CAPABILITY_TO_TOOL: dict[str, str] = {
     "valuation_index":    "calc_indexes",                   # PE / PB / PS / turnover_rate / mktcap
     "financial_report":   "financial_report",               # IS / BS / CF (kind + report_type)
     "technical_indicator": "quant_run",                     # PineScript V6 server-side
-    "news":               "news",                           # per-symbol news (CLI does not have)
+    "news":               "news",                           # per-symbol structured news
     "quote":              "quote",                          # snapshot
 }
 
@@ -308,6 +309,58 @@ def _resolve_tool(client: LongbridgeMCPClient, capability: str) -> str:
 def _client() -> LongbridgeMCPClient:
     """Construct a client, surfacing MCPAuthError upward if no token file."""
     return LongbridgeMCPClient()
+
+
+# ---- news_data: per-symbol structured news ----
+
+def get_news(
+    ticker: Annotated[str, "ticker symbol"],
+    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
+    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+) -> NewsFeed:
+    """Fetch MCP symbol news and preserve its structured metadata."""
+    sym = normalize_symbol(ticker)
+    client = _client()
+    raw = client.call_tool(_resolve_tool(client, "news"), {"symbol": sym})
+    if isinstance(raw, dict):
+        rows = raw.get("items") or raw.get("news_list") or raw.get("list") or []
+    else:
+        rows = raw
+    if not isinstance(rows, list):
+        raise NoMarketDataError(ticker, sym, detail="Longbridge MCP news returned a non-list payload")
+    items: list[NewsItem] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            published_at = parse_external_datetime(
+                row.get("published_at") or row.get("publish_time") or row.get("time")
+            )
+        except ValueError:
+            published_at = ""
+        related = row.get("related_symbols") or []
+        related_symbols = tuple(
+            str(value).upper()
+            for value in related
+            if isinstance(value, str) and value.strip()
+        )
+        symbols = tuple(dict.fromkeys((ticker.upper(), *related_symbols)))
+        items.append(NewsItem(
+            source_id="",
+            title=str(row.get("title") or ""),
+            publisher=str(row.get("source") or row.get("source_name") or "Longbridge"),
+            published_at=published_at,
+            url=str(row.get("url") or ""),
+            summary=str(row.get("description") or row.get("summary") or ""),
+            symbols=symbols,
+            vendor="longbridge_mcp",
+        ))
+    if not items:
+        raise NoMarketDataError(ticker, sym, detail="Longbridge MCP returned no news articles")
+    return NewsFeed(
+        items=tuple(items), scope="ticker", requested_start=start_date,
+        requested_end=end_date, query=ticker,
+    )
 
 
 def _format_text_table(headers: tuple[str, ...], rows: list[tuple[Any, ...]]) -> str:

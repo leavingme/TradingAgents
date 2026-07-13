@@ -1,11 +1,12 @@
 const STORAGE_KEY = 'tradingagents.web.providers';
 const LEGACY_CORE_DEFAULT = ['westock', 'longbridge_mcp', 'longbridge', 'alpha_vantage'];
+const LEGACY_NEWS_DEFAULT = ['westock', 'duckduckgo', 'alpha_vantage'];
 
 const CATEGORY_VENDORS = {
   core_stock_apis: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   technical_indicators: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   fundamental_data: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
-  news_data: ['westock', 'duckduckgo', 'alpha_vantage'],
+  news_data: ['longbridge_mcp', 'longbridge', 'westock', 'duckduckgo', 'alpha_vantage'],
   social_data: ['bird', 'reddit'],
   macro_data: ['fred'],
   prediction_markets: ['polymarket'],
@@ -27,7 +28,7 @@ const FALLBACK_DEFAULTS = {
   core_stock_apis: 'longbridge_mcp, longbridge, westock',
   technical_indicators: 'longbridge_mcp, longbridge, westock',
   fundamental_data: 'longbridge_mcp, longbridge, westock',
-  news_data: 'westock, duckduckgo, alpha_vantage',
+  news_data: 'longbridge_mcp, longbridge, westock, duckduckgo, alpha_vantage',
   social_data: 'bird, reddit',
   macro_data: 'fred',
   prediction_markets: 'polymarket',
@@ -91,6 +92,14 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
       saved.social_data.push({ id: 'reddit', enabled: true });
     }
     const defaults = configDefaults()?.data_vendors || FALLBACK_DEFAULTS;
+    if (Array.isArray(saved?.news_data)) {
+      const isLegacyNewsDefault = saved.news_data.length === LEGACY_NEWS_DEFAULT.length
+        && saved.news_data.every((row, index) => row?.id === LEGACY_NEWS_DEFAULT[index]
+          && row?.enabled !== false);
+      if (isLegacyNewsDefault) {
+        saved.news_data = parseDefaults('news_data', defaults.news_data);
+      }
+    }
     state = {};
     Object.keys(CATEGORY_VENDORS).forEach(category => {
       state[category] = saved && typeof saved === 'object'

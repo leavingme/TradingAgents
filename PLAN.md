@@ -435,8 +435,7 @@ All seven items above are implemented. The acceptance suite covers trusted snaps
 
 Next recommended work:
 
-1. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.
-2. **SSE/Report Section Throttling**: Throttle the write/push rate of `report_section` updates to prevent SQLite database lock congestion and smooth browser UI updates.
-3. Complete deterministic validation and runtime vendor-attempt persistence for news, macro, and prediction-market data.
-4. Add basic auth / API key protection for the Web API before exposing it beyond localhost.
-5. Consider replacing CDN-loaded Markdown rendering with a vendored/bundled asset for offline/local deployments.
+1. **OpenAI-compatible test secret isolation**: make the keyless-local regression test clear both the provider-specific key and `OPENAI_API_KEY` fallback within `monkeypatch`; never compare or expose a real secret value in assertion output. Acceptance: the test is deterministic under a credentialed developer shell, restores the shell environment afterward, and a failure cannot print credential material.
+2. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.
+3. **SSE/Report Section Throttling**: Throttle the write/push rate of `report_section` updates to prevent SQLite database lock congestion and smooth browser UI updates.
+4. Complete deterministic validation and runtime vendor-attempt persistence for prediction-market data.

@@ -134,9 +134,9 @@ shebang。
 
 ```
 core_stock_apis    : "longbridge_mcp, longbridge, westock"
-technical_indicators: "westock, longbridge_mcp, longbridge"
-fundamental_data   : "westock, longbridge_mcp, longbridge"
-news_data          : "web_search, duckduckgo, alpha_vantage, westock"
+technical_indicators: "westock, longbridge_mcp"
+fundamental_data   : "longbridge_mcp, longbridge, westock"
+news_data          : "longbridge_mcp, longbridge, westock, duckduckgo, alpha_vantage"
 ```
 
 `route_to_vendor()` 必须捕获 vendor-specific 异常

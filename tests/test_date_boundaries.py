@@ -41,6 +41,13 @@ def test_default_ohlcv_chain_prefers_longbridge():
 
 
 @pytest.mark.unit
+def test_default_indicator_chain_prefers_westock_without_cli():
+    assert DEFAULT_CONFIG["data_vendors"]["technical_indicators"] == (
+        "westock, longbridge_mcp"
+    )
+
+
+@pytest.mark.unit
 def test_get_westock_data_includes_requested_end(monkeypatch, tmp_path):
     set_config({"data_cache_dir": str(tmp_path)})
     monkeypatch.setattr(

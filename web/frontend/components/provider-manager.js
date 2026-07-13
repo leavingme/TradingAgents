@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'tradingagents.web.providers';
 const LEGACY_CORE_DEFAULT = ['westock', 'longbridge_mcp', 'longbridge', 'alpha_vantage'];
 const LEGACY_NEWS_DEFAULT = ['westock', 'duckduckgo', 'alpha_vantage'];
+const LEGACY_TECHNICAL_DEFAULT = ['longbridge_mcp', 'longbridge', 'westock'];
 
 const CATEGORY_VENDORS = {
   core_stock_apis: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
@@ -26,7 +27,7 @@ const PROVIDER_META = {
 
 const FALLBACK_DEFAULTS = {
   core_stock_apis: 'longbridge_mcp, longbridge, westock',
-  technical_indicators: 'longbridge_mcp, longbridge, westock',
+  technical_indicators: 'westock, longbridge_mcp',
   fundamental_data: 'longbridge_mcp, longbridge, westock',
   news_data: 'longbridge_mcp, longbridge, westock, duckduckgo, alpha_vantage',
   social_data: 'bird, reddit',
@@ -93,11 +94,26 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
     }
     const defaults = configDefaults()?.data_vendors || FALLBACK_DEFAULTS;
     if (Array.isArray(saved?.news_data)) {
-      const isLegacyNewsDefault = saved.news_data.length === LEGACY_NEWS_DEFAULT.length
-        && saved.news_data.every((row, index) => row?.id === LEGACY_NEWS_DEFAULT[index]
-          && row?.enabled !== false);
+      const enabledNewsIds = saved.news_data
+        .filter(row => row?.enabled !== false)
+        .map(row => row?.id);
+      const isLegacyNewsDefault = enabledNewsIds.length === LEGACY_NEWS_DEFAULT.length
+        && enabledNewsIds.every((id, index) => id === LEGACY_NEWS_DEFAULT[index]);
       if (isLegacyNewsDefault) {
         saved.news_data = parseDefaults('news_data', defaults.news_data);
+      }
+    }
+    if (Array.isArray(saved?.technical_indicators)) {
+      const enabledTechnicalIds = saved.technical_indicators
+        .filter(row => row?.enabled !== false)
+        .map(row => row?.id);
+      const isLegacyTechnicalDefault = enabledTechnicalIds.length === LEGACY_TECHNICAL_DEFAULT.length
+        && enabledTechnicalIds.every((id, index) => id === LEGACY_TECHNICAL_DEFAULT[index]);
+      if (isLegacyTechnicalDefault) {
+        saved.technical_indicators = parseDefaults(
+          'technical_indicators',
+          defaults.technical_indicators,
+        );
       }
     }
     state = {};

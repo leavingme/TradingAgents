@@ -139,7 +139,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # source for indicators/fundamentals and an OHLCV fallback for coverage gaps.
     "data_vendors": {
         "core_stock_apis": "longbridge_mcp, longbridge, westock",
-        "technical_indicators": "longbridge_mcp, longbridge, westock",
+        "technical_indicators": "westock, longbridge_mcp",
         "fundamental_data": "longbridge_mcp, longbridge, westock",
         "news_data": "longbridge_mcp, longbridge, westock, duckduckgo, alpha_vantage",
         "social_data": "bird, reddit",

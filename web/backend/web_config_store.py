@@ -35,6 +35,7 @@ ALLOWED_VENDORS = {
 }
 
 LEGACY_NEWS_DEFAULT = ("westock", "duckduckgo", "alpha_vantage")
+LEGACY_TECHNICAL_DEFAULT = ("longbridge_mcp", "longbridge", "westock")
 
 
 def _default_path() -> Path:
@@ -65,16 +66,25 @@ def _normalize_vendor_rows(
     result = {}
     for category, allowed in ALLOWED_VENDORS.items():
         rows = source.get(category)
-        legacy_news_ids = (
-            tuple(row.get("id") for row in rows if isinstance(row, dict))
+        legacy_enabled_ids = (
+            tuple(
+                row.get("id")
+                for row in rows
+                if isinstance(row, dict) and row.get("enabled") is not False
+            )
             if isinstance(rows, list)
             else ()
         )
         if (
             migrate_legacy_defaults
             and category == "news_data"
-            and legacy_news_ids == LEGACY_NEWS_DEFAULT
-            and all(row.get("enabled") is not False for row in rows if isinstance(row, dict))
+            and legacy_enabled_ids == LEGACY_NEWS_DEFAULT
+        ):
+            rows = defaults[category]
+        if (
+            migrate_legacy_defaults
+            and category == "technical_indicators"
+            and legacy_enabled_ids == LEGACY_TECHNICAL_DEFAULT
         ):
             rows = defaults[category]
         if not isinstance(rows, list):

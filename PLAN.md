@@ -453,3 +453,9 @@ Next evolution: add an optional independent `review-model` job that consumes imm
 Longbridge news is now part of the default validated news chain. Per-symbol news prefers MCP's structured `news` response and falls back to the CLI's structured `news` JSON before Westock, DuckDuckGo, and Alpha Vantage. Global macro headlines use the CLI's structured `news search` response; the hosted MCP `news_search` tool is deliberately not registered for global news because its live response currently reports epoch timestamps, which cannot satisfy deterministic publication-time validation. Both adapters map raw JSON directly to `NewsFeed`; router-level validation remains responsible for source IDs, requested-window enforcement, URLs, symbol binding, and deduplication.
 
 Existing Web provider configurations matching the former untouched default are migrated to enable the two Longbridge news vendors. Explicitly customized news-provider lists retain their chosen ordering and enabled state.
+
+## Westock-first technical indicators (2026-07-13)
+
+- The default indicator route is `westock → longbridge_mcp`. Westock/stockstats computes indicators deterministically from the shared canonical OHLCV series, while MCP remains a validated fallback.
+- Longbridge CLI stays registered for explicit opt-in and diagnostics, but is disabled in the default indicator chain because its summary response cannot satisfy the same dated-series validation contract.
+- Existing Web configurations matching the former untouched indicator default are migrated; custom provider ordering and enablement are preserved.

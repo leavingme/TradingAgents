@@ -48,6 +48,7 @@
 - [ ] **安全测试加固 — OpenAI-compatible 密钥隔离**：`test_keyless_local_uses_placeholder_and_chat_completions` 必须同时临时清除 `OPENAI_COMPATIBLE_API_KEY` 与通用 fallback `OPENAI_API_KEY`，并避免在断言差异、pytest 输出或 CI 日志中读取/打印真实密钥明文；测试结束后由 `monkeypatch` 自动恢复原环境。
 - [x] **NVDA 工程闭环**：提供受审计的基准运行、完整执行证据导出、结构化 findings/P0 方案、人工 review 确认、P0 实现证据、修改后固定验收和不可绕过的完成 gate。
 - [x] **Longbridge 结构化新闻接入**：个股新闻按 `longbridge_mcp → longbridge` 优先，全球宏观新闻使用 Longbridge CLI 结构化搜索；原始响应直接映射 `NewsFeed` 并通过统一来源、时间、URL、标的和截止校验。MCP `news_search` 在时间字段恢复前不得冒充有效全球新闻。
+- [x] **技术指标默认路由**：默认使用 Westock/stockstats 基于规范 OHLCV 做确定性计算，Longbridge MCP 仅作 fallback；Longbridge CLI 保留可选能力但不进入默认指标链。旧 Web 默认配置自动迁移，自定义顺序保持不变。
 - [ ] **独立工程 Reviewer 模型**：增加可选 `review-model` 阶段，仅读取不可变 execution evidence，输出带 event/vendor/source 引用的结构化 findings；Codex/其他 Reviewer 不得直接修改历史或决定通过，仍需人工确认、确定性验证和现有 gate。
 
 架构约束：

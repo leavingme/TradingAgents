@@ -10,6 +10,11 @@ def test_web_config_store_persists_runtime_and_provider_settings(tmp_path):
     initial = store.load()
     assert initial["persisted"] is False
     assert [row["id"] for row in initial["providers"]["social_data"]] == ["bird", "reddit"]
+    assert initial["providers"]["technical_indicators"][:3] == [
+        {"id": "westock", "enabled": True},
+        {"id": "longbridge_mcp", "enabled": True},
+        {"id": "longbridge", "enabled": False},
+    ]
 
     saved = store.save({
         "settings": {
@@ -68,6 +73,29 @@ def test_web_config_store_migrates_legacy_default_news_chain(tmp_path):
 
     assert [row["id"] for row in news[:2]] == ["longbridge_mcp", "longbridge"]
     assert all(row["enabled"] for row in news)
+
+
+def test_web_config_store_migrates_legacy_default_indicator_chain(tmp_path):
+    path = tmp_path / "legacy-indicators.json"
+    path.write_text(json.dumps({
+        "settings": {},
+        "providers": {
+            "technical_indicators": [
+                {"id": "longbridge_mcp", "enabled": True},
+                {"id": "longbridge", "enabled": True},
+                {"id": "westock", "enabled": True},
+                {"id": "alpha_vantage", "enabled": False},
+            ],
+        },
+    }))
+
+    indicators = WebConfigStore(path).load()["providers"]["technical_indicators"]
+
+    assert indicators[:2] == [
+        {"id": "westock", "enabled": True},
+        {"id": "longbridge_mcp", "enabled": True},
+    ]
+    assert {row["id"]: row["enabled"] for row in indicators}["longbridge"] is False
 
 
 def test_web_config_api_round_trip(monkeypatch, tmp_path):

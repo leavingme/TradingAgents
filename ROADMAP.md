@@ -8,7 +8,7 @@
 - 截至 2026-07-14，没有未完成的明确 P0。
 - 当前排序遵循 `AGENTS.md` 的四级原则：**安全与正确性 → 运行可靠性/成本 → 核心研究能力 → 高复杂度扩展**。
 - 排名是执行顺序，不是功能价值评分。默认启用且可能影响决策的链路，优先于尚未开放的未来能力。
-- 第 1–4 项已完成；下一项是第 5 项技术指标批量获取。
+- 第 1–5 项已完成；下一项是第 6 项运行上下文压缩。
 
 ## 路线项权威顺序与状态
 
@@ -18,7 +18,7 @@
 | 2 | 已完成（2026-07-14） | Runtime 失败状态与 vendor 轨迹 | 明确显示失败数据域、尝试过的 vendor、fallback 路径及校验原因，避免失败或降级被误读。 |
 | 3 | 已完成（2026-07-14） | 新闻、宏观校验覆盖审计 | 已逐项核对正文、发布时间、观察期、单位、revision/vintage、`source_id` 与 cutoff，并补齐缺口。 |
 | 4 | 已完成（2026-07-14） | SSE / report-section 节流 | 已按 run + section 合并高频中间版本，并消除 Web bridge 重复持久化和 SSE replay 重复发送。 |
-| 5 | 未完成 | 技术指标批量获取 | 减少约 12 次串行请求、重复 OHLCV 加载、事件数量和等待时间。 |
+| 5 | 已完成（2026-07-14） | 技术指标批量获取 | 已实现单次规范 OHLCV、本地批量计算、批量 MCP fallback 和逐项确定性校验。 |
 | 6 | 未完成 | 运行上下文压缩 | depth=1 已观测到超过 25 万输入 token；需要降低成本、延迟和长上下文遗漏风险。 |
 | 7 | 未完成 | 仓位引擎与交易校验器解耦 | 分离建议仓位计算与服务端风险硬门禁；现有风险政策已 fail-closed，因此不是 P0。 |
 | 8 | 未完成 | Longbridge 前瞻研究数据域 | 接入一致预期、EPS、财务日历、评级、filings 和空头数据。 |
@@ -63,10 +63,11 @@
   - 用并发运行验证 SQLite lock、写入次数和浏览器更新频率明显下降。
   - 完成证据：canonical runtime 新增按 `run_id + section` 的 500 ms leading/trailing throttle；首版立即可见，窗口内只保留最新版，并在 agent 完成、终态事件和流结束前强制 flush。100 次同 section 合成测试只持久化并通过 SSE 发送首末 2 个版本，SQLite 写入和浏览器 section 更新下降 98%；4 个并发 run 的 400 个原始更新只生成 8 条 report 事件，无 lock 错误且每个 run 的终版均为第 100 版。Web bridge 不再对 runtime 已落盘事件执行第二次 SQLite 去重事务；SSE 改用广播 condition + 每连接独立 replay cursor，活动连接不再重复发送连接前事件，多连接不再争抢单一队列。heartbeat 格式、历史 replay 和 EventSource 自动重连保持不变。相关 runtime/history/Web 节流测试及项目 Web/CLI 门禁共 76 项通过，前端语法检查通过；长期 Web 服务热加载后保持 active，defaults、env-status、runs 和持久化 SSE replay 接口均验证可用。
 
-- [ ] **5. 技术指标批量获取**
+- [x] **5. 技术指标批量获取**
   - 一次加载规范 OHLCV，批量计算/获取 Market Analyst 所需指标，避免约 12 次重复串行调用。
   - 保留每个指标的预热窗口、确定性 validator、vendor 来源和 fallback 可观测性。
   - 批量结果必须与现有逐项结果在约定容差内一致。
+  - 完成证据：Market Analyst 的 `get_indicators` schema 改为一次接收最多 8 个指标，默认 westock/stockstats 路径只加载一次 canonical OHLCV、创建一个 stockstats frame 并逐项生成结构化 `IndicatorBatch`；同 symbol/date 的缓存填充增加 singleflight，避免并发 cache miss 击穿 Longbridge。router 对每条序列分别执行预热、日期、freshness、数值范围与 Close 相对范围 validator；本地部分失败时只把缺失集合合并为一次 Longbridge MCP 多 `plot()` `quant_run`，仍未解决的个别项才进入旧单项兼容 fallback，所有 batch 与 fallback vendor attempt 保持 run-scoped ledger 可见。基线 NVDA 运行曾产生 10 次技术指标调用和 26 次 Longbridge OHLCV 调用，同秒最多 6 个 OHLCV 请求；新默认 live probe 以一次 batch 在 1.2 秒内返回 8 个有效 section，真实 MCP probe 以一次请求返回 RSI+ATR 并通过 `2026-07-13` 最新交易日校验。批量与旧逐项结果在 `1e-12` 相对容差内一致；指标/OHLCV/router/Web 相关测试 97 项通过、1 项显式 live provider 测试按环境跳过，项目 Web/CLI 门禁 101 项通过，前端语法与 Python 编译检查通过。
 
 - [ ] **6. 运行上下文压缩**
   - 基准证据：NVDA depth=1 两次运行输入 token 为 254,861 和 252,244。

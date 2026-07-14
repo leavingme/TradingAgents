@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from io import StringIO
+import math
 import re
 
 import pandas as pd
@@ -41,6 +42,98 @@ class NormalizedIndicatorData:
     summary_values: tuple[float, ...] = ()
     bars: int | None = None
     source_text: str = ""
+
+
+@dataclass(frozen=True)
+class IndicatorBatch:
+    """Structured technical indicators computed from one OHLCV snapshot."""
+
+    symbol: str
+    analysis_date: str
+    vendor: str
+    requested_indicators: tuple[str, ...]
+    series: tuple[NormalizedIndicatorData, ...]
+    latest_ohlcv_date: str
+    reference_close: float
+    calculation_start: str
+    failures: tuple[tuple[str, str], ...] = ()
+
+    def by_indicator(self) -> dict[str, NormalizedIndicatorData]:
+        return {item.indicator: item for item in self.series}
+
+
+def validate_indicator_batch(batch: object) -> tuple[IndicatorBatch, dict[str, str]]:
+    """Validate every available series while preserving partial failure detail."""
+    if not isinstance(batch, IndicatorBatch):
+        raise TypeError("indicator batch vendor must return IndicatorBatch")
+    if not batch.requested_indicators:
+        raise ValueError("indicator batch requested no indicators")
+    if not batch.vendor.strip():
+        raise ValueError("indicator batch requires vendor provenance")
+    if not math.isfinite(batch.reference_close) or batch.reference_close <= 0:
+        raise ValueError("indicator batch requires a positive verified Close")
+    if not batch.latest_ohlcv_date:
+        raise ValueError("indicator batch requires latest OHLCV date")
+    if pd.Timestamp(batch.latest_ohlcv_date) > pd.Timestamp(batch.analysis_date):
+        raise ValueError("indicator batch OHLCV date is after analysis date")
+    if len(set(batch.requested_indicators)) != len(batch.requested_indicators):
+        raise ValueError("indicator batch contains duplicate requested indicators")
+
+    valid: list[NormalizedIndicatorData] = []
+    failures = dict(batch.failures)
+    requested = set(batch.requested_indicators)
+    seen: set[str] = set()
+    for item in batch.series:
+        if item.indicator not in requested:
+            failures[item.indicator] = "vendor returned an unrequested indicator"
+            continue
+        if item.indicator in seen:
+            failures[item.indicator] = "vendor returned a duplicate indicator series"
+            continue
+        seen.add(item.indicator)
+        result = validate_indicator_result(
+            item,
+            reference_close=(
+                batch.reference_close if indicator_requires_close(item.indicator) else None
+            ),
+            expected_latest_date=batch.latest_ohlcv_date,
+        )
+        if result.is_valid:
+            valid.append(item)
+        else:
+            failures[item.indicator] = result.detail or "indicator validation failed"
+
+    available = {item.indicator for item in valid}
+    for indicator in requested - available - set(failures):
+        failures[indicator] = "indicator vendor returned no series"
+    return (
+        IndicatorBatch(
+            symbol=batch.symbol,
+            analysis_date=batch.analysis_date,
+            vendor=batch.vendor,
+            requested_indicators=batch.requested_indicators,
+            series=tuple(valid),
+            latest_ohlcv_date=batch.latest_ohlcv_date,
+            reference_close=batch.reference_close,
+            calculation_start=batch.calculation_start,
+            failures=tuple(sorted(failures.items())),
+        ),
+        failures,
+    )
+
+
+def render_indicator_batch(batch: IndicatorBatch) -> str:
+    """Render a validated batch only at the LLM boundary."""
+    sections = [
+        item.source_text.strip()
+        for item in batch.series
+        if item.source_text.strip()
+    ]
+    provenance = (
+        f"Batch Source: {batch.vendor}; OHLCV latest={batch.latest_ohlcv_date}; "
+        f"calculation_start={batch.calculation_start}"
+    )
+    return "\n\n".join([provenance, *sections])
 
 
 def _parse_ohlcv(payload: object) -> pd.DataFrame:

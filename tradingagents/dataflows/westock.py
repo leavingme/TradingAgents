@@ -13,6 +13,15 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from .config import get_config
+from .data_validation import (
+    IndicatorBatch,
+    IndicatorObservation,
+    NormalizedIndicatorData,
+)
+from .indicator_requirements import (
+    effective_indicator_lookback_days,
+    indicator_calculation_lookback_days,
+)
 from .stockstats_utils import (
     _assert_ohlcv_not_stale,
     filter_financials_by_date,
@@ -21,6 +30,12 @@ from .stockstats_utils import (
 from .symbol_utils import NoMarketDataError, normalize_symbol
 
 logger = logging.getLogger(__name__)
+
+SUPPORTED_STOCKSTATS_INDICATORS = {
+    "close_50_sma", "close_200_sma", "close_10_ema",
+    "macd", "macds", "macdh", "rsi", "boll", "boll_ub", "boll_lb",
+    "atr", "vwma", "mfi",
+}
 
 
 def get_westock_data_online(
@@ -248,6 +263,101 @@ def get_stock_stats_indicators_window(
     )
 
     return result_str
+
+
+def get_stock_stats_indicators_batch(
+    symbol: str,
+    indicators: list[str] | tuple[str, ...],
+    curr_date: str,
+    look_back_days: int,
+) -> IndicatorBatch:
+    """Calculate several indicators from one canonical OHLCV load and frame."""
+    requested = tuple(
+        dict.fromkeys(
+            str(item).lower().strip() for item in indicators if str(item).strip()
+        )
+    )
+    if not requested:
+        raise ValueError("At least one indicator is required")
+    if len(requested) > 8:
+        raise ValueError("At most 8 indicators may be requested in one batch")
+
+    unsupported = [
+        item for item in requested if item not in SUPPORTED_STOCKSTATS_INDICATORS
+    ]
+    if unsupported:
+        raise ValueError(f"Unsupported indicators: {', '.join(unsupported)}")
+
+    end = pd.Timestamp(curr_date)
+    output_days = {
+        item: effective_indicator_lookback_days(item, int(look_back_days))
+        for item in requested
+    }
+    calculation_days = max(
+        indicator_calculation_lookback_days(item, output_days[item])
+        for item in requested
+    )
+    calculation_start = (end - pd.Timedelta(days=calculation_days)).strftime("%Y-%m-%d")
+    data = load_ohlcv(symbol, curr_date)
+    data = data[
+        (data["Date"] >= pd.Timestamp(calculation_start)) & (data["Date"] <= end)
+    ].copy()
+    if data.empty:
+        raise NoMarketDataError(
+            symbol, detail=f"No OHLCV rows on or after calculation start {calculation_start}"
+        )
+
+    from stockstats import wrap
+
+    stock_frame = wrap(data)
+    failures: list[tuple[str, str]] = []
+    series: list[NormalizedIndicatorData] = []
+    for indicator in requested:
+        try:
+            stock_frame[indicator]
+            display_start = end - pd.Timedelta(days=output_days[indicator])
+            values = pd.DataFrame({
+                "Date": pd.to_datetime(stock_frame["Date"], errors="coerce"),
+                "Value": pd.to_numeric(stock_frame[indicator], errors="coerce"),
+            })
+            values = values[
+                (values["Date"] >= display_start)
+                & (values["Date"] <= end)
+                & values["Value"].notna()
+            ]
+            observations = tuple(
+                IndicatorObservation(pd.Timestamp(row.Date), float(row.Value))
+                for row in values.itertuples(index=False)
+            )
+            source_text = "\n".join([
+                f"## {indicator} values from {display_start.strftime('%Y-%m-%d')} to {curr_date}:",
+                "",
+                *(f"{item.date.strftime('%Y-%m-%d')}: {item.value}" for item in observations),
+                "",
+                "Data Source: westock local stockstats over canonical OHLCV",
+            ])
+            series.append(NormalizedIndicatorData(
+                indicator=indicator,
+                analysis_date=end,
+                observations=observations,
+                bars=len(observations),
+                source_text=source_text,
+            ))
+        except Exception as exc:
+            failures.append((indicator, f"{type(exc).__name__}: {exc}"))
+
+    latest_row = data.sort_values("Date").iloc[-1]
+    return IndicatorBatch(
+        symbol=normalize_symbol(symbol),
+        analysis_date=curr_date,
+        vendor="westock",
+        requested_indicators=requested,
+        series=tuple(series),
+        latest_ohlcv_date=pd.Timestamp(latest_row["Date"]).strftime("%Y-%m-%d"),
+        reference_close=float(latest_row["Close"]),
+        calculation_start=calculation_start,
+        failures=tuple(failures),
+    )
 
 
 def _get_stock_stats_bulk(

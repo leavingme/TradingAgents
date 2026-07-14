@@ -18,10 +18,13 @@ from .alpha_vantage import (
 )
 from .config import get_config
 from .data_validation import (
+    IndicatorBatch,
     indicator_requires_close,
     latest_verified_close,
     latest_verified_ohlcv_date,
     normalize_indicator_result,
+    render_indicator_batch,
+    validate_indicator_batch,
     validate_indicator_result,
     validate_vendor_result,
 )
@@ -72,6 +75,7 @@ try:
     from .longbridge_mcp import (
         get_stock_data as get_longbridge_mcp_stock,
         get_indicators as get_longbridge_mcp_indicators,
+        get_indicators_batch as get_longbridge_mcp_indicators_batch,
         get_fundamentals as get_longbridge_mcp_fundamentals,
         get_balance_sheet as get_longbridge_mcp_balance_sheet,
         get_cashflow as get_longbridge_mcp_cashflow,
@@ -84,6 +88,7 @@ except ImportError:
     _LBMCP_NONE = None
     get_longbridge_mcp_stock = _LBMCP_NONE
     get_longbridge_mcp_indicators = _LBMCP_NONE
+    get_longbridge_mcp_indicators_batch = _LBMCP_NONE
     get_longbridge_mcp_fundamentals = _LBMCP_NONE
     get_longbridge_mcp_balance_sheet = _LBMCP_NONE
     get_longbridge_mcp_cashflow = _LBMCP_NONE
@@ -97,6 +102,7 @@ from .westock import (
     get_income_statement as get_westock_income_statement,
     get_insider_transactions as get_westock_insider_transactions,
     get_stock_stats_indicators_window,
+    get_stock_stats_indicators_batch,
     get_westock_data_online,
 )
 from .westock_news import get_global_news_westock, get_news_westock
@@ -121,7 +127,8 @@ TOOLS_CATEGORIES = {
     "technical_indicators": {
         "description": "Technical analysis indicators",
         "tools": [
-            "get_indicators"
+            "get_indicators",
+            "get_indicators_batch",
         ]
     },
     "fundamental_data": {
@@ -190,6 +197,10 @@ VENDOR_METHODS = {
         "westock": get_stock_stats_indicators_window,
         "longbridge": get_longbridge_indicators,
         "longbridge_mcp": get_longbridge_mcp_indicators,
+    },
+    "get_indicators_batch": {
+        "westock": get_stock_stats_indicators_batch,
+        "longbridge_mcp": get_longbridge_mcp_indicators_batch,
     },
     # fundamental_data
     "get_fundamentals": {
@@ -305,6 +316,9 @@ def _runtime_external_time_args(method: str, args: tuple) -> tuple:
 
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
+    excluded_vendors = {
+        str(value) for value in kwargs.pop("_exclude_vendors", ())
+    }
     if method == "get_indicators" and len(args) >= 4:
         normalized_args = list(args)
         normalized_args[3] = effective_indicator_lookback_days(
@@ -355,6 +369,11 @@ def route_to_vendor(method: str, *args, **kwargs):
             )
     else:
         vendor_chain = all_available_vendors
+    vendor_chain = [vendor for vendor in vendor_chain if vendor not in excluded_vendors]
+    if not vendor_chain:
+        raise ValueError(
+            f"No available vendor remains for '{method}' after exclusions"
+        )
 
     # --- Financial Reconciliation Interception ---
     if method in FINANCIAL_METHODS:
@@ -727,6 +746,18 @@ def route_to_vendor(method: str, *args, **kwargs):
                     reference_close=reference_close,
                     expected_latest_date=expected_latest_date,
                 )
+            elif method == "get_indicators_batch":
+                normalized_result, failures = validate_indicator_batch(result)
+                validation = type(
+                    "Validation",
+                    (),
+                    {
+                        "is_valid": bool(normalized_result.series),
+                        "detail": "; ".join(
+                            f"{key}: {value}" for key, value in failures.items()
+                        ),
+                    },
+                )()
             elif method == "get_social_posts":
                 try:
                     normalized_result = validate_social_feed(
@@ -858,7 +889,7 @@ def route_to_vendor(method: str, *args, **kwargs):
                 method, first_error,
             )
         if method in {
-            "get_stock_data", "get_indicators", "get_social_posts",
+            "get_stock_data", "get_indicators", "get_indicators_batch", "get_social_posts",
             "get_news", "get_global_news", "get_macro_indicators",
         } | FINANCIAL_METHODS:
             raise last_no_data
@@ -890,6 +921,94 @@ def route_to_vendor(method: str, *args, **kwargs):
         raise first_error
 
     raise RuntimeError(f"No available vendor for '{method}'")
+
+
+def route_indicator_batch(
+    symbol: str,
+    indicators: list[str] | tuple[str, ...],
+    curr_date: str,
+    look_back_days: int = 30,
+) -> str:
+    """Batch the local primary path and selectively route only failed series."""
+    requested = tuple(
+        dict.fromkeys(
+            str(item).lower().strip() for item in indicators if str(item).strip()
+        )
+    )
+    if not requested:
+        raise ValueError("At least one indicator is required")
+    if len(requested) > 8:
+        raise ValueError("At most 8 indicators may be requested in one batch")
+
+    batch: IndicatorBatch | None = None
+    primary_error: Exception | None = None
+    try:
+        result = route_to_vendor(
+            "get_indicators_batch", symbol, requested, curr_date, look_back_days
+        )
+        if isinstance(result, IndicatorBatch):
+            batch = result
+    except Exception as exc:
+        primary_error = exc
+
+    rendered: dict[str, str] = {}
+    failures: dict[str, str] = {}
+    if batch is not None:
+        rendered.update(
+            (item.indicator, item.source_text) for item in batch.series
+        )
+        failures.update(batch.failures)
+
+    missing = [indicator for indicator in requested if indicator not in rendered]
+    primary_missing = tuple(missing)
+    if missing:
+        try:
+            fallback_batch = route_to_vendor(
+                "get_indicators_batch",
+                symbol,
+                tuple(missing),
+                curr_date,
+                look_back_days,
+                _exclude_vendors={"westock"},
+            )
+            if isinstance(fallback_batch, IndicatorBatch):
+                rendered.update(
+                    (item.indicator, item.source_text)
+                    for item in fallback_batch.series
+                )
+                failures.update(fallback_batch.failures)
+        except Exception as exc:
+            for indicator in missing:
+                failures[indicator] = str(exc)
+
+    missing = [indicator for indicator in requested if indicator not in rendered]
+    for indicator in missing:
+        try:
+            rendered[indicator] = route_to_vendor(
+                "get_indicators",
+                symbol,
+                indicator,
+                curr_date,
+                look_back_days,
+                _exclude_vendors={"westock"},
+            )
+            failures.pop(indicator, None)
+        except Exception as exc:
+            failures[indicator] = str(exc)
+
+    unresolved = [indicator for indicator in requested if indicator not in rendered]
+    if unresolved:
+        detail = "; ".join(
+            f"{indicator}: {failures.get(indicator, 'unavailable')}"
+            for indicator in unresolved
+        )
+        if primary_error is not None:
+            detail = f"batch primary failed: {primary_error}; {detail}"
+        raise NoUsableTechnicalIndicatorError(symbol, ",".join(unresolved), detail)
+
+    if batch is not None and not primary_missing:
+        return render_indicator_batch(batch)
+    return "\n\n".join(rendered[indicator].strip() for indicator in requested)
 
 
 def _safe_audit_arguments(args, kwargs) -> str:
@@ -948,11 +1067,19 @@ def _vendor_audit_metadata(method: str, args: tuple, category: str) -> dict[str,
     if method == "get_stock_data" and len(args) >= 3:
         metadata["calculation_start"] = str(args[1])
         metadata["requested_end"] = str(args[2])
-    elif method == "get_indicators" and len(args) >= 4:
+    elif method in {"get_indicators", "get_indicators_batch"} and len(args) >= 4:
         end = datetime.strptime(str(args[2]), "%Y-%m-%d")
         from .indicator_requirements import indicator_calculation_lookback_days
 
-        days = indicator_calculation_lookback_days(str(args[1]), int(args[3]))
+        indicator_values = (
+            tuple(args[1])
+            if method == "get_indicators_batch" and not isinstance(args[1], str)
+            else (str(args[1]),)
+        )
+        days = max(
+            indicator_calculation_lookback_days(str(value), int(args[3]))
+            for value in indicator_values
+        )
         metadata["calculation_start"] = (end - timedelta(days=days)).strftime("%Y-%m-%d")
         metadata["requested_end"] = str(args[2])
     return metadata

@@ -369,6 +369,10 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   各自配置链路。当分析日为当前交易日时，收盘缓冲期结束前不得把当日日 K
   视为完整数据；共享 OHLCV 缓存只保留规范的 Date/Open/High/Low/Close/Volume
   列，新获取的同日完整 K 线必须覆盖盘中残缺记录。
+- **技术指标批量路径**：Market Analyst 应在一次 `get_indicators` 调用中传入最多
+  8 个指标。默认 stockstats 引擎只加载一次 canonical OHLCV 并批量计算；部分失败
+  由 router 将缺失集合批量交给 Longbridge MCP `quant_run`，不得恢复逐指标重复
+  OHLCV 获取。每条指标仍必须保留独立 validator 结果、vendor 来源和 fallback 审计。
 
 ## 开发最佳实践与文档维护约定
 

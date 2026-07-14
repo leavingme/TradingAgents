@@ -379,8 +379,9 @@ def get_stock_data(
 # ---- technical_indicators: via `longbridge quant run` (PineScript V6) ----
 #
 # PineScript V6 indicator scripts we use server-side. longbridge CLI executes them
-# against its own K-line data and returns the JSON plot values — no quota, no
-# local computation, no stockstats dependency.
+# against its own K-line data and returns plot values. This is remote server
+# computation: published OpenAPI/quant service limits still apply; it is not a
+# local or unlimited path and has no stockstats dependency.
 #
 # Each script is intentionally minimal: it emits a single `plot(...)` whose value
 # is the indicator we want. The CLI returns the last value in the date range.

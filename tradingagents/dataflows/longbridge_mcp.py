@@ -33,6 +33,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from .data_validation import (
+    IndicatorBatch,
+    IndicatorObservation,
+    NormalizedIndicatorData,
+)
 from .errors import NoMarketDataError
 from .evidence_models import NewsFeed, NewsItem, parse_external_datetime
 from .indicator_requirements import (
@@ -549,6 +554,205 @@ _INDICATOR_ALIASES = {
     "boll_ub": "boll",
     "boll_lb": "boll",
 }
+
+
+def _batch_indicator_script(
+    indicators: tuple[str, ...],
+) -> tuple[str, list[str], list[str]]:
+    """Build one multi-plot OpenPine script and its deterministic plot order."""
+    lines = ["//@version=6", 'indicator("TradingAgents Indicator Batch")']
+    plot_order: list[str] = []
+    unsupported: list[str] = []
+    macd_ready = False
+    boll_ready = False
+    for indicator in indicators:
+        if indicator in {"macd", "macds", "macdh"}:
+            if not macd_ready:
+                lines.append(
+                    "[batch_macd, batch_macds, batch_macdh] = "
+                    "ta.macd(close, 12, 26, 9)"
+                )
+                macd_ready = True
+            variable = {
+                "macd": "batch_macd",
+                "macds": "batch_macds",
+                "macdh": "batch_macdh",
+            }[indicator]
+        elif indicator in {"boll", "boll_ub", "boll_lb"}:
+            if not boll_ready:
+                lines.append(
+                    "[batch_boll, batch_boll_ub, batch_boll_lb] = "
+                    "ta.bb(close, 20, 2)"
+                )
+                boll_ready = True
+            variable = {
+                "boll": "batch_boll",
+                "boll_ub": "batch_boll_ub",
+                "boll_lb": "batch_boll_lb",
+            }[indicator]
+        else:
+            expression = {
+                "rsi": "ta.rsi(close, 14)",
+                "atr": "ta.atr(14)",
+                "vwma": "ta.vwma(close, 20)",
+                "sma": "ta.sma(close, 20)",
+                "sma50": "ta.sma(close, 50)",
+                "close_10_ema": "ta.ema(close, 10)",
+                "close_50_sma": "ta.sma(close, 50)",
+                "close_200_sma": "ta.sma(close, 200)",
+            }.get(indicator)
+            if expression is None:
+                unsupported.append(indicator)
+                continue
+            variable = expression
+        lines.append(f'plot({variable}, "{indicator}")')
+        plot_order.append(indicator)
+    lines.append('plot(close, "__reference_close")')
+    plot_order.append("__reference_close")
+    return "\n".join(lines) + "\n", plot_order, unsupported
+
+
+def get_indicators_batch(
+    symbol: str,
+    indicators: list[str] | tuple[str, ...],
+    curr_date: str,
+    look_back_days: int,
+) -> IndicatorBatch:
+    """Fetch multiple indicator series in one MCP quant_run request."""
+    requested = tuple(
+        dict.fromkeys(
+            str(item).lower().strip() for item in indicators if str(item).strip()
+        )
+    )
+    if not requested:
+        raise ValueError("At least one indicator is required")
+    if len(requested) > 8:
+        raise ValueError("At most 8 indicators may be requested in one batch")
+    end = datetime.strptime(curr_date, "%Y-%m-%d")
+    output_days = {
+        item: effective_indicator_lookback_days(item, int(look_back_days))
+        for item in requested
+    }
+    calculation_days = max(
+        indicator_calculation_lookback_days(item, output_days[item])
+        for item in requested
+    )
+    start = (end - timedelta(days=calculation_days)).strftime("%Y-%m-%d")
+    script, plot_order, unsupported = _batch_indicator_script(requested)
+    client = _client()
+    raw = client.call_tool(
+        _resolve_tool(client, "technical_indicator"),
+        {
+            "symbol": normalize_symbol(symbol),
+            "period": "day",
+            "start": start,
+            "end": (end + timedelta(days=1)).strftime("%Y-%m-%d"),
+            "script": script,
+        },
+    )
+
+    def parse_json(value):
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
+    chart = parse_json(raw.get("chart_json")) if isinstance(raw, dict) else None
+    events = parse_json(raw.get("events_json")) if isinstance(raw, dict) else None
+    if not isinstance(chart, dict) or not isinstance(events, list):
+        raise MCPTransportError("batch quant_run returned no structured chart/events data")
+
+    raw_dates: list[str] = []
+    for event in events:
+        bar = event.get("BarStart") if isinstance(event, dict) else None
+        timestamp = bar.get("timestamp") if isinstance(bar, dict) else None
+        if timestamp is None:
+            continue
+        value = float(timestamp)
+        if value > 10_000_000_000:
+            value /= 1000
+        raw_dates.append(datetime.fromtimestamp(value, tz=timezone.utc).isoformat())
+
+    from .ohlcv_cache import normalize_ohlcv_dates, symbol_to_cache_key
+
+    normalized_dates = normalize_ohlcv_dates(
+        pd.DataFrame({"Date": raw_dates}),
+        symbol_to_cache_key(normalize_symbol(symbol)),
+    )
+    dates = [pd.Timestamp(value) for value in normalized_dates["Date"]]
+
+    graphs = chart.get("series_graphs") or {}
+    items = sorted(
+        graphs.items(),
+        key=lambda item: int(item[0]) if str(item[0]).isdigit() else 999,
+    )
+    extracted: dict[str, tuple[IndicatorObservation, ...]] = {}
+    for position, (_, body) in enumerate(items):
+        plot = body.get("Plot") if isinstance(body, dict) else None
+        values = plot.get("series") if isinstance(plot, dict) else None
+        if not isinstance(values, list):
+            continue
+        title = str(plot.get("title") or "")
+        name = title if title in plot_order else (
+            plot_order[position] if position < len(plot_order) else ""
+        )
+        if not name:
+            continue
+        observations: list[IndicatorObservation] = []
+        for index, value in enumerate(values):
+            if index >= len(dates) or dates[index] is None or value is None:
+                continue
+            try:
+                observations.append(IndicatorObservation(dates[index], float(value)))
+            except (TypeError, ValueError):
+                continue
+        extracted[name] = tuple(observations)
+
+    reference = tuple(
+        item for item in extracted.get("__reference_close", ())
+        if item.date <= pd.Timestamp(curr_date)
+    )
+    if not reference:
+        raise MCPTransportError("batch quant_run returned no reference Close series")
+
+    series: list[NormalizedIndicatorData] = []
+    failures = [(item, "unsupported by Longbridge batch quant") for item in unsupported]
+    for indicator in requested:
+        display_start = pd.Timestamp(curr_date) - pd.Timedelta(days=output_days[indicator])
+        observations = tuple(
+            item for item in extracted.get(indicator, ())
+            if display_start <= item.date <= pd.Timestamp(curr_date)
+        )
+        if not observations:
+            if indicator not in unsupported:
+                failures.append((indicator, "quant_run returned no series"))
+            continue
+        source_text = "\n".join([
+            f"## {indicator} values from {display_start.strftime('%Y-%m-%d')} to {curr_date}:",
+            "",
+            *(f"{item.date.strftime('%Y-%m-%d')}: {item.value}" for item in observations),
+            "",
+            "Data Source: Longbridge MCP (batch quant_run)",
+        ])
+        series.append(NormalizedIndicatorData(
+            indicator=indicator,
+            analysis_date=pd.Timestamp(curr_date),
+            observations=observations,
+            bars=len(observations),
+            source_text=source_text,
+        ))
+
+    latest_reference = max(reference, key=lambda item: item.date)
+    return IndicatorBatch(
+        symbol=normalize_symbol(symbol),
+        analysis_date=curr_date,
+        vendor="longbridge_mcp",
+        requested_indicators=requested,
+        series=tuple(series),
+        latest_ohlcv_date=latest_reference.date.strftime("%Y-%m-%d"),
+        reference_close=latest_reference.value,
+        calculation_start=start,
+        failures=tuple(failures),
+    )
 
 
 def get_indicators(

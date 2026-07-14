@@ -85,7 +85,7 @@ class FredLaggingLookbackTests(unittest.TestCase):
 class ToolSanitizerTests(unittest.TestCase):
     """Test that tool wrapper functions safely ignore extra hallucinated keys (e.g. /invoke) from LLM output."""
 
-    @mock.patch("tradingagents.agents.utils.technical_indicators_tools.route_to_vendor")
+    @mock.patch("tradingagents.agents.utils.technical_indicators_tools.route_indicator_batch")
     def test_get_indicators_ignores_extra_args(self, mock_route):
         mock_route.return_value = "dummy_result"
         # Even if /invoke or other garbage parameters are passed, the tool function should not crash
@@ -100,7 +100,7 @@ class ToolSanitizerTests(unittest.TestCase):
         except TypeError as e:
             self.fail(f"get_indicators raised TypeError with extra arguments: {e}")
         
-        mock_route.assert_called_with("get_indicators", "NVDA", "macdh", "2026-07-11", 60)
+        mock_route.assert_called_with("NVDA", ["macdh"], "2026-07-11", 60)
 
     @mock.patch("tradingagents.agents.utils.core_stock_tools.route_to_vendor")
     def test_get_stock_data_ignores_extra_args(self, mock_route):

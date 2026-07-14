@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from typing import Annotated
 
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 # is treated as stale. Generous enough to span long holiday weekends, tight
 # enough to catch the year-old frames westock occasionally returns (#1021).
 MAX_OHLCV_STALE_DAYS = 10
+_OHLCV_LOAD_LOCKS: dict[tuple[str, str, str], threading.Lock] = {}
+_OHLCV_LOAD_LOCKS_GUARD = threading.Lock()
 
 
 def _ensure_date_column(data: pd.DataFrame) -> pd.DataFrame:
@@ -102,6 +105,17 @@ def _assert_ohlcv_not_stale(
 
 
 def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
+    """Singleflight wrapper for canonical OHLCV cache fill and reads."""
+    canonical = normalize_symbol(symbol)
+    cache_dir = str(get_config()["data_cache_dir"])
+    key = (cache_dir, canonical, str(curr_date))
+    with _OHLCV_LOAD_LOCKS_GUARD:
+        lock = _OHLCV_LOAD_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        return _load_ohlcv_locked(symbol, curr_date)
+
+
+def _load_ohlcv_locked(symbol: str, curr_date: str) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
     Downloads 5 years of data up to today and merges into a per-symbol cache

@@ -269,6 +269,40 @@ def get_vendor(category: str, method: str = None) -> str:
     # Fall back to category-level configuration
     return config.get("data_vendors", {}).get(category, "default")
 
+def _runtime_external_time_args(method: str, args: tuple) -> tuple:
+    """Align current-information vendors with runtime temporal semantics."""
+    if method not in {"get_news", "get_global_news", "get_macro_indicators"}:
+        return args
+    from tradingagents.runtime.audit_context import (
+        current_analysis_mode,
+        current_information_cutoff,
+        current_run_id,
+    )
+
+    if not current_run_id():
+        return args
+    if current_analysis_mode() == "point_in_time":
+        cutoff = datetime.fromisoformat(
+            str(current_information_cutoff()).replace("Z", "+00:00")
+        )
+    else:
+        cutoff = datetime.now(timezone.utc)
+    news_end_date = cutoff.astimezone(timezone.utc).date()
+    macro_end_date = cutoff.date()
+    normalized = list(args)
+    if method == "get_news" and len(normalized) >= 3:
+        requested_start = datetime.fromisoformat(str(normalized[1])).date()
+        requested_end = datetime.fromisoformat(str(normalized[2])).date()
+        window_days = max((requested_end - requested_start).days, 0)
+        normalized[1] = (news_end_date - timedelta(days=window_days)).isoformat()
+        normalized[2] = news_end_date.isoformat()
+    elif method == "get_global_news" and normalized:
+        normalized[0] = news_end_date.isoformat()
+    elif method == "get_macro_indicators" and len(normalized) >= 2:
+        normalized[1] = macro_end_date.isoformat()
+    return tuple(normalized)
+
+
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     if method == "get_indicators" and len(args) >= 4:
@@ -277,6 +311,7 @@ def route_to_vendor(method: str, *args, **kwargs):
             str(normalized_args[1]), int(normalized_args[3])
         )
         args = tuple(normalized_args)
+    args = _runtime_external_time_args(method, args)
 
     category = get_category_for_method(method)
     audit_call_id = uuid4().hex
@@ -702,18 +737,27 @@ def route_to_vendor(method: str, *args, **kwargs):
                 validation = type("Validation", (), {"is_valid": True, "detail": ""})()
             elif method in {"get_news", "get_global_news"}:
                 from .evidence_models import validate_news_feed
+                from tradingagents.runtime.audit_context import current_information_cutoff
                 try:
                     normalized_result = validate_news_feed(
                         result,
                         symbol=str(args[0]) if method == "get_news" else None,
+                        expected_vendor=vendor,
+                        information_cutoff=current_information_cutoff(),
                     )
                 except (TypeError, ValueError) as exc:
                     raise NoMarketDataError(str(args[0]), detail=str(exc)) from exc
                 validation = type("Validation", (), {"is_valid": True, "detail": ""})()
             elif method == "get_macro_indicators":
                 from .evidence_models import validate_macro_series
+                from tradingagents.runtime.audit_context import current_information_cutoff
                 try:
-                    normalized_result = validate_macro_series(result)
+                    normalized_result = validate_macro_series(
+                        result,
+                        expected_vendor=vendor,
+                        expected_indicator=str(args[0]),
+                        information_cutoff=current_information_cutoff(),
+                    )
                 except (TypeError, ValueError) as exc:
                     raise NoMarketDataError(str(args[0]), detail=str(exc)) from exc
                 validation = type("Validation", (), {"is_valid": True, "detail": ""})()

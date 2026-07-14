@@ -53,11 +53,18 @@ class FredLaggingLookbackTests(unittest.TestCase):
     @mock.patch("tradingagents.dataflows.fred._request")
     def test_auto_lookback_expansion_for_lagging_indicators(self, mock_request, mock_key):
         # Setup mock responses for series info and observations
-        mock_request.side_effect = lambda path, params: (
-            {"seriess": [{"title": "Fake China CPI", "units": "Index", "frequency": "Monthly"}]}
-            if path == "series"
-            else {"observations": [{"date": "2024-03-01", "value": "115.0"}]}
-        )
+        def response(path, params):
+            if path == "series":
+                return {"seriess": [{
+                    "title": "Fake China CPI", "units": "Index",
+                    "frequency": "Monthly",
+                }]}
+            row = {"date": "2024-03-01", "value": "115.0"}
+            if params.get("output_type") == 4:
+                row["realtime_start"] = "2024-04-01"
+            return {"observations": [row]}
+
+        mock_request.side_effect = response
 
         # Retrieve a lagging indicator (cn_cpi) with a short window (180 days)
         fred.get_macro_data("cn_cpi", "2026-07-11", 180)
@@ -70,7 +77,7 @@ class FredLaggingLookbackTests(unittest.TestCase):
         # Retrieve a regular indicator (cpi) with 180 days -> no expansion
         fred.get_macro_data("cpi", "2026-07-11", 180)
         # 2026-07-11 - 180 days = 2026-01-12
-        obs_params_us = mock_request.call_args_list[3][0][1]
+        obs_params_us = mock_request.call_args_list[4][0][1]
         self.assertEqual(obs_params_us["observation_start"], "2026-01-12")
 
 

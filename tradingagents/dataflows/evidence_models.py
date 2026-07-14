@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import math
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,9 @@ class MacroObservation:
     observed_at: str
     value: float
     vendor: str
+    published_at: str = ""
+    vintage_date: str = ""
+    revision_status: str = ""
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,10 @@ class MacroSeries:
     requested_start: str
     requested_end: str
     observations: tuple[MacroObservation, ...]
+    vendor: str = ""
+    vintage_date: str = ""
+    revision_policy: str = ""
+    requested_indicator: str = ""
 
 
 @dataclass(frozen=True)
@@ -124,9 +131,15 @@ def news_source_id(*, vendor: str, title: str, published_at: str, url: str) -> s
     return "news_" + hashlib.sha256(material.encode()).hexdigest()[:20]
 
 
-def macro_source_id(series_id: str, observed_at: str) -> str:
+def macro_source_id(
+    series_id: str,
+    observed_at: str,
+    *,
+    vendor: str = "fred",
+    vintage_date: str = "",
+) -> str:
     return "macro_" + hashlib.sha256(
-        f"fred\x1f{series_id}\x1f{observed_at}".encode()
+        f"{vendor}\x1f{series_id}\x1f{observed_at}\x1f{vintage_date}".encode()
     ).hexdigest()[:20]
 
 
@@ -135,11 +148,43 @@ def prediction_source_id(*, vendor: str, event_id: str, market_id: str) -> str:
     return "prediction_" + hashlib.sha256(material.encode()).hexdigest()[:20]
 
 
-def validate_news_feed(feed: NewsFeed, *, symbol: str | None = None) -> NewsFeed:
+def _canonical_news_url(value: str) -> str:
+    parsed = urlsplit(value.strip())
+    query = urlencode(sorted(
+        (key, item) for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.casefold().startswith("utm_")
+        and key.casefold() not in {"fbclid", "gclid"}
+    ))
+    return urlunsplit((
+        parsed.scheme.casefold(), parsed.netloc.casefold(), parsed.path,
+        query, "",
+    ))
+
+
+def validate_news_feed(
+    feed: NewsFeed,
+    *,
+    symbol: str | None = None,
+    expected_vendor: str | None = None,
+    information_cutoff: str | None = None,
+    now: datetime | None = None,
+) -> NewsFeed:
     if not isinstance(feed, NewsFeed):
         raise TypeError("news vendor must return NewsFeed")
     start = datetime.fromisoformat(feed.requested_start).date()
     end = datetime.fromisoformat(feed.requested_end).date()
+    if start > end:
+        raise ValueError("news requested_start is after requested_end")
+    cutoff = (
+        datetime.fromisoformat(information_cutoff.replace("Z", "+00:00"))
+        if information_cutoff
+        else (now or datetime.now(timezone.utc))
+    )
+    if cutoff.tzinfo is None:
+        raise ValueError("news information_cutoff must include a timezone")
+    cutoff = cutoff.astimezone(timezone.utc)
+    if end > cutoff.date():
+        raise ValueError("news requested_end exceeds information cutoff")
     seen_urls: set[str] = set()
     seen_titles: set[str] = set()
     accepted: list[NewsItem] = []
@@ -148,9 +193,15 @@ def validate_news_feed(feed: NewsFeed, *, symbol: str | None = None) -> NewsFeed
             published = datetime.fromisoformat(parse_external_datetime(item.published_at))
         except ValueError:
             continue
-        if not start <= published.date() <= end:
+        if not start <= published.date() <= end or published > cutoff:
             continue
-        if not item.title.strip() or not item.publisher.strip():
+        if (
+            not item.title.strip()
+            or not item.publisher.strip()
+            or not item.summary.strip()
+            or not item.vendor.strip()
+            or (expected_vendor and item.vendor != expected_vendor)
+        ):
             continue
         parsed_url = urlsplit(item.url)
         if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
@@ -158,7 +209,8 @@ def validate_news_feed(feed: NewsFeed, *, symbol: str | None = None) -> NewsFeed
         symbols = tuple(value.upper() for value in item.symbols)
         if symbol and symbol.upper() not in symbols:
             continue
-        url_identity = item.url.strip().lower()
+        canonical_url = _canonical_news_url(item.url)
+        url_identity = canonical_url.casefold()
         title_identity = re.sub(r"[^a-z0-9\u3400-\u9fff]+", "", item.title.lower())
         if url_identity in seen_urls or title_identity in seen_titles:
             continue
@@ -168,10 +220,11 @@ def validate_news_feed(feed: NewsFeed, *, symbol: str | None = None) -> NewsFeed
         accepted.append(replace(
             item,
             published_at=canonical_time,
+            url=canonical_url,
             symbols=symbols,
             source_id=news_source_id(
                 vendor=item.vendor, title=item.title,
-                published_at=canonical_time, url=item.url,
+                published_at=canonical_time, url=canonical_url,
             ),
         ))
     if not accepted:
@@ -180,24 +233,68 @@ def validate_news_feed(feed: NewsFeed, *, symbol: str | None = None) -> NewsFeed
     return replace(feed, items=tuple(accepted))
 
 
-def validate_macro_series(series: MacroSeries) -> MacroSeries:
+def validate_macro_series(
+    series: MacroSeries,
+    *,
+    expected_vendor: str | None = None,
+    expected_indicator: str | None = None,
+    information_cutoff: str | None = None,
+    now: datetime | None = None,
+) -> MacroSeries:
     if not isinstance(series, MacroSeries):
         raise TypeError("macro vendor must return MacroSeries")
-    if not all((series.series_id.strip(), series.title.strip(), series.units.strip(), series.frequency.strip())):
-        raise ValueError("macro series is missing ID/title/units/frequency metadata")
+    if not all((
+        series.series_id.strip(), series.title.strip(), series.units.strip(),
+        series.frequency.strip(), series.vendor.strip(), series.vintage_date.strip(),
+        series.revision_policy.strip(), series.requested_indicator.strip(),
+    )):
+        raise ValueError(
+            "macro series is missing request/ID/title/units/frequency/vintage metadata"
+        )
+    if expected_vendor and series.vendor != expected_vendor:
+        raise ValueError("macro series vendor does not match routed vendor")
+    if (
+        expected_indicator
+        and series.requested_indicator.casefold() != expected_indicator.casefold()
+    ):
+        raise ValueError("macro series does not match requested indicator")
     start = datetime.fromisoformat(series.requested_start).date()
-    cutoff = datetime.fromisoformat(series.requested_end).date()
+    requested_end = datetime.fromisoformat(series.requested_end).date()
+    cutoff_time = (
+        datetime.fromisoformat(information_cutoff.replace("Z", "+00:00"))
+        if information_cutoff
+        else (now or datetime.now(timezone.utc))
+    )
+    if cutoff_time.tzinfo is None:
+        raise ValueError("macro information_cutoff must include a timezone")
+    cutoff = cutoff_time.astimezone(timezone.utc).date()
+    vintage = datetime.fromisoformat(series.vintage_date).date()
+    if start > requested_end or requested_end > cutoff or vintage > cutoff:
+        raise ValueError("macro request or vintage exceeds information cutoff")
     seen: set[str] = set()
     accepted = []
     for observation in series.observations:
         observed = datetime.fromisoformat(observation.observed_at).date()
+        published = datetime.fromisoformat(observation.published_at).date()
+        observation_vintage = datetime.fromisoformat(observation.vintage_date).date()
         if (
-            not start <= observed <= cutoff
+            not start <= observed <= requested_end
+            or not observed <= published <= cutoff
+            or not published <= observation_vintage <= cutoff
             or observation.series_id != series.series_id
+            or observation.title != series.title
             or observation.units != series.units
             or observation.frequency != series.frequency
+            or observation.vendor != series.vendor
+            or observation.vintage_date != series.vintage_date
+            or observation.revision_status not in {"initial", "revised"}
             or not math.isfinite(float(observation.value))
-            or observation.source_id != macro_source_id(series.series_id, observation.observed_at)
+            or observation.source_id != macro_source_id(
+                series.series_id,
+                observation.observed_at,
+                vendor=series.vendor,
+                vintage_date=series.vintage_date,
+            )
         ):
             continue
         if observation.source_id in seen:
@@ -357,10 +454,17 @@ def render_macro_series(series: MacroSeries) -> str:
     lines = [
         f"## Validated macro evidence: {series.title} ({series.series_id})",
         f"- Units: {series.units}", f"- Frequency: {series.frequency}",
-        "", "| source_id | Date | Value |", "|---|---|---:|",
+        f"- Vendor: {series.vendor}", f"- Vintage date: {series.vintage_date}",
+        f"- Revision policy: {series.revision_policy}",
+        f"- Requested indicator: {series.requested_indicator}",
+        "", "| source_id | Observation date | Published | Revision | Value |",
+        "|---|---|---|---|---:|",
     ]
     for item in series.observations[-40:]:
-        lines.append(f"| {item.source_id} | {item.observed_at} | {item.value} |")
+        lines.append(
+            f"| {item.source_id} | {item.observed_at} | {item.published_at} | "
+            f"{item.revision_status} | {item.value} |"
+        )
     return "\n".join(lines)
 
 

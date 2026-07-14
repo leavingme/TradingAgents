@@ -9,8 +9,9 @@ A free API key (https://fred.stlouisfed.org/docs/api/api_key.html) is read from
 the routing layer treats it as "unavailable" rather than a hard crash.
 """
 import logging
+import math
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -182,7 +183,33 @@ def get_macro_data(
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
 
-    meta = _request("series", {"series_id": series_id}).get("seriess") or []
+    from tradingagents.runtime.audit_context import (
+        current_analysis_mode,
+        current_information_cutoff,
+        current_run_id,
+    )
+
+    if current_run_id() and current_analysis_mode() == "point_in_time":
+        cutoff_date = datetime.fromisoformat(
+            str(current_information_cutoff()).replace("Z", "+00:00")
+        ).date()
+        # FRED vintages have date precision, not release-time precision. Use
+        # the prior date so a value released later on the cutoff date cannot
+        # leak into an intraday historical decision.
+        vintage_date = (cutoff_date - timedelta(days=1)).isoformat()
+        revision_policy = "fred_vintage_before_cutoff_date"
+    elif current_run_id():
+        vintage_date = datetime.now(timezone.utc).date().isoformat()
+        revision_policy = "fred_latest_vintage_at_call_time"
+    else:
+        vintage_date = curr_date
+        revision_policy = "fred_explicit_vintage"
+
+    meta = _request("series", {
+        "series_id": series_id,
+        "realtime_start": vintage_date,
+        "realtime_end": vintage_date,
+    }).get("seriess") or []
     if not meta:
         raise NoMarketDataError(
             indicator,
@@ -195,21 +222,38 @@ def get_macro_data(
     frequency = info.get("frequency", "")
     seasonal = info.get("seasonal_adjustment_short", "")
 
+    observation_params = {
+        "series_id": series_id,
+        "observation_start": start_date,
+        "observation_end": curr_date,
+        "sort_order": "asc",
+    }
     observations = _request(
         "series/observations",
+        {**observation_params, "vintage_dates": vintage_date},
+    ).get("observations", [])
+
+    initial_release_rows = _request(
+        "series/observations",
         {
-            "series_id": series_id,
-            "observation_start": start_date,
-            "observation_end": curr_date,
-            "sort_order": "asc",
+            **observation_params,
+            "output_type": 4,
+            "realtime_start": "1776-07-04",
+            "realtime_end": vintage_date,
         },
     ).get("observations", [])
+    initial_by_date = {
+        str(row.get("date")): row
+        for row in initial_release_rows
+        if isinstance(row, dict) and row.get("date") and row.get("realtime_start")
+    }
 
     # FRED encodes a missing observation as ".".
     points = [
-        (o["date"], o["value"])
+        (o["date"], o["value"], initial_by_date.get(str(o["date"])))
         for o in observations
         if o.get("value") not in (".", None, "")
+        and initial_by_date.get(str(o.get("date"))) is not None
     ]
 
     if not points:
@@ -220,13 +264,17 @@ def get_macro_data(
         )
 
     structured = []
-    for observed_at, raw_value in points:
+    for observed_at, raw_value, initial_row in points:
         try:
             value = float(raw_value)
+            initial_value = float(initial_row["value"])
+            published_at = str(initial_row["realtime_start"])
         except (TypeError, ValueError):
             continue
         structured.append(MacroObservation(
-            source_id=macro_source_id(series_id, observed_at),
+            source_id=macro_source_id(
+                series_id, observed_at, vendor="fred", vintage_date=vintage_date
+            ),
             series_id=series_id,
             title=title,
             units=units,
@@ -234,6 +282,11 @@ def get_macro_data(
             observed_at=observed_at,
             value=value,
             vendor="fred",
+            published_at=published_at,
+            vintage_date=vintage_date,
+            revision_status=(
+                "initial" if math.isclose(value, initial_value) else "revised"
+            ),
         ))
     if not structured:
         raise NoMarketDataError(indicator, series_id, "no numeric observations")
@@ -242,4 +295,7 @@ def get_macro_data(
         frequency=frequency + (f" ({seasonal})" if seasonal else ""),
         requested_start=start_date, requested_end=curr_date,
         observations=tuple(structured),
+        vendor="fred", vintage_date=vintage_date,
+        revision_policy=revision_policy,
+        requested_indicator=indicator,
     )

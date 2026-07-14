@@ -35,13 +35,20 @@ _OBS = {
 }
 
 
+def _initial_releases(obs):
+    return {"observations": [
+        {**row, "realtime_start": row["date"]}
+        for row in obs.get("observations", [])
+    ]}
+
+
 def _request_stub(meta=_META, obs=_OBS):
     """Build a _request replacement that dispatches on the endpoint path."""
     def _impl(path, params):
         if path == "series":
             return meta
         if path == "series/observations":
-            return obs
+            return _initial_releases(obs) if params.get("output_type") == 4 else obs
         raise AssertionError(f"unexpected FRED path: {path}")
     return _impl
 
@@ -96,6 +103,14 @@ class FredFormattingTests(unittest.TestCase):
         self.assertEqual(out.frequency, "Monthly (SA)")
         self.assertEqual(out.observations[-1].value, 4.4)
         self.assertTrue(out.observations[-1].source_id.startswith("macro_"))
+        self.assertEqual(out.vintage_date, "2025-09-30")
+        self.assertEqual(out.observations[-1].published_at, "2025-09-01")
+        self.assertEqual(out.observations[-1].revision_status, "initial")
+        from tradingagents.dataflows.evidence_models import validate_macro_series
+        with self.assertRaisesRegex(ValueError, "requested indicator"):
+            validate_macro_series(
+                out, expected_vendor="fred", expected_indicator="cpi"
+            )
 
     def test_missing_value_is_skipped(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):
@@ -132,17 +147,95 @@ class FredFormattingTests(unittest.TestCase):
 
     def test_window_is_lookahead_safe(self):
         # observation_end must equal curr_date so a past date never pulls future data.
-        captured = {}
+        captured = []
 
         def _capture(path, params):
-            captured[path] = params
-            return _META if path == "series" else _OBS
+            captured.append((path, params))
+            if path == "series":
+                return _META
+            return _initial_releases(_OBS) if params.get("output_type") == 4 else _OBS
 
         with mock.patch.object(fred, "_request", side_effect=_capture):
             fred.get_macro_data("unemployment", "2025-09-30", 90)
-        obs_params = captured["series/observations"]
+        obs_params = next(
+            params for path, params in captured
+            if path == "series/observations" and "vintage_dates" in params
+        )
         self.assertEqual(obs_params["observation_end"], "2025-09-30")
         self.assertEqual(obs_params["observation_start"], "2025-07-02")  # 90d back
+        self.assertEqual(obs_params["vintage_dates"], "2025-09-30")
+
+    def test_point_in_time_uses_cutoff_vintage_and_marks_revision(self):
+        from tradingagents.runtime.audit_context import (
+            bind_analysis_mode, bind_information_cutoff, bind_run_id,
+            reset_analysis_mode, reset_information_cutoff, reset_run_id,
+        )
+
+        current = {"observations": [
+            {"date": "2025-06-01", "value": "4.4"},
+        ]}
+        initial = {"observations": [
+            {
+                "date": "2025-06-01", "value": "4.1",
+                "realtime_start": "2025-07-05",
+            },
+        ]}
+        captured = []
+
+        def response(path, params):
+            captured.append((path, params))
+            if path == "series":
+                return _META
+            return initial if params.get("output_type") == 4 else current
+
+        run_token = bind_run_id("fred-vintage")
+        mode_token = bind_analysis_mode("point_in_time")
+        cutoff_token = bind_information_cutoff("2025-07-10T16:00:00-04:00")
+        try:
+            with mock.patch.object(fred, "_request", side_effect=response):
+                out = fred.get_macro_data("unemployment", "2025-07-10", 60)
+        finally:
+            reset_information_cutoff(cutoff_token)
+            reset_analysis_mode(mode_token)
+            reset_run_id(run_token)
+
+        vintage_request = next(
+            params for path, params in captured
+            if path == "series/observations" and "vintage_dates" in params
+        )
+        self.assertEqual(vintage_request["vintage_dates"], "2025-07-09")
+        self.assertEqual(out.vintage_date, "2025-07-09")
+        self.assertEqual(out.revision_policy, "fred_vintage_before_cutoff_date")
+        self.assertEqual(out.observations[0].published_at, "2025-07-05")
+        self.assertEqual(out.observations[0].revision_status, "revised")
+        from tradingagents.dataflows.evidence_models import validate_macro_series
+        validated = validate_macro_series(
+            out,
+            expected_vendor="fred",
+            information_cutoff="2025-07-10T16:00:00-04:00",
+        )
+        self.assertEqual(validated.observations[0].value, 4.4)
+        from dataclasses import replace
+        future_release = replace(
+            out,
+            observations=(replace(
+                out.observations[0], published_at="2025-07-11"
+            ),),
+        )
+        with self.assertRaisesRegex(ValueError, "no macro observations"):
+            validate_macro_series(
+                future_release,
+                expected_vendor="fred",
+                information_cutoff="2025-07-10T16:00:00-04:00",
+            )
+        self.assertNotEqual(
+            fred.macro_source_id(
+                "UNRATE", "2025-06-01", vintage_date="2025-07-10"
+            ),
+            fred.macro_source_id(
+                "UNRATE", "2025-06-01", vintage_date="2025-07-11"
+            ),
+        )
 
 
 @pytest.mark.unit
@@ -163,11 +256,18 @@ class FredRoutingTests(unittest.TestCase):
             {"get_macro_indicators": {"fred": lambda *a, **k: fred.MacroSeries(
                 series_id="CPI", title="CPI", units="Index", frequency="Monthly",
                 requested_start="2025-06-01", requested_end="2026-06-01",
+                vendor="fred", vintage_date="2026-06-01",
+                revision_policy="fred_explicit_vintage",
+                requested_indicator="cpi",
                 observations=(fred.MacroObservation(
-                    source_id=fred.macro_source_id("CPI", "2026-05-01"),
+                    source_id=fred.macro_source_id(
+                        "CPI", "2026-05-01", vintage_date="2026-06-01"
+                    ),
                     series_id="CPI", title="CPI",
                     units="Index", frequency="Monthly", observed_at="2026-05-01",
                     value=100.0, vendor="fred",
+                    published_at="2026-05-15", vintage_date="2026-06-01",
+                    revision_status="initial",
                 ),),
             )}},
             clear=False,

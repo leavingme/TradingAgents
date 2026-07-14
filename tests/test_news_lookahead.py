@@ -10,6 +10,15 @@ import tradingagents.dataflows.westock_news as wnews
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.dataflows import interface
+from tradingagents.runtime.audit_context import (
+    bind_analysis_mode,
+    bind_information_cutoff,
+    bind_run_id,
+    reset_analysis_mode,
+    reset_information_cutoff,
+    reset_run_id,
+)
 
 
 @pytest.mark.unit
@@ -93,3 +102,44 @@ def test_news_does_not_fallback_to_duckduckgo_when_not_configured(monkeypatch):
         set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
 
     assert "westock-data CLI is not available" in str(exc.value)
+
+
+@pytest.mark.unit
+def test_point_in_time_runtime_caps_external_vendor_dates_at_cutoff():
+    run_token = bind_run_id("point-in-time-news")
+    mode_token = bind_analysis_mode("point_in_time")
+    cutoff_token = bind_information_cutoff("2026-07-10T12:30:00-04:00")
+    try:
+        assert interface._runtime_external_time_args(
+            "get_news", ("NVDA", "2026-07-01", "2026-07-07")
+        ) == ("NVDA", "2026-07-04", "2026-07-10")
+        assert interface._runtime_external_time_args(
+            "get_global_news", ("2026-07-07", 7, 20)
+        ) == ("2026-07-10", 7, 20)
+        assert interface._runtime_external_time_args(
+            "get_macro_indicators", ("cpi", "2026-07-07", 365)
+        ) == ("cpi", "2026-07-10", 365)
+    finally:
+        reset_information_cutoff(cutoff_token)
+        reset_analysis_mode(mode_token)
+        reset_run_id(run_token)
+
+
+@pytest.mark.unit
+def test_news_runtime_window_uses_utc_cutoff_date_across_timezone_boundary():
+    run_token = bind_run_id("timezone-news")
+    mode_token = bind_analysis_mode("point_in_time")
+    cutoff_token = bind_information_cutoff("2026-07-10T23:30:00-04:00")
+    try:
+        assert interface._runtime_external_time_args(
+            "get_global_news", ("2026-07-10", 7, 20)
+        ) == ("2026-07-11", 7, 20)
+        # FRED vintages use the cutoff's own calendar date and then apply their
+        # conservative prior-day policy inside the vendor adapter.
+        assert interface._runtime_external_time_args(
+            "get_macro_indicators", ("cpi", "2026-07-10", 365)
+        ) == ("cpi", "2026-07-10", 365)
+    finally:
+        reset_information_cutoff(cutoff_token)
+        reset_analysis_mode(mode_token)
+        reset_run_id(run_token)

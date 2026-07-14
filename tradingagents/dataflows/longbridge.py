@@ -166,6 +166,7 @@ def _news_rows_to_feed(
     end_date: str,
     query: str,
     symbol: str | None = None,
+    load_missing_body: bool = False,
 ) -> NewsFeed:
     """Map Longbridge JSON rows directly into the auditable news model."""
     if not isinstance(rows, list):
@@ -188,6 +189,17 @@ def _news_rows_to_feed(
         )
         requested_symbols = (str(symbol).upper(),) if symbol else ()
         symbols = tuple(dict.fromkeys((*requested_symbols, *related_symbols)))
+        summary = str(
+            row.get("description") or row.get("excerpt") or row.get("summary") or ""
+        ).strip()
+        if not summary and load_missing_body and row.get("id"):
+            # The symbol-news list is structured JSON but currently omits body
+            # text. `news detail` is the same Longbridge source/capability and
+            # returns the full article as Markdown; keep a bounded excerpt as
+            # untrusted evidence rather than treating a headline as a body.
+            summary = _run_cli(
+                ["news", "detail", str(row["id"])], timeout=30
+            ).strip()[:4000]
         items.append(NewsItem(
             source_id="",
             title=str(row.get("title") or ""),
@@ -196,9 +208,7 @@ def _news_rows_to_feed(
             ),
             published_at=published_at,
             url=str(row.get("url") or ""),
-            summary=str(
-                row.get("description") or row.get("excerpt") or row.get("summary") or ""
-            ),
+            summary=summary,
             symbols=symbols,
             vendor=vendor,
         ))
@@ -227,7 +237,7 @@ def get_news(
     ])
     return _news_rows_to_feed(
         rows, vendor="longbridge", scope="ticker", start_date=start_date,
-        end_date=end_date, query=ticker, symbol=ticker,
+        end_date=end_date, query=ticker, symbol=ticker, load_missing_body=True,
     )
 
 

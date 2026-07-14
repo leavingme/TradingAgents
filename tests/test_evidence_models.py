@@ -39,6 +39,7 @@ def test_news_validation_rejects_future_missing_url_and_wrong_symbol():
     for item in (
         _item(published_at="2026-07-11"),
         _item(url=""),
+        _item(summary=""),
         _item(symbols=("AAPL",)),
     ):
         with pytest.raises(ValueError, match="no news items"):
@@ -46,6 +47,43 @@ def test_news_validation_rejects_future_missing_url_and_wrong_symbol():
                 items=(item,), scope="ticker", requested_start="2026-07-01",
                 requested_end="2026-07-10", query="NVDA",
             ), symbol="NVDA")
+
+
+def test_news_validation_enforces_exact_cutoff_and_canonical_url():
+    cutoff = "2026-07-10T12:00:00+00:00"
+    with pytest.raises(ValueError, match="no news items"):
+        validate_news_feed(NewsFeed(
+            items=(_item(published_at="2026-07-10T12:00:01+00:00"),),
+            scope="ticker", requested_start="2026-07-01",
+            requested_end="2026-07-10", query="NVDA",
+        ), symbol="NVDA", expected_vendor="test", information_cutoff=cutoff)
+
+    feed = validate_news_feed(NewsFeed(
+        items=(_item(
+            published_at="2026-07-10T11:59:59+00:00",
+            url="https://EXAMPLE.com/nvda-platform?utm_source=x&article=1#section",
+        ),), scope="ticker", requested_start="2026-07-01",
+        requested_end="2026-07-10", query="NVDA",
+    ), symbol="NVDA", expected_vendor="test", information_cutoff=cutoff)
+    assert feed.items[0].url == "https://example.com/nvda-platform?article=1"
+
+
+def test_news_validation_deduplicates_tracking_variants_and_checks_vendor():
+    items = (
+        _item(url="https://example.com/story?utm_source=one"),
+        _item(url="https://EXAMPLE.com/story?utm_medium=two"),
+    )
+    feed = validate_news_feed(NewsFeed(
+        items=items, scope="ticker", requested_start="2026-07-01",
+        requested_end="2026-07-10", query="NVDA",
+    ), symbol="NVDA", expected_vendor="test")
+    assert len(feed.items) == 1
+    assert feed.items[0].url == "https://example.com/story"
+    with pytest.raises(ValueError, match="no news items"):
+        validate_news_feed(NewsFeed(
+            items=items, scope="ticker", requested_start="2026-07-01",
+            requested_end="2026-07-10", query="NVDA",
+        ), symbol="NVDA", expected_vendor="other")
 
 
 @pytest.mark.unit

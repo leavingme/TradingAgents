@@ -64,7 +64,10 @@ def get_news(ticker, start_date, end_date) -> NewsFeed:
     params = {
         "tickers": ticker,
         "time_from": format_datetime_for_api(start_date),
-        "time_to": format_datetime_for_api(end_date),
+        # The domain window is date-inclusive. Alpha Vantage interprets a bare
+        # date as midnight, which would silently exclude almost the entire end
+        # date; over-fetch to 23:59 and let the router enforce the exact cutoff.
+        "time_to": format_datetime_for_api(f"{end_date} 23:59"),
     }
 
     result = _payload(_make_api_request("NEWS_SENTIMENT", params), ticker)
@@ -93,7 +96,7 @@ def get_global_news(curr_date, look_back_days: int = 7, limit: int = 50) -> News
     params = {
         "topics": "financial_markets,economy_macro,economy_monetary",
         "time_from": format_datetime_for_api(start_date),
-        "time_to": format_datetime_for_api(curr_date),
+        "time_to": format_datetime_for_api(f"{curr_date} 23:59"),
         "limit": str(limit),
     }
 

@@ -15,20 +15,28 @@ from tradingagents.dataflows.evidence_models import validate_news_feed
 @pytest.mark.unit
 def test_longbridge_cli_ticker_news_maps_raw_json(monkeypatch):
     seen = []
+    details = []
     monkeypatch.setattr(longbridge, "_run_cli_json_list", lambda args: seen.append(args) or [{
         "id": "123",
         "title": "NVIDIA launches a platform",
         "published_at": "2026-07-13T06:09:27Z",
         "url": "https://longbridge.com/news/123",
     }])
+    monkeypatch.setattr(
+        longbridge,
+        "_run_cli",
+        lambda args, timeout=30: details.append(args) or "Full article body.",
+    )
 
     feed = longbridge.get_news("NVDA", "2026-07-07", "2026-07-13")
     validated = validate_news_feed(feed, symbol="NVDA")
 
     assert seen == [["news", "NVDA.US", "--count", "20"]]
+    assert details == [["news", "detail", "123"]]
     assert validated.items[0].publisher == "Longbridge"
     assert validated.items[0].symbols == ("NVDA",)
     assert validated.items[0].vendor == "longbridge"
+    assert validated.items[0].summary == "Full article body."
     assert validated.items[0].source_id.startswith("news_")
 
 
@@ -95,6 +103,7 @@ def test_news_router_prefers_mcp_then_cli(monkeypatch):
             "title": "Fallback headline",
             "published_at": "2026-07-12T01:00:00Z",
             "url": "https://longbridge.com/news/fallback",
+            "description": "Fallback article body.",
         }], vendor="longbridge", scope="ticker", start_date=args[1],
             end_date=args[2], query=args[0], symbol=args[0])
 

@@ -8,7 +8,8 @@
 - 截至 2026-07-14，没有未完成的明确 P0。
 - 当前排序遵循 `AGENTS.md` 的四级原则：**安全与正确性 → 运行可靠性/成本 → 核心研究能力 → 高复杂度扩展**。
 - 排名是执行顺序，不是功能价值评分。默认启用且可能影响决策的链路，优先于尚未开放的未来能力。
-- 第 1–5 项已完成；下一项是第 6 项运行上下文压缩。
+- 第 1–5 项已完成；下一项是第 6 项仓位引擎与交易校验器解耦。原第 6 项
+  “运行上下文压缩”经讨论后暂缓并移至路线末尾，未来基于单 Agent 单次请求审计再议。
 
 ## 路线项权威顺序与状态
 
@@ -19,16 +20,16 @@
 | 3 | 已完成（2026-07-14） | 新闻、宏观校验覆盖审计 | 已逐项核对正文、发布时间、观察期、单位、revision/vintage、`source_id` 与 cutoff，并补齐缺口。 |
 | 4 | 已完成（2026-07-14） | SSE / report-section 节流 | 已按 run + section 合并高频中间版本，并消除 Web bridge 重复持久化和 SSE replay 重复发送。 |
 | 5 | 已完成（2026-07-14） | 技术指标批量获取 | 已实现单次规范 OHLCV、本地批量计算、批量 MCP fallback 和逐项确定性校验。 |
-| 6 | 未完成 | 运行上下文压缩 | depth=1 已观测到超过 25 万输入 token；需要降低成本、延迟和长上下文遗漏风险。 |
-| 7 | 未完成 | 仓位引擎与交易校验器解耦 | 分离建议仓位计算与服务端风险硬门禁；现有风险政策已 fail-closed，因此不是 P0。 |
-| 8 | 未完成 | Longbridge 前瞻研究数据域 | 接入一致预期、EPS、财务日历、评级、filings 和空头数据。 |
-| 9 | 未完成 | 跨市场 Session Engine | 正确建模交易所时区、DST、节假日、半日市及盘前/盘中/盘后。 |
-| 10 | 未完成 | 空头与衍生品交易校验 | 在开放做空或期权前建立独立方向、收益结构和 Greeks 风险门禁。 |
-| 11 | 未完成 | Longbridge 只读账户风险输入 | 用真实持仓、购买力、保证金和汇率约束仓位，同时坚持最小 OAuth 权限。 |
-| 12 | 未完成 | Longbridge 基本面与持仓拥挤增强 | 增加业务分部、估值、持有人、资金流和微观结构证据。 |
-| 13 | 未完成 | Longbridge 独立宏观 vendor | 增加 FRED 之外的结构化宏观来源，优先级低于现有宏观校验闭环。 |
-| 14 | 未完成 | 独立 Reviewer 模型 | 增强工程复盘，但只能作为建议层，不能掌握关闭权。 |
-| 15 | 未完成 | 衍生品数据与选股能力 | 必须等待衍生品风险模型与 universe 阶段完成。 |
+| 6 | 未完成 | 仓位引擎与交易校验器解耦 | 分离建议仓位计算与服务端风险硬门禁；现有风险政策已 fail-closed，因此不是 P0。 |
+| 7 | 未完成 | Longbridge 前瞻研究数据域 | 接入一致预期、EPS、财务日历、评级、filings 和空头数据。 |
+| 8 | 未完成 | 跨市场 Session Engine | 正确建模交易所时区、DST、节假日、半日市及盘前/盘中/盘后。 |
+| 9 | 未完成 | 空头与衍生品交易校验 | 在开放做空或期权前建立独立方向、收益结构和 Greeks 风险门禁。 |
+| 10 | 未完成 | Longbridge 只读账户风险输入 | 用真实持仓、购买力、保证金和汇率约束仓位，同时坚持最小 OAuth 权限。 |
+| 11 | 未完成 | Longbridge 基本面与持仓拥挤增强 | 增加业务分部、估值、持有人、资金流和微观结构证据。 |
+| 12 | 未完成 | Longbridge 独立宏观 vendor | 增加 FRED 之外的结构化宏观来源，优先级低于现有宏观校验闭环。 |
+| 13 | 未完成 | 独立 Reviewer 模型 | 增强工程复盘，但只能作为建议层，不能掌握关闭权。 |
+| 14 | 未完成 | 衍生品数据与选股能力 | 必须等待衍生品风险模型与 universe 阶段完成。 |
+| 15 | 暂缓（最低优先级） | 运行上下文压缩（原第 6 项） | 累计 token 高不等于单 Agent 上下文重复；跨角色共享证据和跨轮携带历史属于辩论机制，未来只按单 Agent 单次请求审计后再议。 |
 
 ## 执行计划与验收条件
 
@@ -55,7 +56,7 @@
   - 完成证据：router 对新闻执行 routed vendor、非空正文/摘要、HTTP(S) URL、标的相关性、精确发布时间 cutoff、规范 URL/标题去重和稳定 `source_id` 校验；`live` 运行的新闻窗口按调用时 UTC 日期推进，不再被最近完整日 K 的 `analysis_date` 截断。Longbridge MCP 实时 NVDA 样本通过完整校验；Longbridge CLI 列表缺少正文时使用同一新闻能力的 `news detail` 补齐，Alpha Vantage 的日期末端按 23:59 包含后再由 router 精确裁剪；Westock 在当前主机不可用，DuckDuckGo 缺少可信发布时间，两者均 fail closed，未伪装为有效证据。
   - 完成证据：`MacroSeries` / `MacroObservation` 已包含请求指标、series ID/title、单位、频率、观察期、初次发布日期、vendor、vintage、revision 状态与含 vintage 的稳定 `source_id`。FRED 使用历史 vintage 和 `output_type=4` 初次发布元数据；日内 point-in-time 截止保守固定到前一日 vintage。真实历史探针以 `2025-07-10T16:00:00-04:00` 为截止，固定到 `2025-07-09` vintage，返回 11 条可见 CPI 记录，最新观察期 `2025-05-01`、初次发布日期 `2025-06-11`，并通过确定性 validator。新闻、宏观、路由、runtime/Web 相关测试 98 项和项目快速门禁 61 项通过，前端语法与 Python 编译检查通过；长期 Web 服务热加载后保持 active，`/api/config/defaults` 返回 200。
 
-### 第二阶段：运行可靠性/成本（4–6）
+### 第二阶段：运行可靠性/成本（4–5）
 
 - [x] **4. SSE / report-section 节流**
   - 按 run + section 合并高频中间更新，最终状态和最后一个 section 版本不得丢失。
@@ -69,53 +70,62 @@
   - 批量结果必须与现有逐项结果在约定容差内一致。
   - 完成证据：Market Analyst 的 `get_indicators` schema 改为一次接收最多 8 个指标，默认 westock/stockstats 路径只加载一次 canonical OHLCV、创建一个 stockstats frame 并逐项生成结构化 `IndicatorBatch`；同 symbol/date 的缓存填充增加 singleflight，避免并发 cache miss 击穿 Longbridge。router 对每条序列分别执行预热、日期、freshness、数值范围与 Close 相对范围 validator；本地部分失败时只把缺失集合合并为一次 Longbridge MCP 多 `plot()` `quant_run`，仍未解决的个别项才进入旧单项兼容 fallback，所有 batch 与 fallback vendor attempt 保持 run-scoped ledger 可见。基线 NVDA 运行曾产生 10 次技术指标调用和 26 次 Longbridge OHLCV 调用，同秒最多 6 个 OHLCV 请求；新默认 live probe 以一次 batch 在 1.2 秒内返回 8 个有效 section，真实 MCP probe 以一次请求返回 RSI+ATR 并通过 `2026-07-13` 最新交易日校验。批量与旧逐项结果在 `1e-12` 相对容差内一致；指标/OHLCV/router/Web 相关测试 97 项通过、1 项显式 live provider 测试按环境跳过，项目 Web/CLI 门禁 101 项通过，前端语法与 Python 编译检查通过。
 
-- [ ] **6. 运行上下文压缩**
-  - 基准证据：NVDA depth=1 两次运行输入 token 为 254,861 和 252,244。
-  - 审计 Analyst 报告、工具结果及 Bull/Bear/Risk 辩论之间的重复内容，定义确定性压缩边界。
-  - 来源事实、`source_id`、vendor `call_id`、交易门禁输入和必要反方证据不得被摘要丢失。
-  - 以同输入运行对比 token、延迟、决策状态和引用完整性。
+### 第三阶段：核心研究能力（6–8）
 
-### 第三阶段：核心研究能力（7–9）
-
-- [ ] **7. 仓位引擎与交易校验器解耦**
+- [ ] **6. 仓位引擎与交易校验器解耦**
   - `PositionSizingEngine` 负责固定风险、ATR 风险、波动率目标、分数凯利、账户权益和最大名义敞口下的建议仓位。
   - `TradePlanValidator` 独立重算并执行组合损失、集中度、购买力和账户限制硬门禁；LLM 不能提高服务端限制。
 
-- [ ] **8. Longbridge 前瞻研究数据域**
+- [ ] **7. Longbridge 前瞻研究数据域**
   - 接入 `consensus`、`forecast_eps`、`finance_calendar`、`institution_rating`、`filings`、`short_positions` 和 `short_trades`。
   - 建立包含 `as_of`、发布日期、事件日期、标的、币种、期间、稳定 `source_id` 和 vendor `call_id` 的统一模型与 validator。
   - 验证后分别提供给 Fundamentals、News、Bull/Bear 和 Risk Agent；当前快照不得泄漏到历史运行。
 
-- [ ] **9. 跨市场 Session Engine**
+- [ ] **8. 跨市场 Session Engine**
   - 使用权威交易日历建模交易所时区、DST、节假日、半日市和 `pre|regular|post` session。
   - 分别保存 `market_date`、`observed_at`、`published_at` 和 `available_at`；盘前盘后数据不得覆盖规范日 K。
   - A/H/ADR、汇率、换股比例和产业链映射只生成可审计只读证据；lead-lag 必须验证历史稳定性、流动性、点差、成本和可转换性，不得描述为无风险套利。
 
-### 第四阶段：高复杂度扩展（10–15）
+### 第四阶段：高复杂度扩展（9–14）
 
-- [ ] **10. 空头与衍生品交易校验**
+- [ ] **9. 空头与衍生品交易校验**
   - 新增显式 `side=long|short|flat`；Sell/Underweight 只代表减仓，不得隐式开空。
   - 空头股票验证 `target < entry < stop`；期权独立建模权利金、行权价、到期日、乘数、IV、Greeks 和非线性损益。
 
-- [ ] **11. Longbridge 只读账户风险输入**
+- [ ] **10. Longbridge 只读账户风险输入**
   - 以最小 OAuth 权限读取余额、持仓、保证金、购买力和汇率，并作为服务端风险政策输入。
   - 不向分析 Agent 暴露下单、撤单、改单、DCA、提醒或 Watchlist 写操作。
 
-- [ ] **12. Longbridge 基本面与持仓拥挤增强**
+- [ ] **11. Longbridge 基本面与持仓拥挤增强**
   - 逐项审计并接入业务分部、估值历史/同行、股东/基金持仓、内部人交易、资金流、交易统计、市场温度和异动。
   - 每项必须基于真实 schema 单独建立 adapter、模型和 validator，禁止依据工具描述批量生成。
 
-- [ ] **13. Longbridge 独立宏观 vendor**
+- [ ] **12. Longbridge 独立宏观 vendor**
   - 将 `macrodata` 与宏观事件日历注册为独立 vendor，映射到 `MacroSeries`。
   - 校验单位、观察期、发布日期和 cutoff；不得隐藏在 FRED 或其他 vendor 内部。
 
-- [ ] **14. 独立 Reviewer 模型**
+- [ ] **13. 独立 Reviewer 模型**
   - 可选 `review-model` 只读取不可变 execution evidence，输出带 event/vendor/source 引用的结构化 findings。
   - Reviewer 不得修改历史、直接关闭 finding 或决定 gate 通过；仍需人工确认和确定性验证。
 
-- [ ] **15. 衍生品数据与选股能力**
-  - option chain、IV、Greeks 必须等待第 10 项风险模型完成。
+- [ ] **14. 衍生品数据与选股能力**
+  - option chain、IV、Greeks 必须等待第 9 项风险模型完成。
   - screener、rank、top movers 必须等待独立 universe/选股阶段，不直接塞入现有单标的 Agent 工具集。
+
+### 暂缓议题：最低优先级（15）
+
+- [ ] **15. 运行上下文压缩（原第 6 项，暂缓）**
+  - 历史基准证据：NVDA depth=1 两次运行累计输入 token 为 254,861 和 252,244；
+    该总量只证明运行成本较高，不能证明单个 Agent 收到了重复或无用上下文。
+  - 讨论结论：不同角色读取相同 Analyst 证据，以及同一角色在后续轮次携带既有历史，
+    都是 Bull/Bear/Risk 独立辩论和连续推理的必要组成，不按运行级重复计算为缺陷。
+  - 未来若重启本项，只以“单个 Agent 的单次实际 LLM 请求”为审计单位；按 system、
+    报告、工具结果、辩论历史、最新回复和 reasoning 分块，仅记录类型、长度与内容 hash，
+    不持久化实际 Prompt 或敏感内容，也不把跨 Agent 或跨轮次复用判为重复。
+  - 只有在单次请求内证明存在精确结构重复、无效工具载荷或上下文容量风险后才实施优化；
+    不做模糊语义去重，不以强制 token 降幅为目标，不删除 M3 reasoning round-trip。
+  - 来源事实、`source_id`、vendor `call_id`、交易门禁输入、完整反方证据和辩论结构不得
+    因压缩丢失；相关方案与验收指标留待未来重新讨论后确定。
 
 ## 已完成的安全与架构基础
 

@@ -867,6 +867,24 @@ def _safe_audit_arguments(args, kwargs) -> str:
     return json.dumps({"args": clean(args), "kwargs": clean(kwargs)}, ensure_ascii=False)
 
 
+def _safe_audit_error_detail(error: Exception | None) -> str | None:
+    """Keep actionable failure reasons while redacting credential-shaped values."""
+    if error is None:
+        return None
+    detail = str(error)
+    detail = re.sub(
+        r"(?i)\b(bearer)\s+[a-z0-9._~+/=-]+",
+        r"\1 [REDACTED]",
+        detail,
+    )
+    return re.sub(
+        r"(?i)\b(api[_-]?key|token|secret|password|cookie|authorization|auth)"
+        r"\s*[:=]\s*[^\s,;&]+",
+        r"\1=[REDACTED]",
+        detail,
+    )
+
+
 def _vendor_audit_metadata(method: str, args: tuple, category: str) -> dict[str, str | None]:
     agent_by_category = {
         "core_stock_apis": "Market Analyst",
@@ -923,6 +941,7 @@ def _record_vendor_verification(
     audit_metadata=None,
 ):
     """Update health telemetry and append mandatory run-scoped audit evidence."""
+    safe_error_detail = _safe_audit_error_detail(error)
     health_record = None
     try:
         from .vendor_verification import vendor_verification_store
@@ -933,7 +952,7 @@ def _record_vendor_verification(
             method=method,
             status=status,
             source=source,
-            detail=str(error) if error else None,
+            detail=safe_error_detail,
             latency_ms=round((time.monotonic() - started) * 1000),
         )
     except Exception as exc:
@@ -955,7 +974,7 @@ def _record_vendor_verification(
                 result_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
             # Deliberately not swallowed: an analysis without its immutable
             # provenance ledger must not continue to an executable report.
-            history_store.add_vendor_call({
+            record = {
                 "run_id": run_id,
                 "call_id": call_id,
                 "attempt": attempt,
@@ -969,7 +988,7 @@ def _record_vendor_verification(
                 "arguments_json": arguments_json,
                 "latency_ms": latency_ms,
                 "error_type": type(error).__name__ if error else None,
-                "error_detail": str(error) if error else None,
+                "error_detail": safe_error_detail,
                 "result_summary": summary,
                 "result_hash": result_hash,
                 "calculation_start": (audit_metadata or {}).get("calculation_start"),
@@ -977,7 +996,11 @@ def _record_vendor_verification(
                 "data_latest_date": _latest_date_in_result(result),
                 "started_at": (finished - timedelta(milliseconds=latency_ms)).isoformat(),
                 "finished_at": finished.isoformat(),
-            })
+            }
+            history_store.add_vendor_call(record)
+            from tradingagents.runtime.audit_context import emit_vendor_attempt
+
+            emit_vendor_attempt(record)
     return health_record
 
 

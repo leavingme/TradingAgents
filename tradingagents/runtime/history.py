@@ -292,6 +292,10 @@ class RunHistoryStore:
                 ).fetchall()
                 return [dict(row) for row in rows]
 
+    def get_vendor_summary(self, run_id: str) -> dict[str, Any]:
+        """Build a deterministic, replay-safe summary of a run's vendor paths."""
+        return summarize_vendor_calls(self.get_vendor_calls(run_id))
+
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
             with self._conn() as conn:
@@ -320,6 +324,8 @@ class RunHistoryStore:
                         "timestamp": ev["timestamp"],
                     })
                 run_dict["events"] = events
+                run_dict["vendor_summary"] = self.get_vendor_summary(run_id)
+                run_dict["data_status"] = run_dict["vendor_summary"]["data_status"]
                 return run_dict
 
     def list_runs(self, limit: int = 100) -> list[dict[str, Any]]:
@@ -386,5 +392,63 @@ def _safe_db_event(event: AnalysisEvent) -> AnalysisEvent:
         agent=event.agent,
         content=content,
     )
+
+def summarize_vendor_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for call in calls:
+        grouped.setdefault(str(call["call_id"]), []).append(call)
+
+    trajectories: list[dict[str, Any]] = []
+    for call_id, attempts in grouped.items():
+        attempts.sort(key=lambda item: int(item.get("attempt") or 0))
+        selected = next((item for item in attempts if item.get("selected")), None)
+        if selected is None:
+            status = "unavailable"
+        elif len(attempts) > 1 or int(selected.get("attempt") or 0) > 1:
+            status = "degraded"
+        else:
+            status = "available"
+        first = attempts[0]
+        trajectories.append({
+            "call_id": call_id,
+            "category": first.get("category"),
+            "method": first.get("method"),
+            "agent": first.get("agent"),
+            "symbol": first.get("symbol"),
+            "status": status,
+            "selected_vendor": selected.get("vendor") if selected else None,
+            "attempt_count": len(attempts),
+        })
+
+    statuses = {item["status"] for item in trajectories}
+    if not trajectories:
+        data_status = "not_observed"
+    elif statuses == {"available"}:
+        data_status = "available"
+    elif statuses == {"unavailable"}:
+        data_status = "unavailable"
+    else:
+        data_status = "degraded"
+
+    return {
+        "data_status": data_status,
+        "call_count": len(trajectories),
+        "attempt_count": len(calls),
+        "fallback_domains": sorted({
+            str(item["category"]) for item in trajectories
+            if item["status"] == "degraded"
+        }),
+        "unavailable_domains": sorted({
+            str(item["category"]) for item in trajectories
+            if item["status"] == "unavailable"
+        }),
+        # Healthy first-attempt calls stay available in the append-only ledger
+        # and vendor_attempt events. Keep the run summary focused on paths that
+        # require operator attention so list/history responses remain compact.
+        "trajectories": [
+            item for item in trajectories if item["status"] != "available"
+        ],
+    }
+
 
 history_store = RunHistoryStore()

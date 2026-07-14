@@ -205,6 +205,20 @@ def test_stream_run_events_replays_stored_events(monkeypatch):
         task_store.mark_started(run_id)
         task_store.add_event(
             run_id,
+            AnalysisEvent(
+                type="vendor_attempt",
+                run_id=run_id,
+                content={
+                    "call_id": "call-news", "attempt": 1,
+                    "category": "news_data", "method": "get_news",
+                    "vendor": "primary", "status": "rate_limited",
+                    "selected": False, "error_type": "VendorRateLimitError",
+                    "error_detail": "HTTP 429",
+                },
+            ),
+        )
+        task_store.add_event(
+            run_id,
             AnalysisEvent(type="message", run_id=run_id, content={"text": "hello"}),
         )
         task_store.mark_finished(run_id, "completed")
@@ -224,6 +238,9 @@ def test_stream_run_events_replays_stored_events(monkeypatch):
     body = asyncio.run(exercise())
 
     assert "event: message" in body
+    assert "event: vendor_attempt" in body
+    assert '\"call_id\": \"call-news\"' in body
+    assert '\"error_detail\": \"HTTP 429\"' in body
     assert '"text": "hello"' in body
 
 
@@ -280,6 +297,41 @@ def test_get_run_vendor_calls_returns_run_scoped_ledger(monkeypatch):
         return await main.get_run_vendor_calls(created["run_id"])
 
     assert asyncio.run(exercise()) == expected
+
+
+def test_run_response_exposes_persisted_vendor_health(monkeypatch):
+    from web.backend import main
+
+    def fake_start_background_run(run_id, request, task_store):
+        task_store.mark_started(run_id)
+        task_store.add_event(run_id, AnalysisEvent(
+            type="run_completed",
+            run_id=run_id,
+            content={
+                "decision": "Hold", "decision_status": "validated",
+                "data_status": "degraded",
+                "vendor_summary": {
+                    "data_status": "degraded",
+                    "fallback_domains": ["news_data"],
+                    "unavailable_domains": [],
+                },
+            },
+        ))
+        task_store.mark_finished(run_id, "completed")
+
+    monkeypatch.setattr(main, "start_background_run", fake_start_background_run)
+
+    async def exercise():
+        created = await main.create_run(
+            main.RunCreateRequest(ticker="NVDA", analysis_date="2026-07-10")
+        )
+        return await main.get_run(created["run_id"])
+
+    response = asyncio.run(exercise())
+    assert response["status"] == "completed"
+    assert response["decision_status"] == "validated"
+    assert response["data_status"] == "degraded"
+    assert response["vendor_summary"]["fallback_domains"] == ["news_data"]
 
 
 def test_web_index_serves_frontend_file():

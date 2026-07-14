@@ -27,6 +27,11 @@ export function createEventLog({ element, t, locale, formatAgentName, formatStat
     if (typeof content === 'string') return content;
     if (type === 'message') return content.text || '';
     if (type === 'tool_call') return `${content.name || 'tool'}  ${JSON.stringify(content.args || {})}`;
+    if (type === 'vendor_attempt') {
+      const outcome = content.selected ? `${content.status} · selected` : content.status;
+      const reason = content.error_detail ? ` · ${content.error_detail}` : '';
+      return `${content.category || 'data'} · ${content.method || 'call'} · #${content.attempt} ${content.vendor} · ${outcome}${reason} · call ${content.call_id}`;
+    }
     if (type === 'report_section') return `${content.section || 'report'} ${t('reportUpdated')}`;
     if (type === 'agent_status') return formatStatus(content.status || '');
     if (type === 'run_started') return `${content.ticker} · ${content.analysis_date}`;
@@ -41,6 +46,7 @@ export function createEventLog({ element, t, locale, formatAgentName, formatStat
   function formatType(type) {
     const key = {
       run_started: 'eventRunStarted', message: 'eventMessage', tool_call: 'eventToolCall',
+      vendor_attempt: 'eventVendorAttempt',
       agent_status: 'eventAgentStatus', report_section: 'eventReportSection', stats: 'eventStats',
       run_completed: 'eventRunCompleted', run_cancelled: 'eventRunCancelled', error: 'eventError',
     }[type];

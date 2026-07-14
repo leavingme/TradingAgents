@@ -38,6 +38,8 @@ class RunRecord:
     report_path: str | None = None
     error: str | None = None
     decision_status: str = "unavailable"
+    data_status: str = "not_observed"
+    vendor_summary: dict[str, Any] = field(default_factory=dict)
     events: list[AnalysisEvent] = field(default_factory=list)
     event_queue: queue.Queue[AnalysisEvent | None] = field(
         default_factory=queue.Queue
@@ -58,6 +60,8 @@ class RunRecord:
             "report_path": self.report_path,
             "error": self.error,
             "decision_status": self.decision_status,
+            "data_status": self.data_status,
+            "vendor_summary": self.vendor_summary,
             "event_count": len(self.events),
         }
 
@@ -123,6 +127,8 @@ class TaskStore:
             report_path=run_dict["report_path"],
             error=run_dict["error"],
             decision_status=run_dict.get("decision_status", "unavailable"),
+            data_status=run_dict.get("data_status", "not_observed"),
+            vendor_summary=run_dict.get("vendor_summary", {}),
             events=events,
             event_queue=q,
         )
@@ -199,6 +205,11 @@ class TaskStore:
                 )
                 if record.decision_status in {"review_required", "unavailable"}:
                     record.status = record.decision_status
+            if event.type in {"run_completed", "error"} and isinstance(event.content, dict):
+                record.data_status = event.content.get("data_status", record.data_status)
+                record.vendor_summary = event.content.get(
+                    "vendor_summary", record.vendor_summary
+                )
             if event.type == "error" and record.status != "cancelled":
                 record.status = "failed"
                 if isinstance(event.content, dict):

@@ -8,14 +8,14 @@
 - 截至 2026-07-14，没有未完成的明确 P0。
 - 当前排序遵循 `AGENTS.md` 的四级原则：**安全与正确性 → 运行可靠性/成本 → 核心研究能力 → 高复杂度扩展**。
 - 排名是执行顺序，不是功能价值评分。默认启用且可能影响决策的链路，优先于尚未开放的未来能力。
-- 第 1 项已完成；下一项是第 2 项 Runtime 失败状态与 vendor 轨迹。
+- 第 1–2 项已完成；下一项是第 3 项新闻、宏观校验覆盖审计。
 
 ## 路线项权威顺序与状态
 
 | 顺序 | 状态 | 路线项 | 当前优先级依据 |
 |---:|---|---|---|
 | 1 | 已完成（2026-07-14） | 预测市场确定性校验与 vendor-attempt 持久化 | 当前默认启用且会影响决策；补齐事件 ID、到期日、概率范围、时间截止、稳定 `source_id` 和逐次 vendor 审计。 |
-| 2 | 未完成 | Runtime 失败状态与 vendor 轨迹 | 明确显示失败数据域、尝试过的 vendor、fallback 路径及校验原因，避免失败或降级被误读。 |
+| 2 | 已完成（2026-07-14） | Runtime 失败状态与 vendor 轨迹 | 明确显示失败数据域、尝试过的 vendor、fallback 路径及校验原因，避免失败或降级被误读。 |
 | 3 | 未完成 | 新闻、宏观校验覆盖审计 | 结构化模型已完成，但仍需逐项核对正文、发布时间、观察期、单位、`source_id` 与 cutoff。 |
 | 4 | 未完成 | SSE / report-section 节流 | 降低 SQLite 锁竞争、写放大和浏览器高频重绘。 |
 | 5 | 未完成 | 技术指标批量获取 | 减少约 12 次串行请求、重复 OHLCV 加载、事件数量和等待时间。 |
@@ -41,10 +41,12 @@
   - 每次配置的 vendor 尝试都写入 run-scoped append-only ledger，包括失败原因、fallback 和最终选中结果。
   - 完成证据：Gamma `public-search` 原始 schema 和实时样本已审计；adapter 直接生成 `PredictionMarketFeed`，router 绑定 `call_id` 后校验并渲染。预测市场、citation、vendor ledger、runtime/Web/history 相关测试共 100 项通过。2026-07-14 补跑只读 live probe，`2028 presidential election` 返回的 3 个市场全部通过 validator，并保留 event/market ID、稳定 `prediction_*` source ID、`observed_at` 和带时区到期时间。
 
-- [ ] **2. Runtime 失败状态与 vendor 轨迹**
+- [x] **2. Runtime 失败状态与 vendor 轨迹**
   - Runtime、SQLite、API、SSE 和 Web 必须一致展示失败数据域、`call_id`、尝试顺序、vendor 状态、具体校验/认证/限流/无数据原因及最终 fallback 结果。
   - 降级、`review_required` 和 `unavailable` 不得显示为普通成功或投资 Hold。
   - 刷新和历史回放必须从持久化事件恢复相同的失败与 fallback 轨迹。
+  - 完成证据：新增一等 `vendor_attempt` runtime 事件，逐条携带数据域、`call_id`、attempt、vendor、状态、错误类型/脱敏详情及是否选中；事件与 append-only ledger 使用同一已落盘记录。终态事件和 Run API 通过确定性汇总分别暴露 `decision_status` 与 `data_status=available|degraded|unavailable|not_observed`，并列出 fallback/unavailable 数据域和异常轨迹。Web 实时流、历史 SSE replay 和运行历史均显示降级状态，不再把降级运行只呈现为普通完成或 Hold。相关 runtime/history/vendor/Web 回归测试 80 项及项目 Web/CLI 快速门禁 61 项通过，前端语法与模块测试通过；长期 Web 服务热加载后保持 active，真实 `/api/runs` 已从既有 SQLite ledger 恢复 `data_status=degraded` 和 `fundamental_data` 不可用轨迹。
+  - Langfuse 可作为可选的 OpenTelemetry/Langfuse span 镜像，用于跨运行查询和仪表盘；它不得替代 SQLite/runtime 权威事件链，也不得因采样、网络或外部服务故障阻断分析。接入时需显式创建 vendor span 或配置过滤，因为当前 Langfuse SDK 默认聚焦 LLM/GenAI span。
 
 - [ ] **3. 新闻、宏观校验覆盖审计**
   - 新闻逐项确认来源、URL、正文可用性、真实发布时间、标的相关性、去重、稳定 `source_id` 和 cutoff。

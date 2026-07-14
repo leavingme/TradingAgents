@@ -12,6 +12,7 @@ EventType = Literal[
     "run_started",
     "message",
     "tool_call",
+    "vendor_attempt",
     "agent_status",
     "report_section",
     "stats",

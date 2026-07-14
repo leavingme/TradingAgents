@@ -165,6 +165,8 @@ const translations = {
     statusPending: 'pending',
     statusRunning: 'running',
     statusCompleted: 'completed',
+    statusDataDegraded: 'completed · data degraded',
+    statusDataUnavailable: 'completed · data unavailable',
     statusReviewRequired: 'review required (no valid decision)',
     statusUnavailable: 'decision unavailable',
     statusFailed: 'failed',
@@ -172,6 +174,7 @@ const translations = {
     eventRunStarted: 'run started',
     eventMessage: 'message',
     eventToolCall: 'tool call',
+    eventVendorAttempt: 'vendor attempt',
     eventAgentStatus: 'agent status',
     eventReportSection: 'report section',
     eventStats: 'stats',
@@ -374,6 +377,8 @@ const translations = {
     statusPending: '等待中',
     statusRunning: '运行中',
     statusCompleted: '已完成',
+    statusDataDegraded: '已完成 · 数据已降级',
+    statusDataUnavailable: '已完成 · 数据不可用',
     statusReviewRequired: '需要复核（无有效决策）',
     statusUnavailable: '决策不可用',
     statusFailed: '失败',
@@ -381,6 +386,7 @@ const translations = {
     eventRunStarted: '运行开始',
     eventMessage: '消息',
     eventToolCall: '工具调用',
+    eventVendorAttempt: '数据源尝试',
     eventAgentStatus: 'Agent 状态',
     eventReportSection: '报告章节',
     eventStats: '统计',
@@ -839,6 +845,8 @@ function formatStatus(status) {
     pending: 'statusPending',
     running: 'statusRunning',
     completed: 'statusCompleted',
+    data_degraded: 'statusDataDegraded',
+    data_unavailable: 'statusDataUnavailable',
     review_required: 'statusReviewRequired',
     unavailable: 'statusUnavailable',
     failed: 'statusFailed',
@@ -1030,16 +1038,27 @@ function handleRuntimeEvent(type, event) {
   if (type === 'run_completed') {
     const decisionStatus = event.content?.decision_status ?? 'unavailable';
     const reviewRequired = decisionStatus !== 'validated';
+    const dataStatus = event.content?.data_status ?? 'not_observed';
+    const completedStatus = dataStatus === 'degraded'
+      ? 'data_degraded'
+      : dataStatus === 'unavailable' ? 'data_unavailable' : 'completed';
+    const completedState = dataStatus === 'degraded'
+      ? 'warning'
+      : dataStatus === 'unavailable' ? 'error' : 'done';
     setStatus(
-      reviewRequired ? decisionStatus : 'completed',
-      reviewRequired ? 'error' : 'done',
+      reviewRequired ? decisionStatus : completedStatus,
+      reviewRequired ? 'error' : completedState,
     );
     loadReport.disabled = false;
     cancelButton.disabled = true;
     runtimeLog.append(
       type,
       event.agent,
-      reviewRequired ? t('reviewRequired') : (event.content?.decision ?? t('runCompleted')),
+      reviewRequired
+        ? t('reviewRequired')
+        : dataStatus === 'degraded' || dataStatus === 'unavailable'
+          ? `${formatStatus(completedStatus)} · ${event.content?.decision ?? t('runCompleted')}`
+          : (event.content?.decision ?? t('runCompleted')),
     );
     reportView.load(currentRunId);
     runHistory.refresh();
@@ -1102,7 +1121,12 @@ async function selectHistoryRun(runId, options = {}) {
 
   currentRunId   = run.run_id;
   runIdEl.textContent      = shortId(run.run_id);
-  setStatus(run.status, statusClass(run.status));
+  const restoredStatus = run.status === 'completed' && run.data_status === 'degraded'
+    ? 'data_degraded'
+    : run.status === 'completed' && run.data_status === 'unavailable'
+      ? 'data_unavailable'
+      : run.status;
+  setStatus(restoredStatus, statusClass(restoredStatus));
   eventCount     = 0;
   currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
   updateEventCount();
@@ -1170,6 +1194,7 @@ function setStatus(text, state) {
 function statusClass(status) {
   if (status === 'completed') return 'done';
   if (status === 'running')   return 'running';
-  if (status === 'failed' || status === 'cancelled' || status === 'review_required' || status === 'unavailable') return 'error';
+  if (status === 'data_degraded') return 'warning';
+  if (status === 'failed' || status === 'cancelled' || status === 'review_required' || status === 'unavailable' || status === 'data_unavailable') return 'error';
   return 'ready';
 }

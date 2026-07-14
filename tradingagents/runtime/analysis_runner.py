@@ -7,6 +7,7 @@ dependency so multiple frontends can consume the same execution stream.
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -44,10 +45,12 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
         bind_analysis_mode,
         bind_information_cutoff,
         bind_run_id,
+        bind_vendor_attempt_sink,
         reset_analysis_date,
         reset_analysis_mode,
         reset_information_cutoff,
         reset_run_id,
+        reset_vendor_attempt_sink,
     )
 
     # 1. Register the run in SQLite history
@@ -66,15 +69,30 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
     analysis_date_token = bind_analysis_date(str(request.analysis_date))
     analysis_mode_token = bind_analysis_mode(request.analysis_mode)
     information_cutoff_token = bind_information_cutoff(request.information_cutoff)
+    vendor_events: deque[AnalysisEvent] = deque()
+
+    def collect_vendor_attempt(record: dict[str, Any]) -> None:
+        vendor_events.append(_vendor_attempt_event(request.run_id, record))
+
+    vendor_sink_token = bind_vendor_attempt_sink(collect_vendor_attempt)
 
     has_error = False
     last_event = None
     try:
         for event in _run_analysis_stream_impl(request):
+            while vendor_events:
+                vendor_event = vendor_events.popleft()
+                history_store.add_event(request.run_id, vendor_event)
+                yield vendor_event
+            event = _with_vendor_summary(event, history_store)
             last_event = event
             # Persist event to the history DB
             history_store.add_event(request.run_id, event)
             yield event
+        while vendor_events:
+            vendor_event = vendor_events.popleft()
+            history_store.add_event(request.run_id, vendor_event)
+            yield vendor_event
     except Exception as exc:
         has_error = True
         err_event = AnalysisEvent(
@@ -82,6 +100,7 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
             run_id=request.run_id,
             content={"error": str(exc), "error_type": type(exc).__name__},
         )
+        err_event = _with_vendor_summary(err_event, history_store)
         history_store.add_event(request.run_id, err_event)
         raise exc
     finally:
@@ -103,6 +122,43 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
         reset_analysis_mode(analysis_mode_token)
         reset_analysis_date(analysis_date_token)
         reset_run_id(audit_token)
+        reset_vendor_attempt_sink(vendor_sink_token)
+
+
+def _vendor_attempt_event(run_id: str, record: dict[str, Any]) -> AnalysisEvent:
+    """Expose a safe subset of an already-persisted vendor ledger row."""
+    content = {
+        key: record.get(key)
+        for key in (
+            "call_id", "attempt", "category", "method", "vendor", "agent",
+            "symbol", "status", "selected", "latency_ms", "error_type",
+            "error_detail", "result_hash", "calculation_start", "requested_end",
+            "data_latest_date", "started_at", "finished_at",
+        )
+    }
+    return AnalysisEvent(
+        type="vendor_attempt",
+        run_id=run_id,
+        timestamp=str(record.get("finished_at") or utc_timestamp()),
+        agent=record.get("agent"),
+        content=content,
+    )
+
+
+def _with_vendor_summary(event: AnalysisEvent, store: Any) -> AnalysisEvent:
+    if event.type not in {"run_completed", "error"}:
+        return event
+    content = dict(event.content) if isinstance(event.content, dict) else {}
+    summary = store.get_vendor_summary(event.run_id)
+    content["data_status"] = summary["data_status"]
+    content["vendor_summary"] = summary
+    return AnalysisEvent(
+        type=event.type,
+        run_id=event.run_id,
+        timestamp=event.timestamp,
+        agent=event.agent,
+        content=content,
+    )
 
 
 def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEvent]:

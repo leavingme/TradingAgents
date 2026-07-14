@@ -112,4 +112,6 @@ class RunRecordResponse(BaseModel):
     report_path: str | None = None
     error: str | None = None
     decision_status: Literal["validated", "review_required", "unavailable"] = "unavailable"
+    data_status: Literal["not_observed", "available", "degraded", "unavailable"] = "not_observed"
+    vendor_summary: dict[str, Any] = Field(default_factory=dict)
     event_count: int = 0

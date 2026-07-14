@@ -19,8 +19,13 @@ export function createRunHistory({ api, element, locale, formatStatus, formatEve
     const meta = document.createElement('div');
     meta.className = 'history-meta';
     const status = document.createElement('span');
-    status.className = `history-status ${run.status}`;
-    status.textContent = formatStatus(run.status);
+    const displayStatus = run.status === 'completed' && run.data_status === 'degraded'
+      ? 'data_degraded'
+      : run.status === 'completed' && run.data_status === 'unavailable'
+        ? 'data_unavailable'
+        : run.status;
+    status.className = `history-status ${displayStatus}`;
+    status.textContent = formatStatus(displayStatus);
     const count = document.createElement('span');
     count.className = 'history-event-count';
     count.textContent = formatEventCount(run.event_count);

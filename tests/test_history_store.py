@@ -129,7 +129,9 @@ def test_analysis_runner_binds_run_id_to_vendor_audit(monkeypatch, tmp_path: Pat
         "vendor_verification_store",
         VendorVerificationStore(tmp_path / "runner.db"),
     )
-    monkeypatch.setattr(interface, "get_vendor", lambda category, method: "test_vendor")
+    monkeypatch.setattr(
+        interface, "get_vendor", lambda category, method: "primary, test_vendor"
+    )
     payload = "Date,Open,High,Low,Close,Volume\n2026-07-10,100,105,99,103,1000\n"
 
     def fake_impl(request):
@@ -145,7 +147,14 @@ def test_analysis_runner_binds_run_id_to_vendor_audit(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(analysis_runner, "_run_analysis_stream_impl", fake_impl)
     with mock.patch.dict(
         interface.VENDOR_METHODS,
-        {"get_stock_data": {"test_vendor": lambda *args: payload}},
+        {"get_stock_data": {
+            "primary": mock.Mock(
+                side_effect=interface.NoMarketDataError(
+                    "NVDA", detail="primary has no complete row"
+                )
+            ),
+            "test_vendor": lambda *args: payload,
+        }},
         clear=False,
     ):
         request = AnalysisRequest(
@@ -157,6 +166,66 @@ def test_analysis_runner_binds_run_id_to_vendor_audit(monkeypatch, tmp_path: Pat
         list(analysis_runner.run_analysis_stream(request))
 
     calls = store.get_vendor_calls("runner-audit")
-    assert len(calls) == 1
-    assert calls[0]["run_id"] == "runner-audit"
-    assert calls[0]["selected"] == 1
+    assert len(calls) == 2
+    assert all(call["run_id"] == "runner-audit" for call in calls)
+    assert [(call["status"], call["selected"]) for call in calls] == [
+        ("no_data", 0), ("available", 1)
+    ]
+    run = store.get_run("runner-audit")
+    vendor_events = [event for event in run["events"] if event["type"] == "vendor_attempt"]
+    assert len(vendor_events) == 2
+    assert {event["content"]["call_id"] for event in vendor_events} == {
+        calls[0]["call_id"]
+    }
+    assert "primary has no complete row" in vendor_events[0]["content"]["error_detail"]
+    assert vendor_events[1]["content"]["selected"] is True
+    assert run["data_status"] == "degraded"
+
+
+def test_vendor_summary_distinguishes_fallback_and_unavailable(tmp_path: Path):
+    store = RunHistoryStore(tmp_path / "summary.db")
+    store.create_run(
+        "summary-run", "NVDA", "2026-07-10", "stock", ["market"], "test", 1
+    )
+    base = {
+        "run_id": "summary-run", "category": "core_stock_apis",
+        "method": "get_stock_data", "agent": "Market Analyst", "symbol": "NVDA",
+        "arguments_json": "[]", "latency_ms": 1, "result_summary": None,
+        "result_hash": None, "calculation_start": None, "requested_end": None,
+        "data_latest_date": None, "started_at": "2026-07-14T00:00:00+00:00",
+        "finished_at": "2026-07-14T00:00:01+00:00",
+    }
+    store.add_vendor_call({
+        **base, "call_id": "fallback-call", "attempt": 1, "vendor": "primary",
+        "status": "rate_limited", "selected": False,
+        "error_type": "VendorRateLimitError", "error_detail": "HTTP 429",
+    })
+    store.add_vendor_call({
+        **base, "call_id": "fallback-call", "attempt": 2, "vendor": "fallback",
+        "status": "available", "selected": True,
+        "error_type": None, "error_detail": None, "result_hash": "abc",
+    })
+    store.add_vendor_call({
+        **base, "call_id": "missing-call", "attempt": 1, "vendor": "only",
+        "category": "news_data", "method": "get_news", "status": "no_data",
+        "selected": False, "error_type": "NoMarketDataError",
+        "error_detail": "no articles before cutoff",
+    })
+
+    summary = store.get_vendor_summary("summary-run")
+    assert summary["data_status"] == "degraded"
+    assert summary["fallback_domains"] == ["core_stock_apis"]
+    assert summary["unavailable_domains"] == ["news_data"]
+    assert summary["attempt_count"] == 3
+    assert summary["trajectories"] == [
+        {
+            "call_id": "fallback-call", "category": "core_stock_apis",
+            "method": "get_stock_data", "agent": "Market Analyst", "symbol": "NVDA",
+            "status": "degraded", "selected_vendor": "fallback", "attempt_count": 2,
+        },
+        {
+            "call_id": "missing-call", "category": "news_data", "method": "get_news",
+            "agent": "Market Analyst", "symbol": "NVDA", "status": "unavailable",
+            "selected_vendor": None, "attempt_count": 1,
+        },
+    ]

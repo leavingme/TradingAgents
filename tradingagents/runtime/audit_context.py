@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar, Token
 from datetime import date, datetime
+from typing import Any, Callable
 
 
 _run_id: ContextVar[str | None] = ContextVar("tradingagents_run_id", default=None)
@@ -15,6 +16,9 @@ _analysis_mode: ContextVar[str] = ContextVar(
 )
 _information_cutoff: ContextVar[str | None] = ContextVar(
     "tradingagents_information_cutoff", default=None
+)
+_vendor_attempt_sink: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
+    "tradingagents_vendor_attempt_sink", default=None
 )
 
 
@@ -64,6 +68,23 @@ def bind_information_cutoff(information_cutoff: str | None) -> Token:
 
 def reset_information_cutoff(token: Token) -> None:
     _information_cutoff.reset(token)
+
+
+def emit_vendor_attempt(record: dict[str, Any]) -> None:
+    """Forward one persisted vendor attempt to the active runtime event stream."""
+    sink = _vendor_attempt_sink.get()
+    if sink is not None:
+        sink(record)
+
+
+def bind_vendor_attempt_sink(
+    sink: Callable[[dict[str, Any]], None],
+) -> Token:
+    return _vendor_attempt_sink.set(sink)
+
+
+def reset_vendor_attempt_sink(token: Token) -> None:
+    _vendor_attempt_sink.reset(token)
 
 
 def validate_temporal_context(

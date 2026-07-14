@@ -350,6 +350,12 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - 核心运行时分析流 `run_analysis_stream` 已集成 `history_store` 包装器。无论是通过 CLI（`tradingagents` 交互式运行）还是 Web 界面启动的分析任务，均会自动向统一的 SQLite 数据库 `~/.tradingagents/runs.db` 中持久化记录运行历史与完整的事件步骤（`events`）。
 - `RunHistoryStore` 实现了多进程/线程环境下的并发安全访问和 SQL 事件入库时的去重机制（Deduplication），保证了 WebUI 内部的 SSE 分发与核心流自带的持久化之间不会发生事件双写或冲突。
 - 前端与后端 TaskStore 已全面对接该核心模块，废除了原本仅存在于 `/web` 下的独立 SQL 查询与表初始化结构。
+- vendor 尝试必须先写入 run-scoped append-only ledger，再由同一记录生成
+  `vendor_attempt` runtime 事件；`decision_status` 与 `data_status` 是两个不同维度，
+  fallback 或部分数据不可用不得因最终决策通过校验而显示为普通成功。
+- Langfuse、OpenTelemetry 或其他外部可观测平台只能作为可选异步镜像，不能替代
+  SQLite/runtime 权威事件链。采样、网络失败、外部服务停机或未配置凭据不得影响
+  分析执行、SSE 历史回放和本地审计完整性。
 
 ## 需要定期检查的事项
 

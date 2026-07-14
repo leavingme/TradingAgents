@@ -262,6 +262,7 @@ h1 {
 .status-dot.ready    { background: var(--text-muted); }
 .status-dot.running  { background: var(--accent-amber); animation: pulse-amber 1.5s ease-in-out infinite; }
 .status-dot.done     { background: var(--accent-green); }
+.status-dot.warning  { background: var(--accent-amber); }
 .status-dot.error    { background: var(--accent-red); }
 
 /* Meta chips */
@@ -1065,6 +1066,8 @@ h2, .panel-title {
 }
 
 .history-status.completed { color: var(--accent-green); background: rgba(16,185,129,0.12); }
+.history-status.data_degraded,
+.history-status.data_unavailable { color: var(--accent-amber); background: rgba(245,158,11,0.12); }
 .history-status.running   { color: var(--accent-amber);  background: rgba(245,158,11,0.12); }
 .history-status.failed    { color: var(--accent-red);    background: rgba(239,68,68,0.12); }
 .history-status.pending   { color: var(--text-muted);    background: rgba(75,94,122,0.15); }
@@ -1124,6 +1127,7 @@ h2, .panel-title {
 /* Event type color-coding */
 .event-type-message       { color: var(--accent-blue);   background: rgba(59,130,246,0.15);  }
 .event-type-tool_call     { color: var(--accent-purple);  background: rgba(139,92,246,0.15);  }
+.event-type-vendor_attempt{ color: var(--accent-amber);   background: rgba(245,158,11,0.15);  }
 .event-type-report_section{ color: var(--accent-green);   background: rgba(16,185,129,0.15);  }
 .event-type-agent_status  { color: var(--accent-amber);   background: rgba(245,158,11,0.15);  }
 .event-type-run_started   { color: var(--accent-blue);   background: rgba(59,130,246,0.15);  }

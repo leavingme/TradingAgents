@@ -162,6 +162,17 @@ def test_run_audit_preserves_every_fallback_attempt(monkeypatch, tmp_path):
     assert calls[1]["data_latest_date"] == "2026-07-09"
 
 
+def test_vendor_audit_redacts_credentials_from_failure_detail():
+    error = RuntimeError(
+        "authorization=Bearer-secret token=token-secret; API_KEY=key-secret"
+    )
+    detail = interface._safe_audit_error_detail(error)
+    assert detail == (
+        "authorization=[REDACTED] token=[REDACTED]; API_KEY=[REDACTED]"
+    )
+    assert "secret" not in detail
+
+
 @pytest.mark.unit
 def test_analysis_stops_if_run_audit_cannot_be_written(monkeypatch, tmp_path):
     from tradingagents.runtime import history as history_module

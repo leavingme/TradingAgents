@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 import os
 import re
 import time
@@ -20,6 +20,7 @@ import pytest
 import tradingagents.dataflows.config as config_module
 from tradingagents.dataflows.config import get_config, set_config
 from tradingagents.dataflows.interface import VENDOR_METHODS
+from tradingagents.dataflows.ohlcv_cache import latest_completed_daily_bar_date
 from tradingagents.default_config import DEFAULT_CONFIG
 
 
@@ -182,7 +183,6 @@ def test_configured_technical_indicator_providers_meet_capability_requirements(t
     config_module._config = None
     set_config(test_config)
 
-    curr_date = date.today().isoformat()
     markets = _enabled_markets()
     indicators = _enabled_indicators()
     rows: list[IndicatorProbe] = []
@@ -200,6 +200,7 @@ def test_configured_technical_indicator_providers_meet_capability_requirements(t
 
             vendor_market_results: dict[str, list[bool]] = {market: [] for market in markets}
             for market, symbol in markets.items():
+                curr_date = latest_completed_daily_bar_date(symbol).strftime("%Y-%m-%d")
                 for category, indicator in indicators.items():
                     started = time.perf_counter()
                     date_evidence = None

@@ -298,6 +298,11 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   bootstrap `TRADINGAGENTS_DB`，并为每个测试创建独立 `tmp_path/runs.db`，让
   runtime `history_store`、Web `TaskStore` 与 vendor 审计共用该临时库。测试不得
   绕过此 fixture 写入正式 `~/.tradingagents/runs.db` 或工作区回退数据库。
+- 测试日期分两类：离线确定性单元测试保留固定日期，以稳定覆盖周末、时区、收盘
+  边界、陈旧数据和前视偏差；真实 live integration/smoke 必须按标的调用
+  `latest_completed_daily_bar_date()`，不得把 `date.today()` 或长期硬编码日期用作
+  完整日 K 截止。分钟级 live capability probe 可以使用当前交易自然日，但不得将
+  其结果写入规范日 K。
 - Web 运行态接口可用性至少验证：
   `/api/config/defaults`、`/api/config/env-status`、`/api/runs`、SSE events、
   `/api/runs/{run_id}/report`。

@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from tradingagents.runtime import AnalysisRequest, run_analysis_once
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.ohlcv_cache import latest_completed_daily_bar_date
 
 # Build config: LLM via direct minimax (no :8642 gateway), Alpha Vantage + DuckDuckGo for data
 config = DEFAULT_CONFIG.copy()
@@ -41,7 +42,11 @@ analysts = ["market", "fundamentals"]
 set_config(config)
 
 symbol = sys.argv[1] if len(sys.argv) > 1 else "NVDA"
-date = sys.argv[2] if len(sys.argv) > 2 else "2026-02-27"
+date = (
+    sys.argv[2]
+    if len(sys.argv) > 2
+    else latest_completed_daily_bar_date(symbol).strftime("%Y-%m-%d")
+)
 
 print(f"=== Smoke run: symbol={symbol} date={date} ===")
 print(f"  backend = {config['backend_url']}")

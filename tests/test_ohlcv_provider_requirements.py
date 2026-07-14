@@ -8,17 +8,19 @@ Run explicitly when you want to evaluate the real providers:
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from io import StringIO
 import json
 import os
 import subprocess
 import time
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
 
 from tradingagents.dataflows.interface import VENDOR_METHODS
+from tradingagents.dataflows.ohlcv_cache import latest_completed_daily_bar_date
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.dataflows.symbol_utils import to_westock_code
 
@@ -49,11 +51,26 @@ def _enabled_core_vendors() -> list[str]:
     return [vendor.strip() for vendor in chain.split(",") if vendor.strip()]
 
 
-def _start_end() -> tuple[str, str, int]:
-    end = date.today()
+def _start_end(
+    cache_key: str,
+    now: datetime | None = None,
+) -> tuple[str, str, int]:
+    end = latest_completed_daily_bar_date(cache_key, now).date()
     start = end - timedelta(days=WINDOW_DAYS)
     expected_rows = _weekday_count(start, end)
     return start.isoformat(), end.isoformat(), expected_rows
+
+
+@pytest.mark.unit
+def test_provider_window_excludes_a_still_forming_daily_bar():
+    before_close = datetime(
+        2026, 7, 10, 15, 0, tzinfo=ZoneInfo("Asia/Hong_Kong")
+    )
+    start_iso, end_iso, expected_rows = _start_end("0700.HK", before_close)
+
+    assert start_iso == "2026-05-25"
+    assert end_iso == "2026-07-09"
+    assert expected_rows == _weekday_count(date(2026, 5, 25), date(2026, 7, 9))
 
 
 def _looks_transient(text: object) -> bool:
@@ -203,7 +220,6 @@ def test_configured_ohlcv_providers_meet_data_requirements():
     if os.environ.get("RUN_OHLCV_PROVIDER_REQUIREMENTS") != "1":
         pytest.skip("set RUN_OHLCV_PROVIDER_REQUIREMENTS=1 to run live provider checks")
 
-    start_iso, end_iso, expected_rows = _start_end()
     failures = []
 
     for vendor in _enabled_core_vendors():
@@ -217,6 +233,7 @@ def test_configured_ohlcv_providers_meet_data_requirements():
             continue
 
         for market, symbol in MARKET_PROBES.items():
+            start_iso, end_iso, expected_rows = _start_end(symbol)
             started = time.perf_counter()
             try:
                 raw = _call_stock_data_with_retry(stock_fn, symbol, start_iso, end_iso)
@@ -262,11 +279,12 @@ def test_configured_ohlcv_providers_meet_data_requirements():
                 if not minute_supported:
                     failures.append(f"{vendor} {market}: minute probe unexpectedly failed")
 
+        indicator_end = latest_completed_daily_bar_date("NVDA").strftime("%Y-%m-%d")
         indicator_pass = 0
         indicator_errors = {}
         for indicator in INDICATOR_BASKET:
             try:
-                if _indicator_result_ok(indicator_fn("NVDA", indicator, end_iso, 30)):
+                if _indicator_result_ok(indicator_fn("NVDA", indicator, indicator_end, 30)):
                     indicator_pass += 1
                 else:
                     indicator_errors[indicator] = "empty/unavailable result"

@@ -264,6 +264,10 @@ After this works, refactor the existing TUI to consume the same runtime stream.
   collection and then gives every test one temporary SQLite shared by runtime
   `history_store`, Web `TaskStore`, and vendor audit persistence; tests cannot add
   runs to the production or workspace-fallback history databases.
+- Done: deterministic unit tests retain fixed anchor dates, while live smoke and
+  provider-capability checks derive exchange-aware latest-completed daily-bar
+  cutoffs per symbol; cross-market probes no longer treat the natural current
+  date as a universally complete market-data date.
 - Done: Premium dark-mode frontend (glassmorphism, Inter font, marked.js, animated agent status dots).
 - Done: WebUI run flow now mirrors the CLI startup sequence for run-critical
   configuration: ticker/date/asset, report language, analyst selection,

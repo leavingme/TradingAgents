@@ -6,7 +6,10 @@ Run from project root:
     /data/disk/workspace/TradingAgents/venv/bin/python tests/test_longbridge_integration.py
 """
 import sys
+from datetime import date, timedelta
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -15,10 +18,12 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
 from tradingagents.dataflows.interface import route_to_vendor, VENDOR_METHODS
+from tradingagents.dataflows.ohlcv_cache import latest_completed_daily_bar_date
 
 
 # Pytest-discoverable registration check (the heavy ad-hoc smoke is below
 # under __main__ and requires a live Longbridge token).
+@pytest.mark.unit
 def test_longbridge_vendor_registration():
     """Longbridge must be registered for every vendor slot we cover."""
     expected = {
@@ -78,10 +83,41 @@ if __name__ == "__main__":
             print(f"  ✗ 异常: {type(e).__name__}: {e}")
             return False
 
+    end_date = latest_completed_daily_bar_date("NVDA").strftime("%Y-%m-%d")
+    start_date = (date.fromisoformat(end_date) - timedelta(days=45)).isoformat()
     ok = []
-    ok.append(check("2. get_stock_data NVDA 6/1..7/4", route_to_vendor, "get_stock_data", "NVDA", "2026-06-01", "2026-07-04"))
-    ok.append(check("3. get_indicators NVDA rsi 30d", route_to_vendor, "get_indicators", "NVDA", "rsi", "2026-07-04", 30))
-    ok.append(check("4. get_indicators NVDA macd 60d", route_to_vendor, "get_indicators", "NVDA", "macd", "2026-07-04", 60))
+    ok.append(
+        check(
+            f"2. get_stock_data NVDA {start_date}..{end_date}",
+            route_to_vendor,
+            "get_stock_data",
+            "NVDA",
+            start_date,
+            end_date,
+        )
+    )
+    ok.append(
+        check(
+            "3. get_indicators NVDA rsi 30d",
+            route_to_vendor,
+            "get_indicators",
+            "NVDA",
+            "rsi",
+            end_date,
+            30,
+        )
+    )
+    ok.append(
+        check(
+            "4. get_indicators NVDA macd 60d",
+            route_to_vendor,
+            "get_indicators",
+            "NVDA",
+            "macd",
+            end_date,
+            60,
+        )
+    )
     ok.append(check("5. get_fundamentals NVDA", route_to_vendor, "get_fundamentals", "NVDA"))
     ok.append(check("6. get_income_statement NVDA", route_to_vendor, "get_income_statement", "NVDA"))
     ok.append(check("7. get_balance_sheet NVDA", route_to_vendor, "get_balance_sheet", "NVDA"))

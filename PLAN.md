@@ -400,6 +400,26 @@ Known differences:
 - Split position generation from validation. `PositionSizingEngine` may implement fixed-risk, ATR-risk, volatility-target, fractional-Kelly, account-equity, and max-notional policies; `TradePlanValidator` must independently recompute and enforce portfolio loss, concentration, and account limits.
 - Bind authoritative market inputs (`verified_atr`, latest Close, market date, and vendor `call_id`) from the verified snapshot directly into validation. LLMs should propose trade levels but must not supply or transcribe trusted risk inputs.
 
+## Remaining-work prioritization (2026-07-14)
+
+There is currently no explicit unfinished P0. `TODO.md` section “未完成项统一优先级（2026-07-14）” is the canonical ranked backlog; detailed sections in this plan provide implementation and acceptance context but must not silently reorder it.
+
+The top-level ordering is **Safety and correctness → Runtime reliability/cost → Core research capability → High-complexity expansion**. It is a sequence of gates rather than a blended score:
+
+1. **Safety and correctness** — default-enabled, fail-open, look-ahead, stale, executable, or unauditable decision paths come first. Disabled future capabilities rank below active paths unless enabling them would immediately create a safety gap.
+2. **Runtime reliability/cost** — failures, misleading state, recovery gaps, lost audit evidence, SQLite contention, write amplification, token volume, serial calls, repeated loading, latency, and storage pressure come next.
+3. **Core research capability** — once the active path is correct, stable, and cost-controlled, improve the position/risk boundary, forward-looking evidence, and trusted market context used by the existing analysis flow.
+4. **High-complexity expansion** — capabilities requiring new permissions, risk models, trade semantics, or universe-selection stages come last; protective models and validators must precede enablement.
+
+Re-ranking requires evidence: reproducible runs, probability and blast radius, reversibility, default enablement, and dependency readiness. Revisit the order when a new P0 appears, an optional capability becomes enabled, runtime evidence changes, or a prerequisite closes. Closure requires implementation, focused tests, relevant runtime evidence, and synchronized `TODO.md` / `PLAN.md` updates.
+
+Execution waves preserve the canonical 1–15 ordering:
+
+1. **Safety and correctness (1–3)**: prediction-market deterministic validation and attempt persistence; Runtime failure-domain/vendor trajectory; news and macro validation coverage audit.
+2. **Runtime reliability/cost (4–6)**: SSE/report-section throttling; batched technical indicators; evidence-preserving runtime-context compression.
+3. **Core research capability (7–9)**: position-sizing/validation separation; Longbridge forward-looking research; cross-market Session Engine.
+4. **High-complexity expansion (10–15)**: short/derivative validation before enabling those actions; read-only account constraints; fundamental/ownership enrichment; independent macro vendor; advisory Reviewer; derivatives/universe data only after their risk and selection stages exist.
+
 ## P0 Safety and Integrity Audit Backlog (2026-07-13)
 
 ### Confirmed P0
@@ -444,9 +464,12 @@ All seven items above are implemented. The acceptance suite covers trusted snaps
 Next recommended work:
 
 1. **Completed — OpenAI-compatible test secret isolation**: the keyless-local regression test clears both the provider-specific key and `OPENAI_API_KEY` fallback within `monkeypatch`, and validates the placeholder through a boolean helper that cannot render credential material in assertion diffs.
-2. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.
-3. **SSE/Report Section Throttling**: Throttle the write/push rate of `report_section` updates to prevent SQLite database lock congestion and smooth browser UI updates.
-4. Complete deterministic validation and runtime vendor-attempt persistence for prediction-market data.
+2. **Prediction-market validation and attempt persistence**: validate event ID, expiry, probability, cutoff, and stable source ID, and persist every configured vendor attempt.
+3. **Runtime failure and vendor trajectory**: expose failed domain, attempted vendors, fallback path, and validation reason without representing degraded execution as success.
+4. **News/macro validation coverage audit**: reconcile the implemented structured evidence models with the still-open body, publication-time, observation-period, unit, source-ID, and cutoff checks.
+5. **SSE/Report Section Throttling**: throttle `report_section` writes and pushes to reduce SQLite contention and browser churn.
+6. **Indicator Batching**: batch technical-indicator retrieval to reduce roughly 12 serial requests and repeated OHLCV loading.
+7. **Runtime context compression**: remove repeated reports/tool payloads while retaining deterministic source evidence and audit references.
 
 ## Repeatable NVDA engineering cycle (2026-07-13)
 

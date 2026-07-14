@@ -31,6 +31,18 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
   `tradingagents._cli_entry:app`（不是直接指向 `cli.main:app` —
   详见 PYTHONPATH 部分）。
 
+### TradingAgents skill
+
+- 当前用户级 skill 位于 `/home/ubuntu/.agents/skills/trading-agents/`；其中
+  `analyze.py` 通过用户级 systemd transient service 启动后台分析，任务元数据
+  持久化到 `~/.tradingagents/jobs/`。
+- skill worker 必须调用 `tradingagents.runtime.run_analysis_once()`，让 CLI、Web
+  和 skill 共用 canonical runtime 与 `~/.tradingagents/runs.db`；禁止直接调用
+  `TradingAgentsGraph.propagate()` 绕过事件和历史持久化。
+- `/home/ubuntu/.openclaw/skills/trading-agents/` 和旧 OpenClaw 工作区路径已经
+  退休。不得在 skill 脚本、任务命令、日志或元数据中保存 API key、cookie、token
+  或 webhook；凭据只从 server-side env / `.env` 加载。
+
 ### WebUI 约定
 
 - WebUI 应该镜像 CLI 的启动分析流程，但不要把主运行页塞满。Run 页面只保留

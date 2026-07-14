@@ -1,9 +1,9 @@
-"""Structured, auditable evidence models for news and macro observations."""
+"""Structured, auditable evidence models for news, macro, and predictions."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import math
 import re
@@ -54,6 +54,42 @@ class MacroSeries:
     observations: tuple[MacroObservation, ...]
 
 
+@dataclass(frozen=True)
+class PredictionOutcome:
+    label: str
+    probability: float
+
+
+@dataclass(frozen=True)
+class PredictionMarket:
+    source_id: str
+    event_id: str
+    event_title: str
+    market_id: str
+    condition_id: str
+    question: str
+    slug: str
+    url: str
+    expires_at: str
+    observed_at: str
+    outcomes: tuple[PredictionOutcome, ...]
+    volume: float
+    one_week_probability_change: float | None
+    vendor: str
+    vendor_call_id: str = ""
+    active: bool = True
+    closed: bool = False
+    archived: bool = False
+
+
+@dataclass(frozen=True)
+class PredictionMarketFeed:
+    topic: str
+    observed_at: str
+    requested_limit: int
+    markets: tuple[PredictionMarket, ...]
+
+
 def parse_external_datetime(value: object) -> str:
     if isinstance(value, (int, float)):
         dt = datetime.fromtimestamp(float(value), tz=timezone.utc)
@@ -92,6 +128,11 @@ def macro_source_id(series_id: str, observed_at: str) -> str:
     return "macro_" + hashlib.sha256(
         f"fred\x1f{series_id}\x1f{observed_at}".encode()
     ).hexdigest()[:20]
+
+
+def prediction_source_id(*, vendor: str, event_id: str, market_id: str) -> str:
+    material = "\x1f".join((vendor.strip(), event_id.strip(), market_id.strip()))
+    return "prediction_" + hashlib.sha256(material.encode()).hexdigest()[:20]
 
 
 def validate_news_feed(feed: NewsFeed, *, symbol: str | None = None) -> NewsFeed:
@@ -169,6 +210,134 @@ def validate_macro_series(series: MacroSeries) -> MacroSeries:
     return replace(series, observations=tuple(accepted))
 
 
+def validate_prediction_market_feed(
+    feed: PredictionMarketFeed,
+    *,
+    expected_vendor: str | None = None,
+    expected_topic: str | None = None,
+    information_cutoff: str | None = None,
+    require_call_id: bool = False,
+    now: datetime | None = None,
+) -> PredictionMarketFeed:
+    """Validate live prediction evidence before it is rendered for an LLM."""
+    if not isinstance(feed, PredictionMarketFeed):
+        raise TypeError("prediction-market vendor must return PredictionMarketFeed")
+    if not feed.topic.strip():
+        raise ValueError("prediction-market topic is missing")
+    if expected_topic and feed.topic.strip().casefold() != expected_topic.strip().casefold():
+        raise ValueError("prediction-market feed topic does not match the request")
+    try:
+        requested_limit = int(feed.requested_limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("prediction-market requested_limit must be an integer") from exc
+    if not 1 <= requested_limit <= 20:
+        raise ValueError("prediction-market requested_limit must be between 1 and 20")
+
+    observed = datetime.fromisoformat(parse_external_datetime(feed.observed_at))
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current = current.astimezone(timezone.utc)
+    if observed > current + timedelta(minutes=5):
+        raise ValueError("prediction-market observed_at is in the future")
+    if information_cutoff:
+        cutoff = datetime.fromisoformat(parse_external_datetime(information_cutoff))
+        if observed > cutoff:
+            raise ValueError("prediction-market observed_at exceeds information_cutoff")
+
+    seen: set[str] = set()
+    accepted: list[PredictionMarket] = []
+    for market in feed.markets:
+        try:
+            market_observed = datetime.fromisoformat(
+                parse_external_datetime(market.observed_at)
+            )
+            expires = datetime.fromisoformat(parse_external_datetime(market.expires_at))
+        except (ValueError, OverflowError, OSError):
+            continue
+        if market_observed != observed or expires <= observed:
+            continue
+        if not market.active or market.closed or market.archived:
+            continue
+        if not all((
+            market.event_id.strip(), market.event_title.strip(),
+            market.market_id.strip(), market.condition_id.strip(),
+            market.question.strip(), market.vendor.strip(),
+        )):
+            continue
+        if expected_vendor and market.vendor != expected_vendor:
+            continue
+        expected_source_id = prediction_source_id(
+            vendor=market.vendor,
+            event_id=market.event_id,
+            market_id=market.market_id,
+        )
+        if market.source_id != expected_source_id or market.source_id in seen:
+            continue
+        parsed_url = urlsplit(market.url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            continue
+        if len(market.outcomes) < 2:
+            continue
+        labels = [outcome.label.strip() for outcome in market.outcomes]
+        probabilities = [float(outcome.probability) for outcome in market.outcomes]
+        if (
+            not all(labels)
+            or len(set(labels)) != len(labels)
+            or not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in probabilities)
+            or not math.isclose(sum(probabilities), 1.0, abs_tol=0.02)
+        ):
+            continue
+        if not math.isfinite(float(market.volume)) or float(market.volume) < 0:
+            continue
+        weekly_change = market.one_week_probability_change
+        if weekly_change is not None and (
+            not math.isfinite(float(weekly_change))
+            or not -1.0 <= float(weekly_change) <= 1.0
+        ):
+            continue
+        if require_call_id and not market.vendor_call_id.strip():
+            continue
+        seen.add(market.source_id)
+        accepted.append(replace(
+            market,
+            expires_at=expires.isoformat(),
+            observed_at=market_observed.isoformat(),
+            outcomes=tuple(
+                PredictionOutcome(label=label, probability=probability)
+                for label, probability in zip(labels, probabilities)
+            ),
+            volume=float(market.volume),
+            one_week_probability_change=(
+                float(weekly_change) if weekly_change is not None else None
+            ),
+        ))
+    if not accepted:
+        raise ValueError(
+            "no prediction markets passed ID/expiry/probability/source validation"
+        )
+    accepted.sort(key=lambda market: market.volume, reverse=True)
+    return replace(
+        feed,
+        observed_at=observed.isoformat(),
+        requested_limit=requested_limit,
+        markets=tuple(accepted[:requested_limit]),
+    )
+
+
+def bind_prediction_market_call_id(
+    feed: PredictionMarketFeed, call_id: str
+) -> PredictionMarketFeed:
+    if not call_id.strip():
+        raise ValueError("prediction-market vendor call_id is missing")
+    return replace(
+        feed,
+        markets=tuple(
+            replace(market, vendor_call_id=call_id) for market in feed.markets
+        ),
+    )
+
+
 def render_news_feed(feed: NewsFeed) -> str:
     lines = [f"## Validated news evidence ({feed.requested_start} to {feed.requested_end})"]
     for item in feed.items:
@@ -195,7 +364,38 @@ def render_macro_series(series: MacroSeries) -> str:
     return "\n".join(lines)
 
 
-_SOURCE_ID = re.compile(r"\b(?:news|macro)_[0-9a-f]{8,64}\b")
+def render_prediction_market_feed(feed: PredictionMarketFeed) -> str:
+    lines = [
+        f"## Validated prediction-market evidence: {feed.topic}",
+        f"- Observed at: {feed.observed_at}",
+        "- Probabilities are market prices, not certain forecasts.",
+    ]
+    for market in feed.markets:
+        outcomes = ", ".join(
+            f"{outcome.label} {outcome.probability:.1%}"
+            for outcome in market.outcomes
+        )
+        lines.extend([
+            "",
+            f"### [{market.source_id}] {market.question}",
+            f"- Event: {market.event_title} (event_id={market.event_id})",
+            f"- Market ID: {market.market_id}",
+            f"- Condition ID: {market.condition_id}",
+            f"- Outcomes: {outcomes}",
+            f"- Volume: ${market.volume:,.0f}",
+            f"- Expires: {market.expires_at}",
+            f"- Vendor call ID: {market.vendor_call_id}",
+            f"- URL: {market.url}",
+        ])
+        if market.one_week_probability_change is not None:
+            lines.append(
+                "- One-week probability change: "
+                f"{market.one_week_probability_change * 100:+.1f}pp"
+            )
+    return "\n".join(lines)
+
+
+_SOURCE_ID = re.compile(r"\b(?:news|macro|prediction)_[0-9a-f]{8,64}\b")
 _MATERIAL_CLAIM = re.compile(
     r"\b(?:\d{4}-\d{2}-\d{2}|\d+(?:\.\d+)?%|\$\d|"
     r"announc(?:e|ed|es)|report(?:ed|s)?|rais(?:e|ed|es)|cut|launch(?:ed|es)?)\b",

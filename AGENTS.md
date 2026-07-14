@@ -209,7 +209,7 @@ get_cashflow(symbol, freq=None, curr_date=None)
 - vendor 只能返回其原始接口实际提供并可规范化的数据。禁止用 Web Search、新闻摘要、估算值、静态说明或低信息摘要替代请求的数据类型。
 - 同一 vendor 内部的网络重试可以保留，但必须保持同一数据源、同一能力和同一语义；缓存命中也必须经过与在线响应相同的规范化和校验。
 - 若某个 fallback 来源需要独立配置、可观测性或质量判断，必须注册为独立 vendor，不得隐藏在另一个 vendor 实现内部。
-- 新闻和宏观 vendor 必须返回 `NewsFeed` / `MacroSeries` 结构化领域对象；发布时间、URL、标的关联、观察期、单位与稳定 `source_id` 在 router 层验证后才能渲染给 LLM。DuckDuckGo 等不提供真实发布时间的结果不得用抓取时间冒充发布时间。
+- 新闻、宏观和预测市场 vendor 必须返回 `NewsFeed` / `MacroSeries` / `PredictionMarketFeed` 结构化领域对象；发布时间、URL、标的/主题关联、观察期、单位、事件/市场 ID、带时区到期日、概率范围与稳定 `source_id` 在 router 层验证后才能渲染给 LLM。预测市场 `call_id` 由 router 绑定，所有 configured vendor attempt 必须写入 run-scoped ledger。DuckDuckGo 等不提供真实发布时间的结果不得用抓取时间冒充发布时间。
 - Longbridge 个股新闻默认优先使用 MCP `news`，CLI `news --format json` 为 fallback；全球新闻使用 CLI `news search --format json`。截至 2026-07-13，MCP `news_search` 原始响应会把 `time` 返回为 Unix epoch，修复前不得注册为已验证全球新闻来源。
 - 新闻、社交和外部工具文本必须使用 `untrusted_data` JSON 数据消息传输，不得插入 system instruction；检测到的中英文指令行和控制令牌必须在进入后续辩论前清除。
 

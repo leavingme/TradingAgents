@@ -8,7 +8,8 @@ these (or a thin vendor-named subclass) and needs no new ``except`` clause.
     VendorError
     ├── NoMarketDataError          no usable rows (empty result OR stale data)
     ├── VendorRateLimitError       transient throttle -> skip to next vendor
-    └── VendorNotConfiguredError   missing API key/config -> vendor unavailable
+    ├── VendorNotConfiguredError   missing API key/config -> vendor unavailable
+    └── VendorUnavailableError     transport/service failure -> fallback
 
 The number of types is the number of distinct router reactions, not the number
 of human-describable causes: empty and stale data get identical handling, so
@@ -79,3 +80,7 @@ class VendorNotConfiguredError(VendorError, ValueError):
     Also a ``ValueError`` so existing callers that catch ``ValueError`` keep
     working while the routing layer can treat it as "vendor unavailable".
     """
+
+
+class VendorUnavailableError(VendorError):
+    """A vendor transport or upstream service failed before usable data arrived."""

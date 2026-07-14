@@ -10,14 +10,20 @@ no auth. Each market's ``outcomePrices`` are the implied probabilities of its
 outcomes (a "Yes" at 0.76 means the market prices a 76% chance).
 """
 import json
-import logging
+import math
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import requests
 
-from tradingagents.dataflows.errors import NoMarketDataError
-
-logger = logging.getLogger(__name__)
+from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError
+from tradingagents.dataflows.evidence_models import (
+    PredictionMarket,
+    PredictionMarketFeed,
+    PredictionOutcome,
+    parse_external_datetime,
+    prediction_source_id,
+)
 
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 
@@ -70,28 +76,63 @@ def _parse_json_list(value) -> list:
         return []
 
 
-def _is_forward_looking(market: dict, now: datetime) -> bool:
-    """Keep only open markets that resolve in the future.
+def _float_or_nan(value: object) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return math.nan
+    return parsed
 
-    ``closed`` is the reliable resolved flag (``active`` stays True even for
-    settled markets), and a past ``endDate`` means the event already resolved —
-    either way it is not a forward-looking signal.
-    """
-    if market.get("closed"):
-        return False
-    end_date = market.get("endDate")
-    if end_date:
-        try:
-            if datetime.fromisoformat(end_date.replace("Z", "+00:00")) < now:
-                return False
-        except ValueError:
-            pass
-    return bool(_parse_json_list(market.get("outcomePrices"))) and bool(
-        _parse_json_list(market.get("outcomes"))
+
+def _adapt_market(
+    event: dict, market: dict, *, observed_at: str
+) -> PredictionMarket:
+    event_id = str(event.get("id") or "").strip()
+    market_id = str(market.get("id") or "").strip()
+    event_slug = str(event.get("slug") or "").strip()
+    market_slug = str(market.get("slug") or "").strip()
+    outcomes = _parse_json_list(market.get("outcomes"))
+    prices = _parse_json_list(market.get("outcomePrices"))
+    expiry = market.get("endDate") or event.get("endDate") or ""
+    try:
+        expiry = parse_external_datetime(expiry)
+    except (ValueError, OverflowError, OSError):
+        expiry = ""
+    slug = event_slug or market_slug
+    url = f"https://polymarket.com/event/{quote(slug)}" if slug else ""
+    return PredictionMarket(
+        source_id=prediction_source_id(
+            vendor="polymarket", event_id=event_id, market_id=market_id
+        ),
+        event_id=event_id,
+        event_title=str(event.get("title") or "").strip(),
+        market_id=market_id,
+        condition_id=str(market.get("conditionId") or "").strip(),
+        question=str(market.get("question") or "").strip(),
+        slug=market_slug,
+        url=url,
+        expires_at=expiry,
+        observed_at=observed_at,
+        outcomes=tuple(
+            PredictionOutcome(label=str(label).strip(), probability=_float_or_nan(price))
+            for label, price in zip(outcomes, prices)
+        ),
+        volume=_float_or_nan(market.get("volumeNum") or market.get("volume") or 0),
+        one_week_probability_change=(
+            _float_or_nan(market.get("oneWeekPriceChange"))
+            if market.get("oneWeekPriceChange") is not None
+            else None
+        ),
+        vendor="polymarket",
+        active=bool(market.get("active", True)),
+        closed=bool(market.get("closed", False)),
+        archived=bool(market.get("archived", False)),
     )
 
 
-def get_prediction_markets(topic: str, limit: int | None = None) -> str:
+def get_prediction_markets(
+    topic: str, limit: int | None = None
+) -> PredictionMarketFeed:
     """Return live prediction-market probabilities for an event topic.
 
     Args:
@@ -101,68 +142,39 @@ def get_prediction_markets(topic: str, limit: int | None = None) -> str:
             DEFAULT_LIMIT.
 
     Returns:
-        A markdown report of the most-traded open markets matching the topic,
-        each with its implied probability, traded volume, resolution date, and
-        recent (1-week) move.
+        A structured feed adapted directly from Gamma event/market JSON. The
+        routing layer performs deterministic validation before rendering.
     """
     _reject_unavailable_point_in_time_snapshot(topic)
 
     if limit is None:
         limit = DEFAULT_LIMIT
+    limit = int(limit)
+    if not topic.strip():
+        raise ValueError("prediction-market topic must not be empty")
+    if not 1 <= limit <= 20:
+        raise ValueError("prediction-market limit must be between 1 and 20")
 
     try:
         data = _request("public-search", {"q": topic, "limit_per_type": 20})
     except requests.RequestException as e:
-        logger.warning("Polymarket search failed for %r: %s", topic, e)
-        return (
-            f"Polymarket data is currently unavailable (network error: {e}). "
-            f"Proceed without prediction-market signal for '{topic}'."
-        )
+        raise VendorUnavailableError(
+            f"Polymarket public-search failed for {topic!r}: {e}"
+        ) from e
+    if not isinstance(data, dict):
+        raise VendorUnavailableError("Polymarket public-search returned non-object JSON")
 
-    now = datetime.now(timezone.utc)
-    candidates = [
-        m
-        for event in data.get("events", [])
-        for m in event.get("markets", [])
-        if _is_forward_looking(m, now)
-    ]
-    candidates.sort(key=lambda m: m.get("volumeNum") or 0, reverse=True)
-
-    header = (
-        f'## Polymarket prediction markets: "{topic}"\n'
-        f"Live snapshot observed at {now.isoformat()}.\n"
-        f"Live, market-implied probabilities (higher traded volume = deeper, "
-        f"more reliable). A probability is the crowd's priced odds of the event, "
-        f"not a forecast you should take as certain.\n\n"
+    observed_at = datetime.now(timezone.utc).isoformat()
+    markets = tuple(
+        _adapt_market(event, market, observed_at=observed_at)
+        for event in (data.get("events") or [])
+        if isinstance(event, dict)
+        for market in (event.get("markets") or [])
+        if isinstance(market, dict)
     )
-
-    if not candidates:
-        return header + (
-            f"No open prediction markets matched '{topic}'. Polymarket coverage "
-            f"is concentrated in macro, political, geopolitical, and crypto "
-            f"events; a specific equity may have none."
-        )
-
-    lines = []
-    for m in candidates[:limit]:
-        prices = _parse_json_list(m.get("outcomePrices"))
-        outcomes = _parse_json_list(m.get("outcomes"))
-        try:
-            prob = float(prices[0])
-        except (ValueError, IndexError):
-            continue
-        label = outcomes[0] if outcomes else "Yes"
-        volume = m.get("volumeNum") or 0
-        end_date = (m.get("endDate") or "")[:10]
-        wk = m.get("oneWeekPriceChange")
-        wk_str = (
-            f", 1-week {wk * 100:+.1f}pp"
-            if isinstance(wk, (int, float)) and wk
-            else ""
-        )
-        lines.append(
-            f"- **{m.get('question')}** — {label} {prob:.0%} "
-            f"(${volume:,.0f} volume, resolves {end_date}{wk_str})"
-        )
-
-    return header + "\n".join(lines) + "\n"
+    return PredictionMarketFeed(
+        topic=topic.strip(),
+        observed_at=observed_at,
+        requested_limit=limit,
+        markets=markets,
+    )

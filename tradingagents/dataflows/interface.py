@@ -717,6 +717,42 @@ def route_to_vendor(method: str, *args, **kwargs):
                 except (TypeError, ValueError) as exc:
                     raise NoMarketDataError(str(args[0]), detail=str(exc)) from exc
                 validation = type("Validation", (), {"is_valid": True, "detail": ""})()
+            elif method == "get_prediction_markets":
+                from .evidence_models import (
+                    bind_prediction_market_call_id,
+                    validate_prediction_market_feed,
+                )
+                from tradingagents.runtime.audit_context import (
+                    current_information_cutoff,
+                )
+                prediction_cutoff = current_information_cutoff()
+                try:
+                    normalized_result = validate_prediction_market_feed(
+                        result,
+                        expected_vendor=vendor,
+                        expected_topic=str(args[0]),
+                        information_cutoff=prediction_cutoff,
+                    )
+                    normalized_result = bind_prediction_market_call_id(
+                        normalized_result, audit_call_id
+                    )
+                    normalized_result = validate_prediction_market_feed(
+                        normalized_result,
+                        expected_vendor=vendor,
+                        expected_topic=str(args[0]),
+                        information_cutoff=prediction_cutoff,
+                        require_call_id=True,
+                    )
+                    validation = type(
+                        "Validation", (), {"is_valid": True, "detail": ""}
+                    )()
+                except (TypeError, ValueError) as exc:
+                    normalized_result = result
+                    validation = type(
+                        "Validation",
+                        (),
+                        {"is_valid": False, "detail": str(exc)},
+                    )()
             else:
                 validation = validate_vendor_result(method, result)
             if not validation.is_valid:

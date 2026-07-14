@@ -4,6 +4,10 @@ from langchain_core.tools import tool
 
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.dataflows.untrusted_content import render_untrusted_payload
+from tradingagents.dataflows.evidence_models import (
+    PredictionMarketFeed,
+    render_prediction_market_feed,
+)
 
 
 @tool
@@ -30,6 +34,10 @@ def get_prediction_markets(
     Returns:
         str: A formatted markdown report of matching prediction markets
     """
-    return render_untrusted_payload({
-        "prediction_markets": route_to_vendor("get_prediction_markets", topic, limit)
-    })
+    result = route_to_vendor("get_prediction_markets", topic, limit)
+    rendered = (
+        render_prediction_market_feed(result)
+        if isinstance(result, PredictionMarketFeed)
+        else str(result)
+    )
+    return render_untrusted_payload({"prediction_markets": rendered})

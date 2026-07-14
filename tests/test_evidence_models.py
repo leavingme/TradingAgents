@@ -61,3 +61,18 @@ def test_material_claim_requires_known_source_id():
         validate_report_citations(
             "NVIDIA announced a launch [news_aaaaaaaaaaaaaaaaaaaa].", evidence
         )
+
+
+@pytest.mark.unit
+def test_prediction_claim_accepts_only_known_prediction_source_id():
+    source_id = "prediction_0123456789abcdefabcd"
+    evidence = [f"[{source_id}] Fed probability 65%"]
+    assert validate_report_citations(
+        f"The market prices a 65% probability [{source_id}].", evidence
+    )
+    with pytest.raises(ValueError, match="unknown source_id"):
+        validate_report_citations(
+            "The market prices a 65% probability "
+            "[prediction_aaaaaaaaaaaaaaaaaaaa].",
+            evidence,
+        )

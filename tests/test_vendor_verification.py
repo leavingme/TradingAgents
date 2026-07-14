@@ -3,7 +3,13 @@ from unittest import mock
 import pytest
 
 from tradingagents.dataflows import interface
-from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.errors import NoMarketDataError, VendorUnavailableError
+from tradingagents.dataflows.evidence_models import (
+    PredictionMarket,
+    PredictionMarketFeed,
+    PredictionOutcome,
+    prediction_source_id,
+)
 from tradingagents.dataflows.vendor_verification import VendorVerificationStore
 from tradingagents.runtime.audit_context import bind_run_id, reset_run_id
 from tradingagents.runtime.history import RunHistoryStore
@@ -189,3 +195,92 @@ def test_analysis_stops_if_run_audit_cannot_be_written(monkeypatch, tmp_path):
                 )
         finally:
             reset_run_id(token)
+
+
+@pytest.mark.unit
+def test_prediction_router_persists_invalid_and_selected_attempts(monkeypatch, tmp_path):
+    from tradingagents.runtime import history as history_module
+    from tradingagents.dataflows import vendor_verification as verification_module
+
+    run_store = RunHistoryStore(tmp_path / "runs.db")
+    run_store.create_run(
+        "run-prediction-audit", "NVDA", "2026-07-14", "stock",
+        ["news"], "test", 1,
+    )
+    monkeypatch.setattr(history_module, "history_store", run_store)
+    monkeypatch.setattr(
+        verification_module,
+        "vendor_verification_store",
+        VendorVerificationStore(tmp_path / "runs.db"),
+    )
+    monkeypatch.setattr(
+        interface,
+        "get_vendor",
+        lambda category, method: "transport, invalid, polymarket",
+    )
+
+    def feed(vendor: str, probability: float) -> PredictionMarketFeed:
+        event_id, market_id = "event-fed", "market-fed"
+        observed_at = "2026-07-14T04:00:00+00:00"
+        return PredictionMarketFeed(
+            topic="Fed rate cut",
+            observed_at=observed_at,
+            requested_limit=3,
+            markets=(PredictionMarket(
+                source_id=prediction_source_id(
+                    vendor=vendor, event_id=event_id, market_id=market_id
+                ),
+                event_id=event_id,
+                event_title="Federal Reserve decision",
+                market_id=market_id,
+                condition_id="condition-fed",
+                question="Will the Fed cut rates?",
+                slug="will-the-fed-cut-rates",
+                url="https://polymarket.com/event/will-the-fed-cut-rates",
+                expires_at="2030-12-31T00:00:00+00:00",
+                observed_at=observed_at,
+                outcomes=(
+                    PredictionOutcome("Yes", probability),
+                    PredictionOutcome("No", 1 - probability),
+                ),
+                volume=50_000,
+                one_week_probability_change=0.01,
+                vendor=vendor,
+            ),),
+        )
+
+    def transport_failure(*args):
+        raise VendorUnavailableError("prediction transport failed")
+
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_prediction_markets": {
+            "transport": transport_failure,
+            "invalid": lambda *args: feed("invalid", 1.2),
+            "polymarket": lambda *args: feed("polymarket", 0.65),
+        }},
+        clear=False,
+    ):
+        token = bind_run_id("run-prediction-audit")
+        try:
+            result = interface.route_to_vendor(
+                "get_prediction_markets", "Fed rate cut", 3
+            )
+        finally:
+            reset_run_id(token)
+
+    calls = run_store.get_vendor_calls("run-prediction-audit")
+    assert [
+        (call["attempt"], call["vendor"], call["status"], call["selected"])
+        for call in calls
+    ] == [
+        (1, "transport", "unavailable", 0),
+        (2, "invalid", "invalid", 0),
+        (3, "polymarket", "available", 1),
+    ]
+    assert len({call["call_id"] for call in calls}) == 1
+    assert result.markets[0].vendor_call_id == calls[2]["call_id"]
+    assert result.markets[0].source_id.startswith("prediction_")
+    assert calls[0]["error_type"] == "VendorUnavailableError"
+    assert calls[1]["error_type"] == "NoMarketDataError"
+    assert calls[2]["result_hash"]

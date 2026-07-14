@@ -145,6 +145,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 | `.longbridge_mcp_token.json` | Longbridge API token（数据 vendor） | `tradingagents/.longbridge_mcp_token.json`（gitignored） |
 | `AUTH_TOKEN` / `CT0` | Bird 只读 X/Twitter cookie 认证（社交舆情 vendor） | server-side env / browser cookie source；禁止写入配置或日志 |
 | `TRADINGAGENTS_DB` | CLI、Web、runtime history 与 vendor 审计共用的 SQLite 路径；唯一受支持的数据库路径覆盖变量 | server-side env（未设置时使用 `~/.tradingagents/runs.db`） |
+| `TRADINGAGENTS_REPORT_SECTION_THROTTLE_MS` | report section 按 run + section 合并更新的服务端节流窗口；默认 `500` ms，设为 `0` 仅用于诊断 | server-side env（通常无需设置） |
 | `data_vendors.core_stock_apis` | 默认 `"longbridge_mcp, longbridge, westock"` | `default_config.py` |
 | `llm_provider` | 默认 `"minimax-cn"` | `default_config.py` |
 | `quick_think_llm` / `deep_think_llm` | 默认都是 `"MiniMax-M3"` | `default_config.py` |

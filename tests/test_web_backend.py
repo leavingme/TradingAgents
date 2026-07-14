@@ -244,6 +244,116 @@ def test_stream_run_events_replays_stored_events(monkeypatch):
     assert '"text": "hello"' in body
 
 
+def test_stream_run_events_does_not_repeat_replayed_live_event(monkeypatch):
+    from web.backend import main
+
+    main._RATE_EVENTS.clear()
+
+    def fake_start_background_run(run_id, request, task_store):
+        task_store.mark_started(run_id)
+        task_store.add_event(
+            run_id,
+            AnalysisEvent(type="message", run_id=run_id, content={"text": "first"}),
+        )
+
+    monkeypatch.setattr(main, "start_background_run", fake_start_background_run)
+
+    async def exercise():
+        created = await main.create_run(
+            main.RunCreateRequest(ticker="NVDA", analysis_date="2026-07-05")
+        )
+        run_id = created["run_id"]
+        response = await main.stream_run_events(run_id)
+        iterator = response.body_iterator
+        first = await anext(iterator)
+        main.store.add_event(
+            run_id,
+            AnalysisEvent(type="message", run_id=run_id, content={"text": "second"}),
+        )
+        main.store.mark_finished(run_id, "completed")
+        second = await anext(iterator)
+        with pytest.raises(StopAsyncIteration):
+            await anext(iterator)
+        return run_id, first, second
+
+    run_id, first, second = asyncio.run(exercise())
+    assert '"text": "first"' in first
+    assert '"text": "second"' in second
+    assert '"text": "first"' not in second
+    main.store.delete(run_id)
+    main._RATE_EVENTS.clear()
+
+
+def test_stream_run_events_keeps_heartbeat_when_idle(monkeypatch):
+    from web.backend import main
+
+    main._RATE_EVENTS.clear()
+
+    def fake_start_background_run(run_id, request, task_store):
+        task_store.mark_started(run_id)
+
+    async def immediate_timeout(func, *args, **kwargs):
+        return False
+
+    monkeypatch.setattr(main, "start_background_run", fake_start_background_run)
+    monkeypatch.setattr(main.asyncio, "to_thread", immediate_timeout)
+
+    async def exercise():
+        created = await main.create_run(
+            main.RunCreateRequest(ticker="NVDA", analysis_date="2026-07-05")
+        )
+        response = await main.stream_run_events(created["run_id"])
+        heartbeat = await anext(response.body_iterator)
+        await response.body_iterator.aclose()
+        return created["run_id"], heartbeat
+
+    run_id, heartbeat = asyncio.run(exercise())
+    assert heartbeat == ": heartbeat\n\n"
+    main.store.delete(run_id)
+    main._RATE_EVENTS.clear()
+
+
+def test_runner_bridge_does_not_persist_runtime_events_twice(monkeypatch):
+    from web.backend import runner_worker
+
+    events = [
+        AnalysisEvent(type="run_started", run_id="run-once", content={}),
+        AnalysisEvent(
+            type="run_completed",
+            run_id="run-once",
+            content={"decision_status": "validated"},
+        ),
+    ]
+
+    class FakeStore:
+        def __init__(self):
+            self.persist_flags = []
+            self.status = None
+
+        def mark_started(self, run_id):
+            pass
+
+        def get(self, run_id):
+            return type("Record", (), {"cancel_requested": False})()
+
+        def add_event(self, run_id, event, *, persist=True):
+            self.persist_flags.append(persist)
+
+        def mark_finished(self, run_id, status):
+            self.status = status
+
+    store = FakeStore()
+    monkeypatch.setattr(runner_worker, "run_analysis_stream", lambda request: iter(events))
+    runner_worker._run(
+        "run-once",
+        runner_worker.RunCreateRequest(ticker="NVDA", analysis_date="2026-07-05"),
+        store,
+    )
+
+    assert store.persist_flags == [False, False]
+    assert store.status == "completed"
+
+
 def test_get_run_report_returns_markdown(monkeypatch, tmp_path):
     from web.backend import main
 

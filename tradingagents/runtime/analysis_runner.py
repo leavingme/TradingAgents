@@ -21,6 +21,7 @@ from tradingagents.reporting import write_report_tree
 
 from .config_builder import build_runtime_config
 from .events import AnalysisEvent, AnalysisRequest, AnalysisResult, utc_timestamp
+from .report_throttle import ReportSectionThrottler
 
 ANALYST_ORDER = ("market", "social", "news", "fundamentals")
 ANALYST_AGENT_NAMES = {
@@ -75,18 +76,24 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
         vendor_events.append(_vendor_attempt_event(request.run_id, record))
 
     vendor_sink_token = bind_vendor_attempt_sink(collect_vendor_attempt)
+    report_throttler = ReportSectionThrottler()
 
     has_error = False
     last_event = None
     try:
-        for event in _run_analysis_stream_impl(request):
+        for raw_event in _run_analysis_stream_impl(request):
             while vendor_events:
                 vendor_event = vendor_events.popleft()
                 history_store.add_event(request.run_id, vendor_event)
                 yield vendor_event
-            event = _with_vendor_summary(event, history_store)
+            for event in report_throttler.push(raw_event):
+                event = _with_vendor_summary(event, history_store)
+                last_event = event
+                # Persist the canonical, coalesced event sequence once.
+                history_store.add_event(request.run_id, event)
+                yield event
+        for event in report_throttler.flush():
             last_event = event
-            # Persist event to the history DB
             history_store.add_event(request.run_id, event)
             yield event
         while vendor_events:
@@ -432,12 +439,8 @@ def _analyst_events(
         agent = ANALYST_AGENT_NAMES[analyst_key]
         report_key = ANALYST_REPORT_MAP[analyst_key]
         if chunk.get(report_key):
-            report_sections[report_key] = chunk[report_key]
-            yield AnalysisEvent(
-                type="report_section",
-                run_id=run_id,
-                agent=agent,
-                content={"section": report_key, "text": chunk[report_key]},
+            yield from _report_section_event(
+                run_id, report_sections, agent, report_key, chunk[report_key]
             )
 
         if report_sections.get(report_key):

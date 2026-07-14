@@ -8,7 +8,7 @@
 - 截至 2026-07-14，没有未完成的明确 P0。
 - 当前排序遵循 `AGENTS.md` 的四级原则：**安全与正确性 → 运行可靠性/成本 → 核心研究能力 → 高复杂度扩展**。
 - 排名是执行顺序，不是功能价值评分。默认启用且可能影响决策的链路，优先于尚未开放的未来能力。
-- 第 1–3 项已完成；下一项是第 4 项 SSE / report-section 节流。
+- 第 1–4 项已完成；下一项是第 5 项技术指标批量获取。
 
 ## 路线项权威顺序与状态
 
@@ -17,7 +17,7 @@
 | 1 | 已完成（2026-07-14） | 预测市场确定性校验与 vendor-attempt 持久化 | 当前默认启用且会影响决策；补齐事件 ID、到期日、概率范围、时间截止、稳定 `source_id` 和逐次 vendor 审计。 |
 | 2 | 已完成（2026-07-14） | Runtime 失败状态与 vendor 轨迹 | 明确显示失败数据域、尝试过的 vendor、fallback 路径及校验原因，避免失败或降级被误读。 |
 | 3 | 已完成（2026-07-14） | 新闻、宏观校验覆盖审计 | 已逐项核对正文、发布时间、观察期、单位、revision/vintage、`source_id` 与 cutoff，并补齐缺口。 |
-| 4 | 未完成 | SSE / report-section 节流 | 降低 SQLite 锁竞争、写放大和浏览器高频重绘。 |
+| 4 | 已完成（2026-07-14） | SSE / report-section 节流 | 已按 run + section 合并高频中间版本，并消除 Web bridge 重复持久化和 SSE replay 重复发送。 |
 | 5 | 未完成 | 技术指标批量获取 | 减少约 12 次串行请求、重复 OHLCV 加载、事件数量和等待时间。 |
 | 6 | 未完成 | 运行上下文压缩 | depth=1 已观测到超过 25 万输入 token；需要降低成本、延迟和长上下文遗漏风险。 |
 | 7 | 未完成 | 仓位引擎与交易校验器解耦 | 分离建议仓位计算与服务端风险硬门禁；现有风险政策已 fail-closed，因此不是 P0。 |
@@ -57,10 +57,11 @@
 
 ### 第二阶段：运行可靠性/成本（4–6）
 
-- [ ] **4. SSE / report-section 节流**
+- [x] **4. SSE / report-section 节流**
   - 按 run + section 合并高频中间更新，最终状态和最后一个 section 版本不得丢失。
   - heartbeat、断线重连和持久化 replay 语义保持不变。
   - 用并发运行验证 SQLite lock、写入次数和浏览器更新频率明显下降。
+  - 完成证据：canonical runtime 新增按 `run_id + section` 的 500 ms leading/trailing throttle；首版立即可见，窗口内只保留最新版，并在 agent 完成、终态事件和流结束前强制 flush。100 次同 section 合成测试只持久化并通过 SSE 发送首末 2 个版本，SQLite 写入和浏览器 section 更新下降 98%；4 个并发 run 的 400 个原始更新只生成 8 条 report 事件，无 lock 错误且每个 run 的终版均为第 100 版。Web bridge 不再对 runtime 已落盘事件执行第二次 SQLite 去重事务；SSE 改用广播 condition + 每连接独立 replay cursor，活动连接不再重复发送连接前事件，多连接不再争抢单一队列。heartbeat 格式、历史 replay 和 EventSource 自动重连保持不变。相关 runtime/history/Web 节流测试及项目 Web/CLI 门禁共 76 项通过，前端语法检查通过；长期 Web 服务热加载后保持 active，defaults、env-status、runs 和持久化 SSE replay 接口均验证可用。
 
 - [ ] **5. 技术指标批量获取**
   - 一次加载规范 OHLCV，批量计算/获取 Market Analyst 所需指标，避免约 12 次重复串行调用。

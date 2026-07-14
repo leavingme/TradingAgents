@@ -1,9 +1,15 @@
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from tradingagents.runtime import AnalysisRequest, run_analysis_once, run_analysis_stream
+from tradingagents.runtime import (
+    AnalysisEvent,
+    AnalysisRequest,
+    run_analysis_once,
+    run_analysis_stream,
+)
 from tradingagents.runtime.config_builder import build_runtime_config
 
 
@@ -292,6 +298,86 @@ def test_agent_statuses_are_monotonic_and_report_updates_are_deduplicated(
         if event.type == "report_section"
     ]
     assert len(sections) == len(set(sections))
+
+
+def test_runtime_persists_only_coalesced_report_section_versions(monkeypatch):
+    from tradingagents.runtime import analysis_runner, history_store
+
+    def fake_stream(request):
+        yield AnalysisEvent(type="run_started", run_id=request.run_id, content={})
+        for version in range(100):
+            yield AnalysisEvent(
+                type="report_section",
+                run_id=request.run_id,
+                agent="Researcher",
+                content={"section": "debate", "text": f"version-{version}"},
+            )
+        yield AnalysisEvent(
+            type="run_completed",
+            run_id=request.run_id,
+            content={"decision_status": "validated"},
+        )
+
+    monkeypatch.setenv("TRADINGAGENTS_REPORT_SECTION_THROTTLE_MS", "60000")
+    monkeypatch.setattr(analysis_runner, "_run_analysis_stream_impl", fake_stream)
+    events = list(run_analysis_stream(AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-05",
+        run_id="run-coalesced-reports",
+    )))
+
+    reports = [event for event in events if event.type == "report_section"]
+    persisted = history_store.get_run("run-coalesced-reports")
+    persisted_reports = [
+        event for event in persisted["events"] if event["type"] == "report_section"
+    ]
+    assert len(reports) == len(persisted_reports) == 2
+    assert reports[-1].content["text"] == "version-99"
+    assert persisted_reports[-1]["content"]["text"] == "version-99"
+
+
+def test_concurrent_runs_coalesce_report_writes_without_sqlite_lock_errors(monkeypatch):
+    from tradingagents.runtime import analysis_runner, history_store
+
+    def fake_stream(request):
+        yield AnalysisEvent(type="run_started", run_id=request.run_id, content={})
+        for version in range(100):
+            yield AnalysisEvent(
+                type="report_section",
+                run_id=request.run_id,
+                agent="Researcher",
+                content={"section": "debate", "text": f"version-{version}"},
+            )
+        yield AnalysisEvent(
+            type="run_completed",
+            run_id=request.run_id,
+            content={"decision_status": "validated"},
+        )
+
+    monkeypatch.setenv("TRADINGAGENTS_REPORT_SECTION_THROTTLE_MS", "60000")
+    monkeypatch.setattr(analysis_runner, "_run_analysis_stream_impl", fake_stream)
+
+    def execute(index):
+        return list(run_analysis_stream(AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-05",
+            run_id=f"run-concurrent-{index}",
+        )))
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        runs = list(pool.map(execute, range(4)))
+
+    assert sum(
+        event.type == "report_section" for events in runs for event in events
+    ) == 8
+    for index in range(4):
+        persisted = history_store.get_run(f"run-concurrent-{index}")
+        reports = [
+            event for event in persisted["events"]
+            if event["type"] == "report_section"
+        ]
+        assert len(reports) == 2
+        assert reports[-1]["content"]["text"] == "version-99"
 
 
 def test_data_validation_error_stops_run_without_report_or_completion(monkeypatch, tmp_path):

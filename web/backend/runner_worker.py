@@ -67,7 +67,7 @@ def _run(run_id: str, request: RunCreateRequest, task_store: TaskStore) -> None:
                 )
                 break
 
-            task_store.add_event(run_id, event)
+            task_store.add_event(run_id, event, persist=False)
             if event.type == "error":
                 final_status = "failed"
                 break

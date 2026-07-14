@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import queue
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -41,9 +40,6 @@ class RunRecord:
     data_status: str = "not_observed"
     vendor_summary: dict[str, Any] = field(default_factory=dict)
     events: list[AnalysisEvent] = field(default_factory=list)
-    event_queue: queue.Queue[AnalysisEvent | None] = field(
-        default_factory=queue.Queue
-    )
     cancel_requested: bool = False
 
     def to_response(self) -> dict[str, Any]:
@@ -85,6 +81,7 @@ class TaskStore:
         # In-memory cache: run_id -> RunRecord (for active + recently created runs)
         self._runs: dict[str, RunRecord] = {}
         self._lock = threading.RLock()
+        self._event_condition = threading.Condition(self._lock)
         
         # Recover any active runs left in running/pending state from a previous session
         history_store._recover_runs()
@@ -112,11 +109,6 @@ class TaskStore:
                 )
             )
 
-        q: queue.Queue[AnalysisEvent | None] = queue.Queue()
-        for ev in events:
-            q.put(ev)
-        q.put(None)  # sentinel
-
         return RunRecord(
             run_id=run_dict["run_id"],
             request=request,
@@ -130,7 +122,6 @@ class TaskStore:
             data_status=run_dict.get("data_status", "not_observed"),
             vendor_summary=run_dict.get("vendor_summary", {}),
             events=events,
-            event_queue=q,
         )
 
     def create(self, run_id: str, request: RunCreateRequest) -> RunRecord:
@@ -191,7 +182,9 @@ class TaskStore:
 
             history_store.mark_started(run_id, started_at=record.started_at)
 
-    def add_event(self, run_id: str, event: AnalysisEvent) -> None:
+    def add_event(
+        self, run_id: str, event: AnalysisEvent, *, persist: bool = True
+    ) -> None:
         with self._lock:
             record = self._runs[run_id]
             event = _web_safe_event(event)
@@ -215,11 +208,13 @@ class TaskStore:
                 if isinstance(event.content, dict):
                     record.error = event.content.get("error")
 
-            # Persist event to DB via history_store
-            history_store.add_event(run_id, event)
+            # Runtime events are already persisted before the Web bridge sees
+            # them. Tests and Web-local events still use the default path.
+            if persist:
+                history_store.add_event(run_id, event)
 
-            # Push to live SSE queue
-            record.event_queue.put(event)
+            # Wake every SSE subscriber; each replays from its own list cursor.
+            self._event_condition.notify_all()
 
     def mark_finished(self, run_id: str, status: RunStatus) -> None:
         with self._lock:
@@ -230,8 +225,28 @@ class TaskStore:
 
             history_store.mark_finished(run_id, record.status, finished_at=record.finished_at)
 
-            # Sentinel signals SSE consumer to close the stream
-            record.event_queue.put(None)
+            self._event_condition.notify_all()
+
+    def wait_for_events(
+        self, run_id: str, after_index: int, timeout: float
+    ) -> bool:
+        """Wait until replay has new events or the run reaches a terminal state.
+
+        A condition over the append-only in-memory event list is broadcast-safe:
+        multiple SSE clients no longer compete for a single queue item.
+        """
+        terminal = {
+            "completed", "review_required", "unavailable", "failed", "cancelled"
+        }
+        with self._event_condition:
+            return self._event_condition.wait_for(
+                lambda: (
+                    run_id not in self._runs
+                    or len(self._runs[run_id].events) > after_index
+                    or self._runs[run_id].status in terminal
+                ),
+                timeout=timeout,
+            )
 
     def request_cancel(self, run_id: str) -> bool:
         with self._lock:
@@ -249,6 +264,7 @@ class TaskStore:
             record.status = "cancelled"
 
             history_store.request_cancel(run_id)
+            self._event_condition.notify_all()
             return True
 
     def delete(self, run_id: str) -> bool:

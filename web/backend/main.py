@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import queue
 import secrets
 import threading
 import time
@@ -260,15 +259,12 @@ async def stream_run_events(run_id: str):
             ):
                 break
 
-            try:
-                event = await asyncio.to_thread(current.event_queue.get, True, 15)
-            except queue.Empty:
+            ready = await asyncio.to_thread(
+                store.wait_for_events, run_id, replay_index, 15
+            )
+            if not ready:
                 yield ": heartbeat\n\n"
                 continue
-            if event is None:
-                break
-            replay_index += 1
-            yield _sse(event.type, event.to_dict())
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

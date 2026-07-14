@@ -46,8 +46,10 @@
 - [x] Reddit 社交配置：在 `social_data` 中提供独立开关，旧浏览器配置自动迁移为启用，并让开关实际控制 Sentiment Analyst 抓取。
 - [x] Web 配置归属：客户端仅保留 UI language；报告、模型、推理和数据 Vendor 配置迁移到服务端原子持久化，并兼容旧 localStorage 一次性迁移。
 - [ ] Runtime 状态：记录失败的数据域、vendor 尝试轨迹和具体校验原因。
+- [x] **测试运行历史隔离**：pytest 在收集测试模块前设置进程唯一 bootstrap SQLite，随后为每个测试创建独立 `tmp_path/runs.db`；Web `TaskStore`、runtime `history_store` 和 vendor 审计 store 统一指向该临时库，SSE/event 持久化及测试内创建的 run 不再写入正式或工作区回退数据库。
+- [ ] **测试日期策略**：确定性单元测试继续使用固定历史日期覆盖周末/节假日、盘中收盘边界、时区、陈旧数据、前视偏差及 `point_in_time + information_cutoff`；仅 live integration/smoke 使用“最近已完成交易日”，不得直接使用仍在形成的当日 K。动态日期逻辑应冻结时钟或从显式基准日期计算，避免随自然日变化产生偶发失败。
 - [ ] **P1 — 运行上下文成本**：NVDA depth=1 工程闭环连续两次输入 token 分别为 254,861 与 252,244；审计基础 Analyst 报告、工具结果、Bull/Bear/Risk 辩论之间的重复传递并设计保留来源证据的确定性压缩边界。
-- [ ] **安全测试加固 — OpenAI-compatible 密钥隔离**：`test_keyless_local_uses_placeholder_and_chat_completions` 必须同时临时清除 `OPENAI_COMPATIBLE_API_KEY` 与通用 fallback `OPENAI_API_KEY`，并避免在断言差异、pytest 输出或 CI 日志中读取/打印真实密钥明文；测试结束后由 `monkeypatch` 自动恢复原环境。
+- [x] **安全测试加固 — OpenAI-compatible 密钥隔离**：`test_keyless_local_uses_placeholder_and_chat_completions` 同时临时清除 `OPENAI_COMPATIBLE_API_KEY` 与通用 fallback `OPENAI_API_KEY`，通过不展开密钥值的布尔 helper 校验 keyless placeholder，并由 `monkeypatch` 在测试后恢复原环境。
 - [x] **NVDA 工程闭环**：提供受审计的基准运行、完整执行证据导出、结构化 findings/P0 方案、人工 review 确认、P0 实现证据、修改后固定验收和不可绕过的完成 gate。
 - [x] **Longbridge 结构化新闻接入**：个股新闻按 `longbridge_mcp → longbridge` 优先，全球宏观新闻使用 Longbridge CLI 结构化搜索；原始响应直接映射 `NewsFeed` 并通过统一来源、时间、URL、标的和截止校验。MCP `news_search` 在时间字段恢复前不得冒充有效全球新闻。
 - [x] **技术指标默认路由**：默认使用 Westock/stockstats 基于规范 OHLCV 做确定性计算，Longbridge MCP 仅作 fallback；Longbridge CLI 保留可选能力但不进入默认指标链。旧 Web 默认配置自动迁移，自定义顺序保持不变。

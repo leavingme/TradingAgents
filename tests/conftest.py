@@ -1,9 +1,21 @@
 """Shared pytest fixtures that prevent CI hangs when API keys are absent."""
 
 import os
+import sys
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+# Set a process-unique database before pytest imports any test modules.  This is
+# the first line of defence against collection-time imports initializing the
+# runtime store against a developer's real history database.  Each test gets a
+# separate database in ``_isolate_run_storage`` below.
+_PYTEST_DB_DIR = tempfile.TemporaryDirectory(prefix="tradingagents-pytest-")
+_PYTEST_BOOTSTRAP_DB = Path(_PYTEST_DB_DIR.name) / "bootstrap-runs.db"
+os.environ["TRADINGAGENTS_DB"] = str(_PYTEST_BOOTSTRAP_DB)
 
 
 def pytest_configure(config):
@@ -35,6 +47,48 @@ def _dummy_api_keys(monkeypatch):
         # `or` not a .get default: an env var present but empty (e.g. a key left
         # blank in a .env copied from .env.example) must still get the placeholder.
         monkeypatch.setenv(env_var, os.environ.get(env_var) or "placeholder")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_run_storage(monkeypatch, tmp_path):
+    """Give every test one SQLite database shared by runtime and Web stores."""
+    from tradingagents import runtime as runtime_module
+    from tradingagents.runtime import history as history_module
+    from tradingagents.runtime.history import RunHistoryStore
+    from tradingagents.dataflows import vendor_verification as verification_module
+    from tradingagents.dataflows.vendor_verification import VendorVerificationStore
+    from web.backend import task_store as task_store_module
+
+    db_path = tmp_path / "runs.db"
+    monkeypatch.setenv("TRADINGAGENTS_DB", str(db_path))
+
+    runtime_store = RunHistoryStore(db_path)
+    vendor_store = VendorVerificationStore(db_path)
+    monkeypatch.setattr(history_module, "history_store", runtime_store)
+    monkeypatch.setattr(runtime_module, "history_store", runtime_store)
+    monkeypatch.setattr(
+        verification_module, "vendor_verification_store", vendor_store
+    )
+
+    # task_store imports the singleton by value, so patch that alias as well as
+    # its module-level Web store.  Both stores must point at the same test DB.
+    monkeypatch.setattr(task_store_module, "history_store", runtime_store)
+    web_store = task_store_module.TaskStore(db_path)
+    monkeypatch.setattr(task_store_module, "store", web_store)
+
+    # These modules also import store singletons by value.  Patch them only if
+    # they were already loaded; modules imported later will see patched values.
+    main_module = sys.modules.get("web.backend.main")
+    if main_module is not None:
+        monkeypatch.setattr(main_module, "store", web_store)
+        monkeypatch.setattr(
+            main_module, "vendor_verification_store", vendor_store
+        )
+    engineering_module = sys.modules.get("tradingagents.engineering_cycle")
+    if engineering_module is not None:
+        monkeypatch.setattr(engineering_module, "history_store", runtime_store)
+
+    yield db_path
 
 
 @pytest.fixture(autouse=True)

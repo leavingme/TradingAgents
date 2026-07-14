@@ -14,7 +14,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def _default_db_path() -> Path:
-    configured = os.environ.get("TRADINGAGENTS_DB") or os.environ.get("TRADINGAGENTS_WEBUI_DB")
+    configured = os.environ.get("TRADINGAGENTS_DB")
     if configured:
         return Path(configured)
 

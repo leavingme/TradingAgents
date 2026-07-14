@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tradingagents.runtime import AnalysisEvent, history_store, DB_PATH
+from tradingagents.runtime import AnalysisEvent, history_store
 from .models import RunCreateRequest, RunStatus
 
 def _now() -> str:
@@ -70,7 +70,10 @@ class RunRecord:
 class TaskStore:
     """Thread-safe run store delegating SQL persistence to core history_store."""
 
-    def __init__(self, db_path: Path = DB_PATH):
+    def __init__(self, db_path: Path | None = None):
+        db_path = db_path or Path(
+            os.environ.get("TRADINGAGENTS_DB", str(history_store._db_path))
+        )
         # Sync core history_store with the configured db_path
         history_store._db_path = db_path
         history_store._init_db()

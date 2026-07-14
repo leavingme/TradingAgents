@@ -12,7 +12,7 @@ from tradingagents.sqlite_utils import configure_wal, connect_sqlite
 
 
 def _default_db_path() -> Path:
-    configured = os.environ.get("TRADINGAGENTS_DB") or os.environ.get("TRADINGAGENTS_WEBUI_DB")
+    configured = os.environ.get("TRADINGAGENTS_DB")
     if configured:
         return Path(configured)
     home_path = Path.home() / ".tradingagents" / "runs.db"

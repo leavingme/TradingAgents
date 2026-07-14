@@ -13,6 +13,20 @@ VALID_OHLCV = "Date,Open,High,Low,Close,Volume\n2026-07-09,100,105,99,103,1000\n
 
 
 @pytest.mark.unit
+def test_vendor_audit_db_path_only_uses_unified_environment_variable(monkeypatch, tmp_path):
+    from tradingagents.dataflows import vendor_verification as verification_module
+
+    unified = tmp_path / "unified.db"
+    monkeypatch.setenv("TRADINGAGENTS_DB", str(unified))
+    monkeypatch.setenv("TRADINGAGENTS_WEBUI_DB", str(tmp_path / "legacy.db"))
+    assert verification_module._default_db_path() == unified
+
+    monkeypatch.delenv("TRADINGAGENTS_DB")
+    monkeypatch.setattr(verification_module.Path, "home", lambda: tmp_path)
+    assert verification_module._default_db_path() == tmp_path / ".tradingagents" / "runs.db"
+
+
+@pytest.mark.unit
 def test_verification_store_keeps_latest_result_per_capability(tmp_path):
     store = VendorVerificationStore(tmp_path / "runs.db")
 

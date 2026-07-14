@@ -260,6 +260,10 @@ After this works, refactor the existing TUI to consume the same runtime stream.
   - Interrupted runs auto-recovered to `failed` on startup.
   - `list()` returns up to 100 runs from DB.
   - Past-run SSE replay reads from events table.
+- Done: pytest run-history isolation initializes a process-unique bootstrap DB before
+  collection and then gives every test one temporary SQLite shared by runtime
+  `history_store`, Web `TaskStore`, and vendor audit persistence; tests cannot add
+  runs to the production or workspace-fallback history databases.
 - Done: Premium dark-mode frontend (glassmorphism, Inter font, marked.js, animated agent status dots).
 - Done: WebUI run flow now mirrors the CLI startup sequence for run-critical
   configuration: ticker/date/asset, report language, analyst selection,
@@ -435,7 +439,7 @@ All seven items above are implemented. The acceptance suite covers trusted snaps
 
 Next recommended work:
 
-1. **OpenAI-compatible test secret isolation**: make the keyless-local regression test clear both the provider-specific key and `OPENAI_API_KEY` fallback within `monkeypatch`; never compare or expose a real secret value in assertion output. Acceptance: the test is deterministic under a credentialed developer shell, restores the shell environment afterward, and a failure cannot print credential material.
+1. **Completed — OpenAI-compatible test secret isolation**: the keyless-local regression test clears both the provider-specific key and `OPENAI_API_KEY` fallback within `monkeypatch`, and validates the placeholder through a boolean helper that cannot render credential material in assertion diffs.
 2. **Indicator Batching**: Create a batch technical indicators fetcher to reduce the overhead of 12 sequential indicator requests.
 3. **SSE/Report Section Throttling**: Throttle the write/push rate of `report_section` updates to prevent SQLite database lock congestion and smooth browser UI updates.
 4. Complete deterministic validation and runtime vendor-attempt persistence for prediction-market data.

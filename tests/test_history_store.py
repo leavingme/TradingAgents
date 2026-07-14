@@ -4,6 +4,45 @@ from tradingagents.runtime import AnalysisRequest, run_analysis_once, history_st
 from tradingagents.runtime.events import AnalysisEvent
 from unittest import mock
 
+
+def test_pytest_runtime_and_web_share_only_the_per_test_database(
+    _isolate_run_storage,
+):
+    from tradingagents import runtime as runtime_module
+    from tradingagents.runtime import history as history_module
+    from web.backend import task_store as task_store_module
+
+    db_path = _isolate_run_storage
+    assert history_module.history_store is runtime_module.history_store
+    assert task_store_module.history_store is runtime_module.history_store
+    assert runtime_module.history_store._db_path == db_path
+    assert runtime_module.history_store.list_runs() == []
+
+    runtime_module.history_store.create_run(
+        run_id="isolation-probe",
+        ticker="NVDA",
+        analysis_date="2026-07-10",
+        asset_type="stock",
+        selected_analysts=("market",),
+        llm_provider="test",
+        research_depth=1,
+    )
+    assert task_store_module.store.get("isolation-probe") is not None
+
+
+def test_runtime_db_path_only_uses_unified_environment_variable(monkeypatch, tmp_path: Path):
+    from tradingagents.runtime import history as history_module
+
+    unified = tmp_path / "unified.db"
+    monkeypatch.setenv("TRADINGAGENTS_DB", str(unified))
+    monkeypatch.setenv("TRADINGAGENTS_WEBUI_DB", str(tmp_path / "legacy.db"))
+    assert history_module._default_db_path() == unified
+
+    monkeypatch.delenv("TRADINGAGENTS_DB")
+    monkeypatch.setattr(history_module.Path, "home", lambda: tmp_path)
+    assert history_module._default_db_path() == tmp_path / ".tradingagents" / "runs.db"
+
+
 def test_history_store_crud(tmp_path: Path):
     db_file = tmp_path / "test_history.db"
     store = RunHistoryStore(db_path=db_file)

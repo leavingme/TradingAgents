@@ -353,14 +353,12 @@ def resolve_db_path(run_id: str, explicit: Path | None) -> Path:
 
 
 def db_candidates() -> list[Path]:
-    configured = os.environ.get("TRADINGAGENTS_DB") or os.environ.get("TRADINGAGENTS_WEBUI_DB")
+    configured = os.environ.get("TRADINGAGENTS_DB")
     paths = [
         Path(configured) if configured else None,
         Path.home() / ".tradingagents" / "runs.db",
         DB_PATH,
         Path.cwd() / ".tradingagents" / "runs.db",
-        Path.home() / ".tradingagents" / "webui_runs.db",
-        Path.cwd() / ".tradingagents" / "webui_runs.db",
     ]
     deduped: list[Path] = []
     for path in paths:

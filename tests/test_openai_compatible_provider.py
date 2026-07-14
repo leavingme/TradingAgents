@@ -15,6 +15,13 @@ from tradingagents.llm_clients.validators import validate_model
 # openai_client module, which would otherwise create a second class identity.
 
 
+def _uses_keyless_placeholder(llm) -> bool:
+    """Compare the local placeholder without exposing a secret in assertion diffs."""
+    key = llm.openai_api_key
+    value = key.get_secret_value() if hasattr(key, "get_secret_value") else key
+    return value == "EMPTY"
+
+
 @pytest.mark.unit
 def test_factory_routes_to_openai_client():
     client = create_llm_client(
@@ -33,14 +40,15 @@ def test_base_url_required(monkeypatch):
 @pytest.mark.unit
 def test_keyless_local_uses_placeholder_and_chat_completions(monkeypatch):
     monkeypatch.delenv("OPENAI_COMPATIBLE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     llm = create_llm_client(
         provider="openai_compatible", model="qwen2.5", base_url="http://localhost:8000/v1"
     ).get_llm()
     assert type(llm).__name__ == "LocalCompatibleChatOpenAI"
     assert str(llm.openai_api_base) == "http://localhost:8000/v1"
     # keyless local servers: a placeholder key is sent
-    key = llm.openai_api_key.get_secret_value() if hasattr(llm.openai_api_key, "get_secret_value") else llm.openai_api_key
-    assert key == "EMPTY"
+    uses_placeholder = _uses_keyless_placeholder(llm)
+    assert uses_placeholder
     # must use Chat Completions, not OpenAI's Responses API
     assert getattr(llm, "use_responses_api", False) in (False, None)
 

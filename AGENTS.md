@@ -89,6 +89,18 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 - 长时间运行的 uvicorn tool session 可能在工具轮次结束时被清理。做截图验证时，
   更可靠的方式是在同一个 shell 里：启动临时 uvicorn、等待健康检查、执行
   headless Chrome 截图、再 kill 临时 server。
+- **长期开发服务（2026-07-14 已配置）**：使用 user systemd 单元
+  `~/.config/systemd/user/tradingagents-web.service` 托管默认 WebUI。该单元在
+  `/data/workspace/TradingAgents` 中运行
+  `venv/bin/tradingagents web --host 127.0.0.1 --port 8765 --reload`，通过
+  `~/.zshrc` 加载服务端环境变量，设置 `Restart=always` / `RestartSec=3`，并已
+  `enable --now`；用户 `ubuntu` 的 linger 为启用状态，因此退出登录或主机重启后
+  仍可自动拉起。源码目录 `cli/`、`tradingagents/`、`web/` 的变更由 uvicorn
+  热加载实时生效；不要再用长时 tool session 占用 8765。常用运维命令：
+  `systemctl --user status tradingagents-web`、
+  `systemctl --user restart tradingagents-web`、
+  `journalctl --user -u tradingagents-web -f`。修改服务单元后必须执行
+  `systemctl --user daemon-reload` 和 `systemctl --user restart tradingagents-web`。
 - `chromium-browser` 在该环境可能只是 snap wrapper，无法使用；优先检查并使用
   `/usr/bin/google-chrome` 做 headless 截图。
 - 移动端截图不能只靠肉眼。还要用浏览器读取
@@ -110,6 +122,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 | `MINIMAX_API_KEY` | minimax（Global） | `~/.zshrc` export |
 | `.longbridge_mcp_token.json` | Longbridge API token（数据 vendor） | `tradingagents/.longbridge_mcp_token.json`（gitignored） |
 | `AUTH_TOKEN` / `CT0` | Bird 只读 X/Twitter cookie 认证（社交舆情 vendor） | server-side env / browser cookie source；禁止写入配置或日志 |
+| `TRADINGAGENTS_DB` | CLI、Web、runtime history 与 vendor 审计共用的 SQLite 路径；唯一受支持的数据库路径覆盖变量 | server-side env（未设置时使用 `~/.tradingagents/runs.db`） |
 | `data_vendors.core_stock_apis` | 默认 `"longbridge_mcp, longbridge, westock"` | `default_config.py` |
 | `llm_provider` | 默认 `"minimax-cn"` | `default_config.py` |
 | `quick_think_llm` / `deep_think_llm` | 默认都是 `"MiniMax-M3"` | `default_config.py` |
@@ -281,6 +294,10 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   的 OpenAI/OpenAI-compatible key 环境变量污染。
 - 报告全量测试结果时要区分“本次相关测试失败”和“既有/环境失败”。不要为了让
   全量测试变绿而改无关测试或清理用户环境变量，除非用户明确要求。
+- pytest 运行历史已做强制隔离：`tests/conftest.py` 在测试模块收集前设置进程唯一
+  bootstrap `TRADINGAGENTS_DB`，并为每个测试创建独立 `tmp_path/runs.db`，让
+  runtime `history_store`、Web `TaskStore` 与 vendor 审计共用该临时库。测试不得
+  绕过此 fixture 写入正式 `~/.tradingagents/runs.db` 或工作区回退数据库。
 - Web 运行态接口可用性至少验证：
   `/api/config/defaults`、`/api/config/env-status`、`/api/runs`、SSE events、
   `/api/runs/{run_id}/report`。

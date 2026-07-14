@@ -1,6 +1,6 @@
 import asyncio
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 from tradingagents.runtime import AnalysisEvent
 
@@ -164,17 +164,25 @@ def test_mutating_api_requires_bearer_when_server_token_is_configured(monkeypatc
     from web.backend import main
 
     monkeypatch.setenv("TRADINGAGENTS_WEB_AUTH_TOKEN", "web-secret")
-    main._RATE_EVENTS.clear()
-    client = TestClient(main.app)
-    payload = {"ticker": "NVDA", "analysis_date": "2026-07-05"}
-    assert client.post("/api/runs", json=payload).status_code == 401
-
     monkeypatch.setattr(main, "start_background_run", lambda *args: None)
-    response = client.post(
-        "/api/runs",
-        json=payload,
-        headers={"Authorization": "Bearer web-secret"},
-    )
+    main._RATE_EVENTS.clear()
+    payload = {"ticker": "NVDA", "analysis_date": "2026-07-05"}
+
+    async def exercise():
+        transport = httpx.ASGITransport(app=main.app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            unauthorized = await client.post("/api/runs", json=payload)
+            authorized = await client.post(
+                "/api/runs",
+                json=payload,
+                headers={"Authorization": "Bearer web-secret"},
+            )
+        return unauthorized, authorized
+
+    unauthorized, response = asyncio.run(exercise())
+    assert unauthorized.status_code == 401
     assert response.status_code == 200
     main.store.delete(response.json()["run_id"])
 
@@ -425,6 +433,11 @@ def test_manual_vendor_verification_endpoint(monkeypatch):
         "verified_at": "2026-07-10T01:02:03+00:00",
     }
     monkeypatch.setattr(interface, "verify_vendor", lambda vendor, category: expected)
+
+    async def run_inline(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", run_inline)
 
     result = asyncio.run(main.verify_data_vendor("news_data", "westock"))
 

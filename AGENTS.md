@@ -11,6 +11,16 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 - **分支**：`main`
 - **版本**：v0.3.0（`85946c2 chore: release v0.3.0`）+ 15 个 fork 本地提交
 
+## 工作优先级与路线图
+
+- 顶层工作顺序固定为：**安全与正确性 → 运行可靠性/成本 → 核心研究能力 → 高复杂度扩展**。这是依次通过的门禁，不是混合成主观总分。
+- 安全与正确性优先处理默认启用、fail-open、前视、过期、不可追溯或可能形成错误可执行决策的链路；已启用能力高于尚未开放的未来能力。
+- 运行可靠性/成本处理失败状态、恢复、审计证据、并发与锁竞争，以及 token、串行调用、重复加载、延迟和写放大。
+- 核心研究能力只在现有路径正确、稳定、成本可控后扩展；需要新权限、新风险模型、新交易语义或 universe 阶段的能力归入高复杂度扩展。
+- 新能力必须先完成原始 schema 审计、统一领域模型、确定性 validator、失败语义和必要风险门禁，再允许进入默认链路。
+- 优先级调整必须依据可复现证据、影响范围、发生概率、可逆性、默认启用状态和依赖关系。任务关闭必须同时具备实现、针对性测试、必要运行态证据和文档更新。
+- `ROADMAP.md` 是任务状态、当前优先级、验收标准和中长期路线的唯一权威来源；不要另建或恢复并行的 `TODO.md` / `PLAN.md`。
+
 ## 环境
 
 ### Python 和 venv
@@ -285,7 +295,7 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 
 - 涉及“运行分析后复盘并处理 P0”的工作统一使用 `scripts/engineering_cycle.py`，详细规范见 `docs/engineering-cycle.md`。
 - 固定阶段为 `run → review → ack-review → P0 plan/implementation → resolve → verify → gate`。不得跳过全流程 review，也不得在 P0 未解决、缺少证据或验证早于修复时关闭循环。
-- 每轮使用新的 `run_id`；原始 events/vendor ledger 来自 SQLite，生成的本地 cycle 产物位于 gitignored 的 `.tradingagents/engineering_cycles/<run_id>/`。需要长期追踪的 finding 必须同步到 `TODO.md`/`PLAN.md`。
+- 每轮使用新的 `run_id`；原始 events/vendor ledger 来自 SQLite，生成的本地 cycle 产物位于 gitignored 的 `.tradingagents/engineering_cycles/<run_id>/`。需要长期追踪的 finding 必须同步到 `ROADMAP.md`。
 - 默认基准标的是 NVDA，默认日期为最近已完成工作日，避免使用仍在形成的当日日 K；需要复现历史运行时显式传 `--date`。
 
 ## 分析时间轴语义
@@ -318,7 +328,7 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - Web 运行态接口可用性至少验证：
   `/api/config/defaults`、`/api/config/env-status`、`/api/runs`、SSE events、
   `/api/runs/{run_id}/report`。
-- 完成目标前做证据审计：检查当前工作区、最新提交、PLAN 覆盖矩阵、测试输出、
+- 完成目标前做证据审计：检查当前工作区、最新提交、ROADMAP 覆盖、测试输出、
   运行态接口、桌面/移动端截图或 scroll 审计。不要只凭记忆宣布完成。
 
 ## Git 工作流
@@ -354,7 +364,7 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 
 ## 开发最佳实践与文档维护约定
 
-- **TODO.md 与 PLAN.md 维护**：Agent 只要完成任意新功能开发或数据校验重构，且确认本地单元测试通过，必须自觉同步更新这两个文件的进度复选框 `[x]` 或 Progress 列表，并与代码改动一同提交与推送。
+- **ROADMAP.md 维护**：Agent 完成新功能开发或数据校验重构并确认相关测试通过后，必须同步更新 `ROADMAP.md` 的状态、验收证据或优先级，并与代码改动一同提交和推送。
 - **Tool 参数安全性加固 (`**kwargs`)**：为了防止 LLM 在长上下文或交织思考（Interleaved Thinking）时发生幻觉并在 arguments 中夹带非标控制参数（例如 `"/invoke"` ），所有暴露给 LLM 调用的数据工具（`@tool`）函数签名末尾必须添加 `**kwargs`，在运行时自动忽略这些多余键值，严防因 Unexpected Keyword Argument 报错导致 Graph 崩溃。
 - **非美宏观指标回溯窗口**：由于 FRED 数据库中的中国/香港等非美宏观指标（如中国 CPI `CHNCPIALLMINMEI`、香港 CPI `FPCPITOTLZGHKG`）存在显著的数据发布滞后，直接请求 180 或 365 天的回溯极易因窗口内无数据导致 API 报错。对此类滞后指标在底层请求端必须强制采用至少 1095 天（3 年）的最小 Lookback 周期。
 

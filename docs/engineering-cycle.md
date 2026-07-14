@@ -17,7 +17,7 @@
 └── completion.json          # gate 通过后才生成
 ```
 
-该目录位于已 gitignore 的 `.tradingagents/` 下。需要长期保留的结论应同步到 `TODO.md`/`PLAN.md`，代码和文档一起提交。
+该目录位于已 gitignore 的 `.tradingagents/` 下。需要长期保留的结论应同步到 `ROADMAP.md`，代码和文档一起提交。
 
 ## LLM 与 Codex 的职责边界
 
@@ -107,7 +107,7 @@ venv/bin/python3.12 scripts/engineering_cycle.py plan <run_id> <finding_id> \
 
 ## 4. 完成 P0 优化
 
-实现代码、补测试并同步 `TODO.md`/`PLAN.md`。逐项记录实现证据：
+实现代码、补测试并同步 `ROADMAP.md`。逐项记录实现证据：
 
 ```bash
 venv/bin/python3.12 scripts/engineering_cycle.py resolve <run_id> <finding_id> \

@@ -4,6 +4,7 @@ missing-value handling, lookahead-safe windowing, and router integration.
 All API access is mocked, so these run without a network connection or a key.
 """
 import copy
+from datetime import datetime, timezone
 import unittest
 from unittest import mock
 
@@ -91,9 +92,60 @@ class FredConfigTests(unittest.TestCase):
         # Routing relies on this subclassing for "vendor unavailable" handling.
         self.assertTrue(issubclass(fred.FredNotConfiguredError, ValueError))
 
+    def test_http_error_never_exposes_api_key_or_request_url(self):
+        response = mock.Mock(
+            status_code=502,
+            reason="Bad Gateway",
+        )
+        with mock.patch.dict("os.environ", {"FRED_API_KEY": "fake-secret-key"}), \
+                mock.patch.object(fred.requests, "get", return_value=response), \
+                self.assertRaises(fred.requests.HTTPError) as raised:
+            fred._request("series", {"series_id": "GDPC1"})
+
+        detail = str(raised.exception)
+        self.assertIn("HTTP 502 Bad Gateway for series", detail)
+        self.assertNotIn("fake-secret-key", detail)
+        self.assertNotIn("api_key", detail)
+        self.assertNotIn("https://", detail)
+
+    def test_transport_error_never_forwards_prepared_url(self):
+        upstream = fred.requests.ConnectionError(
+            "failed for https://example.test?api_key=fake-secret-key"
+        )
+        with mock.patch.dict("os.environ", {"FRED_API_KEY": "fake-secret-key"}), \
+                mock.patch.object(fred.requests, "get", side_effect=upstream), \
+                self.assertRaises(fred.requests.RequestException) as raised:
+            fred._request("series/observations", {"series_id": "DGS10"})
+
+        detail = str(raised.exception)
+        self.assertEqual(
+            detail,
+            "FRED transport failed for series/observations: ConnectionError",
+        )
+        self.assertNotIn("fake-secret-key", detail)
+        self.assertNotIn("api_key", detail)
+
+    def test_bad_request_keeps_safe_fred_error_message(self):
+        response = mock.Mock(status_code=400)
+        response.json.return_value = {"error_message": "unknown series id"}
+        with mock.patch.dict("os.environ", {"FRED_API_KEY": "fake-secret-key"}), \
+                mock.patch.object(fred.requests, "get", return_value=response), \
+                self.assertRaisesRegex(ValueError, "unknown series id") as raised:
+            fred._request("series", {"series_id": "UNKNOWN"})
+
+        self.assertNotIn("fake-secret-key", str(raised.exception))
+
 
 @pytest.mark.unit
 class FredFormattingTests(unittest.TestCase):
+    def test_live_vintage_uses_fred_calendar_across_utc_midnight(self):
+        instant = datetime(2026, 7, 15, 2, 42, tzinfo=timezone.utc)
+        self.assertEqual(fred._live_vintage_date(instant), "2026-07-14")
+
+    def test_live_vintage_rejects_naive_time(self):
+        with self.assertRaisesRegex(ValueError, "timezone-aware"):
+            fred._live_vintage_date(datetime(2026, 7, 15, 2, 42))
+
     def test_report_has_header_latest_change_and_table(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):
             out = fred.get_macro_data("unemployment", "2025-09-30", 365)

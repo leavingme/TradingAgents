@@ -5,6 +5,8 @@ call fails and the model reports the tool "unavailable" and skips verification.
 Regression guard for that wiring gap (snapshot bound to the LLM but missing from
 the market ToolNode).
 """
+from unittest import mock
+
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
@@ -64,6 +66,39 @@ def test_invalid_tool_arguments_are_returned_for_one_correction_round():
     assert "[tool-argument-correction]" in message.content
     assert "indicator: Field required" in message.content
     assert "curr_date: Field required" in message.content
+
+
+@pytest.mark.unit
+def test_empty_indicator_batch_uses_server_default_without_model_retry():
+    node = TradingAgentsGraph._create_tool_nodes(None)["market"]
+    empty_call = {
+        "name": "get_indicators",
+        "args": {
+            "symbol": "NVDA",
+            "indicator": [],
+            "curr_date": "2026-07-14",
+            "look_back_days": 30,
+        },
+        "id": "empty-indicators",
+        "type": "tool_call",
+    }
+
+    with mock.patch(
+        "tradingagents.agents.utils.technical_indicators_tools.route_indicator_batch",
+        return_value="default batch",
+    ) as route:
+        result = _invoke_tool_node(
+            node, [AIMessage(content="", tool_calls=[empty_call])]
+        )
+
+    message = result["messages"][-1]
+    assert isinstance(message, ToolMessage)
+    assert message.status == "success"
+    assert message.content == "default batch"
+    assert route.call_args.args[1] == [
+        "close_50_sma", "close_200_sma", "close_10_ema", "rsi",
+        "macd", "macdh", "boll_ub", "boll_lb",
+    ]
 
 
 @pytest.mark.unit

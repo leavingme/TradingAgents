@@ -12,7 +12,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
     get_prediction_markets,
 )
-from tradingagents.dataflows.evidence_models import validate_report_citations
+from tradingagents.dataflows.evidence_models import (
+    remove_uncited_material_claims,
+    validate_report_citations,
+)
 from tradingagents.dataflows.untrusted_content import isolate_untrusted_content
 
 
@@ -30,7 +33,15 @@ def _validate_final_report_with_retry(chain, messages, result, evidence_texts):
         retried = chain.invoke([*messages, result, correction])
         if retried.tool_calls:
             return retried, ""
-        return retried, validate_report_citations(str(retried.content), evidence_texts)
+        try:
+            report = validate_report_citations(str(retried.content), evidence_texts)
+        except ValueError as retry_exc:
+            if str(retry_exc) != "decision-material news claim is missing a source_id citation":
+                raise
+            report = remove_uncited_material_claims(str(retried.content))
+            report = validate_report_citations(report, evidence_texts)
+            retried = retried.model_copy(update={"content": report})
+        return retried, report
 
 
 def create_news_analyst(llm):

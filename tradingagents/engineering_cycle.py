@@ -28,6 +28,7 @@ P0_RESOLVED = "resolved"
 AUTOMATIC_FINDING_IDS = {
     "P0-RUN-FAILURE", "P0-NO-VALID-DECISION",
     "P0-NONLONG-EXECUTABLE-NUMBERS", "P0-MISSING-VENDOR-AUDIT",
+    "P0-CURRENCY-UNIT-DRIFT",
     "P0-INCOMPLETE-VENDOR-PROVENANCE", "P1-VENDOR-FALLBACK",
     "P1-MISSING-LLM-STATS", "P1-HIGH-CONTEXT-COST",
 }
@@ -255,6 +256,18 @@ def detect_findings(
         {},
     )
     decision_text = str(completed.get("decision") or "")
+    trusted_evidence_sections = {
+        "market_report",
+        "sentiment_report",
+        "news_report",
+        "fundamentals_report",
+    }
+    report_sections = [
+        str((event.get("content") or {}).get("text") or "")
+        for event in events
+        if event.get("type") == "report_section"
+        and (event.get("content") or {}).get("section") in trusted_evidence_sections
+    ]
     if status in {"failed", "cancelled"} or any(e.get("type") == "error" for e in events):
         errors = [e.get("content") for e in events if e.get("type") == "error"]
         findings.append(_finding(
@@ -283,6 +296,21 @@ def detect_findings(
                 "validated Hold/Underweight/Sell report contains numeric execution guidance",
                 "扩展非执行型 prose 清理器；不得放松 Buy/Overweight 的结构化门禁。",
                 "非多头报告不含入场/减仓/清仓/回补/对冲/行权价等执行数字。",
+            ))
+    if decision_status == "validated" and report_sections:
+        from tradingagents.agents.schemas import unsupported_currency_amounts
+
+        unsupported = unsupported_currency_amounts(
+            decision_text,
+            "\n".join(report_sections),
+        )
+        if unsupported:
+            findings.append(_finding(
+                "P0-CURRENCY-UNIT-DRIFT", "P0",
+                "最终决策包含无法追溯的货币单位漂移",
+                f"unsupported normalized currency amounts={unsupported}",
+                "在 Portfolio Manager 渲染边界按 USD 绝对值统一 M/B/T/亿/万亿并拒绝新增数值。",
+                "同输入重跑通过；最终报告的全部货币数字均可与上游证据在舍入容差内对齐。",
             ))
     if not vendor_calls:
         findings.append(_finding(

@@ -106,6 +106,59 @@ def test_review_detects_executable_numbers_in_validated_underweight(tmp_path):
 
 
 @pytest.mark.unit
+def test_review_detects_currency_unit_drift_in_final_decision(tmp_path):
+    run = _run()
+    run["events"].insert(0, {
+        "type": "report_section",
+        "content": {
+            "section": "fundamentals_report",
+            "text": "Q2营收指引为$910亿。",
+        },
+    })
+    run["events"][-1]["content"]["decision"] = (
+        "**Rating**: Hold\n\n若Q2营收达到$910B则重新评估。"
+    )
+    store = FakeStore(run, _calls())
+    build_review("NVDA-cycle-test", root=tmp_path, store=store)
+    payload = json.loads(
+        (tmp_path / "NVDA-cycle-test" / "findings.json").read_text(encoding="utf-8")
+    )
+    assert "P0-CURRENCY-UNIT-DRIFT" in {
+        item["id"] for item in payload["findings"]
+    }
+
+
+@pytest.mark.unit
+def test_review_does_not_trust_risk_debate_to_self_support_currency(tmp_path):
+    run = _run()
+    run["events"].insert(0, {
+        "type": "report_section",
+        "content": {
+            "section": "fundamentals_report",
+            "text": "管理层下一季度指引为$910亿。",
+        },
+    })
+    run["events"].insert(1, {
+        "type": "report_section",
+        "content": {
+            "section": "aggressive_analyst",
+            "text": "下一季度营收是540-570亿美元。",
+        },
+    })
+    run["events"][-1]["content"]["decision"] = (
+        "**Rating**: Hold\n\n下一季度营收是540-570亿美元。"
+    )
+    store = FakeStore(run, _calls())
+    build_review("NVDA-cycle-test", root=tmp_path, store=store)
+    payload = json.loads(
+        (tmp_path / "NVDA-cycle-test" / "findings.json").read_text(encoding="utf-8")
+    )
+    assert "P0-CURRENCY-UNIT-DRIFT" in {
+        item["id"] for item in payload["findings"]
+    }
+
+
+@pytest.mark.unit
 def test_failed_run_creates_p0_and_gate_requires_resolution_review_and_verification(
     tmp_path, monkeypatch
 ):

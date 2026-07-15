@@ -501,8 +501,9 @@ def render_prediction_market_feed(feed: PredictionMarketFeed) -> str:
 
 _SOURCE_ID = re.compile(r"\b(?:news|macro|prediction)_[0-9a-f]{8,64}\b")
 _MATERIAL_CLAIM = re.compile(
-    r"\b(?:\d{4}-\d{2}-\d{2}|\d+(?:\.\d+)?%|\$\d|"
-    r"announc(?:e|ed|es)|report(?:ed|s)?|rais(?:e|ed|es)|cut|launch(?:ed|es)?)\b",
+    r"(?:\b\d{4}-\d{2}-\d{2}\b|\b\d+(?:\.\d+)?\s*%|\$\s*\d|"
+    r"\bannounc(?:e|ed|es)\b|\breport(?:ed|s)?\b|\brais(?:e|ed|es)\b|"
+    r"\bcut\b|\blaunch(?:ed|es)?\b)",
     re.IGNORECASE,
 )
 
@@ -527,3 +528,22 @@ def validate_report_citations(report: str, evidence_texts: list[str]) -> str:
         if _MATERIAL_CLAIM.search(text) and not (_SOURCE_ID.findall(text)):
             raise ValueError("decision-material news claim is missing a source_id citation")
     return report
+
+
+def remove_uncited_material_claims(report: str) -> str:
+    """Drop unsupported material paragraphs after the single model correction.
+
+    This is deliberately narrower than citation validation: unknown citations
+    and reports with no valid citations still fail hard. Only paragraphs that
+    contain a decision-material claim but no source_id are removed.
+    """
+    kept: list[str] = []
+    for paragraph in re.split(r"\n\s*\n", report):
+        text = paragraph.strip()
+        if not text:
+            continue
+        exempt = text.startswith("|") or text.startswith("#")
+        if not exempt and _MATERIAL_CLAIM.search(text) and not _SOURCE_ID.findall(text):
+            continue
+        kept.append(text)
+    return "\n\n".join(kept)

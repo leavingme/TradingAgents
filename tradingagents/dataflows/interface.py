@@ -1089,7 +1089,13 @@ def _latest_date_in_result(result: object) -> str | None:
     if result is None:
         return None
     text = str(result)
-    dates = re.findall(r"(?m)^\s*(\d{4}-\d{2}-\d{2})(?=[:,])", text)
+    # Prefer actual row-leading dates over metadata/footer dates. Vendors emit
+    # both CSV and fixed-width tables; the latter separates Date from Open with
+    # two or more spaces. Comment lines cannot match because they start with #.
+    dates = re.findall(
+        r"(?m)^\s*(\d{4}-\d{2}-\d{2})(?=[:,]|\s{2,})",
+        text,
+    )
     if not dates:
         dates = re.findall(r"\b(\d{4}-\d{2}-\d{2})\b", text)
     return max(dates) if dates else None

@@ -18,6 +18,17 @@ from tradingagents.runtime.history import RunHistoryStore
 VALID_OHLCV = "Date,Open,High,Low,Close,Volume\n2026-07-09,100,105,99,103,1000\n"
 
 
+def test_latest_date_prefers_fixed_width_data_row_over_retrieval_date():
+    result = """# Stock data for NVDA from 2026-07-01 to 2026-07-14
+# Data retrieved from Longbridge MCP on: 2026-07-15 10:42:00
+
+Date        Open  High  Low  Close  Volume
+2026-07-11  170   175   169  174    1000
+2026-07-14  174   177   172  176    1200
+"""
+    assert interface._latest_date_in_result(result) == "2026-07-14"
+
+
 @pytest.mark.unit
 def test_vendor_audit_db_path_only_uses_unified_environment_variable(monkeypatch, tmp_path):
     from tradingagents.dataflows import vendor_verification as verification_module

@@ -37,6 +37,15 @@ def create_portfolio_manager(llm):
         trader_plan = state["trader_investment_plan"]
         verified_market = state["verified_market_snapshot"]
         risk_policy = state["trade_risk_policy"]
+        analyst_evidence = "\n".join(
+            str(state.get(key) or "")
+            for key in (
+                "market_report",
+                "sentiment_report",
+                "news_report",
+                "fundamentals_report",
+            )
+        )
 
         past_context = state.get("past_context", "")
         lessons_line = (
@@ -113,6 +122,7 @@ directions do not yet have an approved direction-specific calculator."""
                 decision,
                 verified_market=verified_market,
                 risk_policy=risk_policy,
+                evidence_context=analyst_evidence,
             ),
             safe_pm_decision,
             "Portfolio Manager",

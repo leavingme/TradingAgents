@@ -41,3 +41,19 @@ def test_invalid_news_citation_after_retry_remains_a_hard_failure():
         _validate_final_report_with_retry(chain, [], first, [EVIDENCE])
 
     assert len(chain.calls) == 1
+
+
+@pytest.mark.unit
+def test_uncited_material_paragraph_after_retry_is_removed_fail_closed():
+    first = AIMessage(content="NVIDIA announced a launch.")
+    corrected = AIMessage(content=(
+        "Supported context [news_12345678].\n\n"
+        "NVIDIA announced revenue growth without a citation."
+    ))
+    chain = FakeChain(corrected)
+
+    result, report = _validate_final_report_with_retry(chain, [], first, [EVIDENCE])
+
+    assert "Supported context" in report
+    assert "announced revenue" not in report
+    assert result.content == report

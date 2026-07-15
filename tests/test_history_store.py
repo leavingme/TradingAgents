@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 from tradingagents.runtime import AnalysisRequest, run_analysis_once, history_store, RunHistoryStore
 from tradingagents.runtime.events import AnalysisEvent
+from tradingagents.runtime.history import summarize_vendor_calls
 from unittest import mock
 
 
@@ -229,3 +230,23 @@ def test_vendor_summary_distinguishes_fallback_and_unavailable(tmp_path: Path):
             "selected_vendor": None, "attempt_count": 1,
         },
     ]
+
+
+def test_vendor_summary_treats_all_available_supporting_call_as_available():
+    calls = [{
+        "call_id": "reconciliation:get_cashflow:1",
+        "attempt": 1,
+        "vendor": "longbridge_mcp",
+        "category": "fundamental_data",
+        "method": "get_cashflow",
+        "agent": "Fundamentals Analyst",
+        "symbol": "NVDA",
+        "status": "available",
+        "selected": False,
+    }]
+
+    summary = summarize_vendor_calls(calls)
+
+    assert summary["data_status"] == "available"
+    assert summary["unavailable_domains"] == []
+    assert summary["trajectories"] == []

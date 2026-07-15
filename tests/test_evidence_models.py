@@ -99,6 +99,14 @@ def test_material_claim_requires_known_source_id():
         validate_report_citations(
             "NVIDIA announced a launch [news_aaaaaaaaaaaaaaaaaaaa].", evidence
         )
+    with pytest.raises(ValueError, match="missing a source_id"):
+        validate_report_citations(
+            f"Context [{source_id}].\n\nRevenue increased 85%.", evidence
+        )
+    with pytest.raises(ValueError, match="missing a source_id"):
+        validate_report_citations(
+            f"Context [{source_id}].\n\nThe target is $300.", evidence
+        )
 
 
 @pytest.mark.unit

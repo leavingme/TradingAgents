@@ -253,6 +253,44 @@ def test_hold_removes_chinese_risk_reward_and_keeps_decimal_chunks_atomic():
     assert "等待方向明确后再行动" in rendered
 
 
+@pytest.mark.parametrize("phrase", ["风险收益比 1:3", "风险回报比为 1:2"])
+def test_hold_removes_chinese_risk_reward_synonyms(phrase):
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="维持观察。",
+        investment_thesis=f"当前{phrase}。等待财报确认。",
+    )
+    rendered = render_pm_decision(decision)
+    assert phrase not in rendered
+    assert "等待财报确认" in rendered
+
+
+def test_hold_removes_numeric_odds_ratio_even_when_quoted_as_criticism():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="维持观察。",
+        investment_thesis="激进派把赔率 1:3 包装成确定性机会。证据仍然平衡。",
+    )
+    rendered = render_pm_decision(decision)
+    assert "1:3" not in rendered
+    assert "证据仍然平衡" in rendered
+
+
+def test_hold_removes_conditional_actions_using_chinese_numerals():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="维持观察。",
+        investment_thesis=(
+            "可执行纪律：三正加仓、两正一平维持、两负减仓。"
+            "等待财报确认。"
+        ),
+    )
+    rendered = render_pm_decision(decision)
+    assert "三正加仓" not in rendered
+    assert "两负减仓" not in rendered
+    assert "等待财报确认" in rendered
+
+
 @pytest.mark.unit
 def test_hold_removes_target_level_synonym_from_prose():
     decision = PortfolioDecision(
@@ -304,6 +342,116 @@ def test_negative_sell_rating_context_is_not_an_execution_false_positive():
 def test_hold_with_triggers_heading_and_calendar_number_is_not_execution():
     report = "最终决策：Hold with Triggers。关键观察点：Q2 财报在 8 月发布。"
     assert not contains_unverified_non_long_execution(report)
+
+
+def test_negative_sell_heading_list_number_is_not_execution():
+    report = "**为何Sell/Underweight不成立**： 1. 下行有$40B净现金支撑。"
+    assert not contains_unverified_non_long_execution(report)
+
+
+@pytest.mark.parametrize(
+    "heading",
+    ["支撑 Hold（不卖出）的硬证据", "支撑 Hold（不加仓）的硬证据"],
+)
+def test_hold_negative_action_heading_is_not_execution(heading):
+    assert not contains_unverified_non_long_execution(
+        f"**{heading}**： 1. 趋势仍待确认。"
+    )
+
+
+def test_hold_negative_heading_does_not_hide_real_conditional_action():
+    report = "**支撑 Hold（不加仓）的硬证据**：跌破$200后卖出。"
+    assert contains_unverified_non_long_execution(report)
+
+
+def test_why_not_add_heading_does_not_turn_indicator_distance_into_execution():
+    report = "**为何不做方向性加仓** 当前价格距布林上轨仅约1.5%。"
+    assert not contains_unverified_non_long_execution(report)
+
+
+def test_why_not_add_heading_does_not_hide_following_real_action():
+    report = "**为何不做方向性加仓** 当前距上轨1.5%，突破后加仓20%。"
+    assert contains_unverified_non_long_execution(report)
+
+
+def test_trigger_heading_with_month_end_and_quarter_is_not_execution():
+    report = "**触发框架（纪律性动作边界）**： - **8月底Q2财报结果**"
+    assert not contains_unverified_non_long_execution(report)
+
+
+def test_calendar_normalization_does_not_hide_real_execution_trigger():
+    report = "8月底Q2财报后，trigger at $200 and reduce exposure."
+    assert contains_unverified_non_long_execution(report)
+
+
+@pytest.mark.unit
+def test_pm_rejects_currency_unit_drift_from_chinese_billions():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="等待财报确认。",
+        investment_thesis="若营收达到$910B则重新评估。",
+    )
+    with pytest.raises(ValueError, match="not supported by upstream evidence"):
+        render_pm_decision(decision, evidence_context="公司指引为$910亿。")
+
+
+@pytest.mark.unit
+def test_pm_accepts_equivalent_currency_units_and_rounding():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="等待财报确认。",
+        investment_thesis="净利润约$58.3B，净现金约$40B。",
+    )
+    rendered = render_pm_decision(
+        decision,
+        evidence_context="净利润$583亿，净现金$403亿。",
+    )
+    assert "$58.3B" in rendered
+    assert "$40B" in rendered
+
+
+@pytest.mark.unit
+def test_pm_rejects_unsupported_currency_range_after_unit_conversion():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="等待财报确认。",
+        investment_thesis="报告引用的营收区间为$880-900B。",
+    )
+    with pytest.raises(ValueError, match=r"\$880-900B"):
+        render_pm_decision(decision, evidence_context="营收预期为$880到900亿。")
+
+
+@pytest.mark.unit
+def test_pm_rejects_unsupported_bare_chinese_currency_range():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="等待财报确认。",
+        investment_thesis="下一季度营收预计为540-570亿美元。",
+    )
+    with pytest.raises(ValueError, match="540-570亿"):
+        render_pm_decision(decision, evidence_context="管理层指引为$910亿。")
+
+
+@pytest.mark.unit
+def test_pm_validates_chinese_usd_suffix_and_range_against_evidence():
+    supported = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="当前价格211.80美元。",
+        investment_thesis="压力情景为160甚至152美元。",
+    )
+    rendered = render_pm_decision(
+        supported,
+        evidence_context="收盘价211.80美元，情景水平为160美元与152美元。",
+    )
+    assert "160甚至152美元" in rendered
+
+    unsupported = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="维持观察。",
+        investment_thesis="等待可能错失20美元。",
+    )
+    with pytest.raises(ValueError, match="20美元"):
+        render_pm_decision(unsupported, evidence_context="收盘价211.80美元。")
 
 
 @pytest.mark.unit

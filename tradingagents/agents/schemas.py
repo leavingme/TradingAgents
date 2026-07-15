@@ -39,7 +39,8 @@ def _coerce_optional_float(value):
 
 _PROSE_TRADE_MATH = re.compile(
     r"risk\s*[/:-]?\s*reward|reward\s*[/:-]?\s*risk|"
-    r"风险\s*[/：:]?\s*回报|盈亏比|"
+    r"风险\s*[/：:]?\s*回报|风险\s*(?:收益|回报)\s*比|盈亏比|"
+    r"赔率\s*\d+(?:\.\d+)?\s*[:：比]\s*\d+(?:\.\d+)?|"
     r"\d+(?:\.\d+)?\s*(?:[×x]|倍)\s*atr|atr\s*(?:倍数|multiple)|"
     r"initial portfolio risk|初始组合风险",
     re.IGNORECASE,
@@ -61,14 +62,155 @@ _PROSE_EXECUTABLE_NUMBER = re.compile(
     r"卖出|买入|对冲|行权价|敞口|触发|跌破|突破)",
     re.IGNORECASE,
 )
+_PROSE_EXECUTABLE_CHINESE_NUMBER = re.compile(
+    r"(?:入场|止损|目标价|目标位|仓位|持仓|战术仓|建仓|加仓|减仓|减持|"
+    r"清仓|回补|卖出|买入|对冲|行权价|敞口|触发|跌破|突破)"
+    r"[^\n.!?。！？]{0,20}[一二两三四五六七八九十百]+|"
+    r"[一二两三四五六七八九十百]+[^\n.!?。！？]{0,10}"
+    r"(?:入场|止损|目标价|目标位|仓位|持仓|战术仓|建仓|加仓|减仓|减持|"
+    r"清仓|回补|卖出|买入|对冲|行权价|敞口|触发|跌破|突破)",
+    re.IGNORECASE,
+)
+
+_CURRENCY_RANGE = re.compile(
+    r"\$\s*(\d+(?:\.\d+)?)\s*[-–—至到]\s*\$?\s*(\d+(?:\.\d+)?)"
+    r"\s*(万亿|亿|[TtBbMm])"
+)
+_CHINESE_LARGE_RANGE = re.compile(
+    r"(?<![\d.])(\d+(?:\.\d+)?)\s*[-–—至到]\s*(\d+(?:\.\d+)?)"
+    r"\s*(万亿|亿)"
+)
+_USD_SUFFIX_RANGE = re.compile(
+    r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:[-–—至到]|甚至)\s*"
+    r"(\d+(?:\.\d+)?)\s*美元"
+)
+_CURRENCY_SCALAR = re.compile(
+    r"\$\s*(\d+(?:\.\d+)?)\s*(万亿|亿|[TtBbMm])?"
+)
+_CHINESE_LARGE_NUMBER = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*(万亿|亿)")
+_USD_SUFFIX_SCALAR = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*美元")
+
+
+def _currency_values(value: str) -> list[tuple[str, float]]:
+    """Extract dollar amounts and normalize them to absolute USD values."""
+    extracted: list[tuple[str, float]] = []
+    range_spans: list[tuple[int, int]] = []
+
+    def normalize(number: str, unit: str | None) -> float:
+        multipliers = {
+            None: 1.0,
+            "M": 1_000_000.0,
+            "B": 1_000_000_000.0,
+            "T": 1_000_000_000_000.0,
+            "亿": 100_000_000.0,
+            "万亿": 1_000_000_000_000.0,
+        }
+        normalized_unit = unit.upper() if unit and unit.isascii() else unit
+        return float(number) * multipliers[normalized_unit]
+
+    for match in _CURRENCY_RANGE.finditer(value):
+        range_spans.append(match.span())
+        for number in match.group(1), match.group(2):
+            extracted.append((match.group(0), normalize(number, match.group(3))))
+    for match in _CHINESE_LARGE_RANGE.finditer(value):
+        range_spans.append(match.span())
+        for number in match.group(1), match.group(2):
+            extracted.append((match.group(0), normalize(number, match.group(3))))
+    for match in _USD_SUFFIX_RANGE.finditer(value):
+        range_spans.append(match.span())
+        for number in match.group(1), match.group(2):
+            extracted.append((match.group(0), normalize(number, None)))
+    for match in _CURRENCY_SCALAR.finditer(value):
+        if any(start <= match.start() < end for start, end in range_spans):
+            continue
+        extracted.append((match.group(0), normalize(match.group(1), match.group(2))))
+    occupied = [*range_spans, *(match.span() for match in _CURRENCY_SCALAR.finditer(value))]
+    for match in _CHINESE_LARGE_NUMBER.finditer(value):
+        if any(start <= match.start() < end for start, end in occupied):
+            continue
+        extracted.append((match.group(0), normalize(match.group(1), match.group(2))))
+    for match in _USD_SUFFIX_SCALAR.finditer(value):
+        if any(start <= match.start() < end for start, end in occupied):
+            continue
+        extracted.append((match.group(0), normalize(match.group(1), None)))
+    return extracted
+
+
+def unsupported_currency_amounts(value: str, evidence_context: str) -> list[str]:
+    """Return output dollar amounts that cannot be reconciled to upstream evidence.
+
+    Chinese ``亿``/``万亿`` and English M/B/T suffixes are normalized before
+    comparison. This catches silent 10x/100x unit drift during multilingual
+    hand-offs while allowing ordinary rounding (up to one percent).
+    """
+    evidence_values = [amount for _, amount in _currency_values(evidence_context)]
+    unsupported: list[str] = []
+    for rendered, amount in _currency_values(value):
+        if not any(
+            abs(amount - evidence) <= max(0.05, abs(evidence) * 0.01)
+            for evidence in evidence_values
+        ):
+            unsupported.append(rendered)
+    return list(dict.fromkeys(unsupported))
+
+
+def _validate_currency_evidence(value: str, evidence_context: str | None) -> str:
+    if not evidence_context:
+        return value
+    unsupported = unsupported_currency_amounts(value, evidence_context)
+    if unsupported:
+        raise ValueError(
+            "currency amounts are not supported by upstream evidence after unit "
+            f"normalization: {', '.join(unsupported)}"
+        )
+    return value
+
+
+def _execution_scan_text(value: str) -> str:
+    """Remove non-executable numbering before scanning prose for trade levels."""
+    # A section explicitly explaining why Sell/Underweight is not justified is
+    # rating analysis, not a sell instruction. Remove only that negated heading;
+    # genuine Sell prose and all following financial numbers remain scannable.
+    value = re.sub(
+        r"(?i)为何\s*sell(?:\s*/\s*underweight)?\s*不成立",
+        "反对非多头评级",
+        value,
+    )
+    value = re.sub(
+        r"(?i)为何\s*不做\s*方向性\s*(?:加仓|减仓)",
+        "维持当前方向的理由",
+        value,
+    )
+    value = re.sub(
+        r"(?i)支撑\s*hold\s*[（(]\s*不(?:卖出|加仓)\s*[）)](?:的)?硬证据",
+        "支撑维持评级的硬证据",
+        value,
+    )
+    # Markdown/natural-language ordered-list markers are not prices. Require a
+    # dot followed by whitespace/markdown so decimal values remain intact.
+    value = re.sub(r"(?<![\d.])\d+\.(?=\s|\*\*)", "", value)
+    # Calendar references such as Q2 and 8月底 are catalysts, not execution
+    # numbers. Actual dollar/percent/ATR/position values remain untouched.
+    value = re.sub(r"(?i)(?<![A-Z0-9])Q[1-4](?![0-9])", "", value)
+    value = re.sub(
+        r"(?<![\d.])(?:1[0-2]|[1-9])\s*月(?:底|初|中旬|下旬)?",
+        "",
+        value,
+    )
+    return value
 
 
 def _reject_calculated_trade_math(value: str) -> str:
-    if _PROSE_TRADE_MATH.search(value):
+    scan_text = _execution_scan_text(value)
+    if _PROSE_TRADE_MATH.search(scan_text):
         raise ValueError(
             "calculated reward/risk, ATR multiples, and portfolio risk must not appear in prose"
         )
-    if _PROSE_EXECUTABLE_NUMBER.search(value):
+    if _PROSE_EXECUTABLE_NUMBER.search(scan_text):
+        raise ValueError(
+            "executable entry, stop, target, and position numbers must use structured fields, not prose"
+        )
+    if _PROSE_EXECUTABLE_CHINESE_NUMBER.search(scan_text):
         raise ValueError(
             "executable entry, stop, target, and position numbers must use structured fields, not prose"
         )
@@ -90,8 +232,9 @@ def _sanitize_non_executable_prose(value: str) -> str:
         chunk.strip()
         for chunk in chunks
         if chunk.strip()
-        and not _PROSE_TRADE_MATH.search(chunk)
-        and not _PROSE_EXECUTABLE_NUMBER.search(chunk)
+        and not _PROSE_TRADE_MATH.search(_execution_scan_text(chunk))
+        and not _PROSE_EXECUTABLE_NUMBER.search(_execution_scan_text(chunk))
+        and not _PROSE_EXECUTABLE_CHINESE_NUMBER.search(_execution_scan_text(chunk))
     ]
     if safe:
         return " ".join(safe)
@@ -100,7 +243,12 @@ def _sanitize_non_executable_prose(value: str) -> str:
 
 def contains_unverified_non_long_execution(value: str) -> bool:
     """Return whether non-long prose still carries executable numeric guidance."""
-    return bool(_PROSE_TRADE_MATH.search(value) or _PROSE_EXECUTABLE_NUMBER.search(value))
+    scan_text = _execution_scan_text(value)
+    return bool(
+        _PROSE_TRADE_MATH.search(scan_text)
+        or _PROSE_EXECUTABLE_NUMBER.search(scan_text)
+        or _PROSE_EXECUTABLE_CHINESE_NUMBER.search(scan_text)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +544,7 @@ def render_pm_decision(
     *,
     verified_market: dict | None = None,
     risk_policy: dict | None = None,
+    evidence_context: str | None = None,
 ) -> str:
     """Render a PortfolioDecision back to the markdown shape the rest of the system expects.
 
@@ -443,6 +592,10 @@ def render_pm_decision(
         )
         executive_summary = _sanitize_non_executable_prose(executive_summary)
         investment_thesis = _sanitize_non_executable_prose(investment_thesis)
+    _validate_currency_evidence(
+        f"{executive_summary}\n{investment_thesis}",
+        evidence_context,
+    )
     parts = [
         f"**Rating**: {decision.rating.value}",
         "",

@@ -141,6 +141,42 @@ def test_tool_passes_all_indicators_in_one_batch_call():
     )
 
 
+@pytest.mark.parametrize("empty", ["", ["  "], []])
+def test_tool_schema_normalizes_empty_selection_to_server_default(empty):
+    parsed = get_indicators.args_schema.model_validate({
+        "symbol": "NVDA",
+        "indicator": empty,
+        "curr_date": "2026-07-10",
+        "look_back_days": 30,
+    })
+    assert parsed.indicator == [
+        "close_50_sma", "close_200_sma", "close_10_ema", "rsi",
+        "macd", "macdh", "boll_ub", "boll_lb",
+    ]
+
+
+def test_tool_schema_rejects_more_than_eight_indicators():
+    with pytest.raises(ValueError):
+        get_indicators.args_schema.model_validate({
+            "symbol": "NVDA",
+            "indicator": ["rsi"] * 9,
+            "curr_date": "2026-07-10",
+            "look_back_days": 30,
+        })
+
+
+def test_tool_schema_exposes_indicator_cardinality_to_model():
+    indicator_schema = get_indicators.args_schema.model_json_schema()["properties"][
+        "indicator"
+    ]
+    array_schema = next(
+        branch for branch in indicator_schema["anyOf"]
+        if branch.get("type") == "array"
+    )
+    assert "minItems" not in array_schema
+    assert array_schema["maxItems"] == 8
+
+
 @pytest.mark.unit
 def test_batch_router_falls_back_only_missing_indicators(monkeypatch):
     rsi = NormalizedIndicatorData(

@@ -403,7 +403,19 @@ def summarize_vendor_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
         attempts.sort(key=lambda item: int(item.get("attempt") or 0))
         selected = next((item for item in attempts if item.get("selected")), None)
         if selected is None:
-            status = "unavailable"
+            # Financial reconciliation records validated supporting statements
+            # as independent, non-selected calls before selecting the outer
+            # requested result. Do not turn an all-success supporting trajectory
+            # into a false unavailable domain merely because it is not itself
+            # the router's selected return value.
+            success_statuses = {"available", "cache_hit"}
+            status = (
+                "available"
+                if attempts and all(
+                    str(item.get("status")) in success_statuses for item in attempts
+                )
+                else "unavailable"
+            )
         elif len(attempts) > 1 or int(selected.get("attempt") or 0) > 1:
             status = "degraded"
         else:

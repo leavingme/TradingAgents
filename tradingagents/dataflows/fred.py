@@ -12,6 +12,7 @@ import logging
 import math
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -43,6 +44,12 @@ MAX_ROWS = 40
 # below that limit is deterministic even for daily series. The normal 365/1095
 # day lookbacks fit in one request; this only adds calls for explicit long ranges.
 MAX_VINTAGE_WINDOW_DAYS = 1800
+
+# FRED evaluates "today" in the St. Louis/Central business-day context. UTC
+# enters the next calendar day several hours earlier, and using the UTC date in
+# that interval makes an otherwise valid live request look like a future
+# realtime_start to the API.
+FRED_TIMEZONE = ZoneInfo("America/Chicago")
 
 # Curated human-friendly aliases -> FRED series IDs. Anything not listed is used
 # verbatim as a raw FRED series ID, so power users are never limited to this set.
@@ -136,18 +143,33 @@ def _resolve_series_id(indicator: str) -> str:
 def _request(path: str, params: dict) -> dict:
     """GET a FRED endpoint, surfacing FRED's JSON error body on a bad request."""
     api_params = {**params, "api_key": get_api_key(), "file_type": "json"}
-    response = requests.get(
-        f"{FRED_API_BASE}/{path}", params=api_params, timeout=REQUEST_TIMEOUT
-    )
+    try:
+        response = requests.get(
+            f"{FRED_API_BASE}/{path}", params=api_params, timeout=REQUEST_TIMEOUT
+        )
+    except requests.RequestException as exc:
+        # requests exceptions may include PreparedRequest.url, whose query
+        # string contains the FRED API key. Preserve the failure class and
+        # endpoint without forwarding the original exception text.
+        raise requests.RequestException(
+            f"FRED transport failed for {path}: {type(exc).__name__}"
+        ) from None
     # FRED returns 400 with a JSON {"error_message": ...} for unknown series IDs
     # or malformed params; turn that into a clear, actionable error.
     if response.status_code == 400:
         try:
-            message = response.json().get("error_message", response.text)
+            message = response.json().get("error_message")
         except ValueError:
-            message = response.text
-        raise ValueError(f"FRED request failed: {message}")
-    response.raise_for_status()
+            message = None
+        detail = f": {message}" if message else ""
+        raise ValueError(f"FRED request failed: HTTP 400 for {path}{detail}")
+    if response.status_code >= 400:
+        reason = str(getattr(response, "reason", "") or "").strip()
+        reason_suffix = f" {reason}" if reason else ""
+        raise requests.HTTPError(
+            f"FRED request failed: HTTP {response.status_code}{reason_suffix} "
+            f"for {path}"
+        )
     return response.json()
 
 
@@ -198,6 +220,14 @@ def _initial_release_rows(
         cursor = chunk_end + timedelta(days=1)
 
     return [earliest_by_date[key] for key in sorted(earliest_by_date)]
+
+
+def _live_vintage_date(now: datetime | None = None) -> str:
+    """Return FRED's current calendar date for a live runtime request."""
+    instant = now or datetime.now(timezone.utc)
+    if instant.tzinfo is None:
+        raise ValueError("live FRED vintage time must be timezone-aware")
+    return instant.astimezone(FRED_TIMEZONE).date().isoformat()
 
 
 def get_macro_data(
@@ -254,7 +284,7 @@ def get_macro_data(
         vintage_date = (cutoff_date - timedelta(days=1)).isoformat()
         revision_policy = "fred_vintage_before_cutoff_date"
     elif current_run_id():
-        vintage_date = datetime.now(timezone.utc).date().isoformat()
+        vintage_date = _live_vintage_date()
         revision_policy = "fred_latest_vintage_at_call_time"
     else:
         vintage_date = curr_date

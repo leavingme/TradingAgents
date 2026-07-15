@@ -40,3 +40,12 @@ class StockTwitsResilienceTests:
             out = stocktwits.fetch_stocktwits_messages("NVDA")
         assert "unavailable" in out.lower()
         assert out.startswith("<stocktwits unavailable")
+
+    def test_cloudflare_403_has_explicit_non_retryable_placeholder(self):
+        exc = HTTPError("url", 403, "Forbidden", {"cf-mitigated": "challenge"}, None)
+        with patch.object(stocktwits, "urlopen", side_effect=exc):
+            out = stocktwits.fetch_stocktwits_messages("NVDA")
+
+        assert out == (
+            "<stocktwits unavailable: legacy endpoint requires browser challenge>"
+        )

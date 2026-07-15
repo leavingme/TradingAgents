@@ -147,6 +147,8 @@
 
 - [x] 行情、技术指标和财务数据进入 Agent 前经过统一领域模型与确定性 validator。
 - [x] `NewsFeed`、`MacroSeries` 和 `SocialFeed` 已结构化；外部内容以 `untrusted_data` JSON 传输并清除提示注入控制文本。
+- [x] StockTwits 历史 keyless symbol stream 已因 Cloudflare browser challenge 从默认 Sentiment 路径退役；运行不再重复请求并产生 403。当前使用已验证的 Bird/X 与 Reddit，只有取得官方批准的服务端 API 和原始 schema 后才允许将 StockTwits 作为独立结构化 vendor 重新接入，禁止保存浏览器 challenge cookie 或抓取 HTML 绕过。
+  - 完成证据：官方旧 endpoint 的只读探针返回 HTTP 403、`cf-mitigated: challenge`；403 现在映射为明确且不可重试的 unavailable marker，Sentiment 默认只注入 disabled marker 而不发起网络请求。StockTwits/Sentiment/不可信内容相关测试 34 项通过。
 - [x] OHLCV 采用 `OHLCVBatch` 写入契约、日期/OHLC 硬校验、原子缓存替换及 JSONL 溯源；盘中或日期漂移数据不能冒充规范日 K。
 - [x] 技术指标统一预热窗口和三年 calculation start；默认 Westock/stockstats，Longbridge MCP 为验证后 fallback。
 - [x] run-scoped vendor ledger 按 `run_id + call_id + attempt` 追加保存；审计落盘失败时禁止生成可执行报告。

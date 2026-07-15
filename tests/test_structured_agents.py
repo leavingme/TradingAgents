@@ -384,7 +384,6 @@ def mock_sentiment_sources(monkeypatch):
     monkeypatch.setattr(
         module, "get_social_posts", types.SimpleNamespace(func=lambda *args: "validated social")
     )
-    monkeypatch.setattr(module, "fetch_stocktwits_messages", lambda *args, **kwargs: "posts")
     monkeypatch.setattr(module, "fetch_reddit_posts", lambda *args, **kwargs: "posts")
 
 

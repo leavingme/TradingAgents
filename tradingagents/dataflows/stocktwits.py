@@ -1,10 +1,11 @@
-"""StockTwits public symbol-stream fetcher.
+"""Legacy StockTwits public symbol-stream fetcher.
 
-StockTwits exposes a per-symbol message stream at
-``api.stocktwits.com/api/2/streams/symbol/{ticker}.json`` that requires no
-API key, no OAuth, and no registration. Each message includes a
-user-labeled sentiment field (``Bullish``/``Bearish``/null), the message
-body, timestamp, and posting user.
+The historical keyless endpoint at
+``api.stocktwits.com/api/2/streams/symbol/{ticker}.json`` is currently behind
+a Cloudflare browser challenge and returns HTTP 403 to server-side clients.
+It is therefore retired from the default analysis path. Keep this helper only
+for explicit diagnostics or a future approved StockTwits integration; do not
+work around the challenge with browser cookies or HTML scraping.
 
 The function is deliberately self-contained: short timeout, graceful
 degradation on any HTTP or parse failure, and a string return type so
@@ -17,6 +18,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,15 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
     try:
         with urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
+    except HTTPError as exc:
+        if exc.code == 403:
+            logger.warning(
+                "StockTwits legacy endpoint is unavailable for %s: HTTP 403 browser challenge",
+                ticker,
+            )
+            return "<stocktwits unavailable: legacy endpoint requires browser challenge>"
+        logger.warning("StockTwits fetch failed for %s: HTTP %s", ticker, exc.code)
+        return f"<stocktwits unavailable: HTTP {exc.code}>"
     except (OSError, http.client.HTTPException, json.JSONDecodeError) as exc:
         # OSError covers URLError/TimeoutError/connection resets; HTTPException
         # covers chunked-transfer errors (IncompleteRead/BadStatusLine, #1024).

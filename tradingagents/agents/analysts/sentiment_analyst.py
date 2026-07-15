@@ -9,8 +9,8 @@ The redesigned agent pre-fetches four complementary data sources before
 the LLM is invoked and transports them in a separate untrusted-data message:
 
   1. News headlines     — Westock (institutional framing)
-  2. StockTwits messages — retail-trader posts indexed by cashtag, with
-                           user-labeled Bullish/Bearish sentiment tags
+  2. StockTwits status   — the legacy keyless endpoint is retired because it
+                           requires a Cloudflare browser challenge
   3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
   4. X/Twitter posts     — validated read-only bird search results
 
@@ -46,7 +46,6 @@ from tradingagents.agents.utils.structured import (
 )
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.config import get_config
-from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 from tradingagents.dataflows.untrusted_content import (
     isolate_untrusted_content,
     render_untrusted_payload,
@@ -60,6 +59,14 @@ def _seven_days_back(trade_date: str) -> str:
 def _social_source_enabled(source: str) -> bool:
     configured = get_config().get("data_vendors", {}).get("social_data", "")
     return source in {item.strip() for item in configured.split(",") if item.strip()}
+
+
+def _stocktwits_disabled_block() -> str:
+    """Return an explicit fail-closed marker for the retired public endpoint."""
+    return (
+        "<StockTwits disabled: legacy public endpoint requires a browser challenge; "
+        "no verified server-side API is configured>"
+    )
 
 
 def create_sentiment_analyst(llm):
@@ -89,7 +96,10 @@ def create_sentiment_analyst(llm):
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(sq["stocktwits"], limit=30)
+        # Do not attempt the historical keyless endpoint: StockTwits now serves
+        # a Cloudflare browser challenge to server-side clients. Re-enable only
+        # through a separately audited, approved API vendor.
+        stocktwits_block = _stocktwits_disabled_block()
         reddit_block = (
             fetch_reddit_posts(sq["reddit"])
             if _social_source_enabled("reddit")

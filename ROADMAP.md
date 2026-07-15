@@ -5,7 +5,7 @@
 
 ## 当前结论
 
-- 截至 2026-07-14，没有未完成的明确 P0。
+- 截至 2026-07-15，没有未完成的明确 P0。
 - 当前排序遵循 `AGENTS.md` 的四级原则：**安全与正确性 → 运行可靠性/成本 → 核心研究能力 → 高复杂度扩展**。
 - 排名是执行顺序，不是功能价值评分。默认启用且可能影响决策的链路，优先于尚未开放的未来能力。
 - 第 1–5 项已完成；下一项是第 6 项仓位引擎与交易校验器解耦。原第 6 项
@@ -55,6 +55,7 @@
   - 对照现有 `NewsFeed` / `MacroSeries` 实现、测试和运行证据；已满足的项目关闭，缺口形成独立可验收任务。
   - 完成证据：router 对新闻执行 routed vendor、非空正文/摘要、HTTP(S) URL、标的相关性、精确发布时间 cutoff、规范 URL/标题去重和稳定 `source_id` 校验；`live` 运行的新闻窗口按调用时 UTC 日期推进，不再被最近完整日 K 的 `analysis_date` 截断。Longbridge MCP 实时 NVDA 样本通过完整校验；Longbridge CLI 列表缺少正文时使用同一新闻能力的 `news detail` 补齐，Alpha Vantage 的日期末端按 23:59 包含后再由 router 精确裁剪；Westock 在当前主机不可用，DuckDuckGo 缺少可信发布时间，两者均 fail closed，未伪装为有效证据。
   - 完成证据：`MacroSeries` / `MacroObservation` 已包含请求指标、series ID/title、单位、频率、观察期、初次发布日期、vendor、vintage、revision 状态与含 vintage 的稳定 `source_id`。FRED 使用历史 vintage 和 `output_type=4` 初次发布元数据；日内 point-in-time 截止保守固定到前一日 vintage。真实历史探针以 `2025-07-10T16:00:00-04:00` 为截止，固定到 `2025-07-09` vintage，返回 11 条可见 CPI 记录，最新观察期 `2025-05-01`、初次发布日期 `2025-06-11`，并通过确定性 validator。新闻、宏观、路由、runtime/Web 相关测试 98 项和项目快速门禁 61 项通过，前端语法与 Python 编译检查通过；长期 Web 服务热加载后保持 active，`/api/config/defaults` 返回 200。
+  - 2026-07-15 回归修复：FRED `output_type=4` 初次发布查询不再从 `1776-07-04` 扫描至当前 vintage，而是绑定实际 observation window；显式超长窗口按最多 1800 个日历日分段，规避 JSON 每次最多 2000 个 vintage date 的限制。合并分段及修订记录时确定性保留同一观察期最早的 `realtime_start`，避免把后续修订误标为初值；新增日频 VIX 与 4000 天窗口回归覆盖。FRED/全球宏观/lookahead 测试 30 项及 evidence/vendor/runtime/Web 快速门禁 79 项通过；真实 VIX、DGS10 探针分别返回 258、250 条记录并通过统一 `MacroSeries` validator，未再触发 3887/5063-vintage 错误。
 
 ### 第二阶段：运行可靠性/成本（4–5）
 

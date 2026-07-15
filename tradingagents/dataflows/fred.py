@@ -38,6 +38,12 @@ DEFAULT_LOOKBACK_DAYS = 365
 # daily series (yields, VIX) over a long window would otherwise flood context.
 MAX_ROWS = 40
 
+# FRED rejects JSON observation requests spanning more than 2,000 vintage dates.
+# A vintage date has day precision, so keeping each inclusive real-time window
+# below that limit is deterministic even for daily series. The normal 365/1095
+# day lookbacks fit in one request; this only adds calls for explicit long ranges.
+MAX_VINTAGE_WINDOW_DAYS = 1800
+
 # Curated human-friendly aliases -> FRED series IDs. Anything not listed is used
 # verbatim as a raw FRED series ID, so power users are never limited to this set.
 MACRO_SERIES = {
@@ -145,6 +151,55 @@ def _request(path: str, params: dict) -> dict:
     return response.json()
 
 
+def _initial_release_rows(
+    observation_params: dict,
+    realtime_start: str,
+    realtime_end: str,
+) -> list[dict]:
+    """Return each observation's earliest release without exceeding FRED limits.
+
+    ``output_type=4`` returns every new or revised value in the requested
+    real-time range. Restrict that range to the observation window (an
+    observation cannot be released before its own period starts), split long
+    ranges below FRED's 2,000-vintage JSON cap, and retain the earliest
+    ``realtime_start`` when later revisions repeat an observation date.
+    """
+    window_start = datetime.strptime(realtime_start, "%Y-%m-%d").date()
+    window_end = datetime.strptime(realtime_end, "%Y-%m-%d").date()
+    if window_start > window_end:
+        return []
+
+    earliest_by_date: dict[str, dict] = {}
+    cursor = window_start
+    while cursor <= window_end:
+        chunk_end = min(
+            cursor + timedelta(days=MAX_VINTAGE_WINDOW_DAYS - 1),
+            window_end,
+        )
+        rows = _request(
+            "series/observations",
+            {
+                **observation_params,
+                "output_type": 4,
+                "realtime_start": cursor.isoformat(),
+                "realtime_end": chunk_end.isoformat(),
+            },
+        ).get("observations", [])
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            observed_at = str(row.get("date") or "")
+            published_at = str(row.get("realtime_start") or "")
+            if not observed_at or not published_at:
+                continue
+            previous = earliest_by_date.get(observed_at)
+            if previous is None or published_at < str(previous["realtime_start"]):
+                earliest_by_date[observed_at] = row
+        cursor = chunk_end + timedelta(days=1)
+
+    return [earliest_by_date[key] for key in sorted(earliest_by_date)]
+
+
 def get_macro_data(
     indicator: str,
     curr_date: str,
@@ -233,15 +288,11 @@ def get_macro_data(
         {**observation_params, "vintage_dates": vintage_date},
     ).get("observations", [])
 
-    initial_release_rows = _request(
-        "series/observations",
-        {
-            **observation_params,
-            "output_type": 4,
-            "realtime_start": "1776-07-04",
-            "realtime_end": vintage_date,
-        },
-    ).get("observations", [])
+    initial_release_rows = _initial_release_rows(
+        observation_params,
+        start_date,
+        vintage_date,
+    )
     initial_by_date = {
         str(row.get("date")): row
         for row in initial_release_rows

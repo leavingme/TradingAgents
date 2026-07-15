@@ -165,6 +165,58 @@ class FredFormattingTests(unittest.TestCase):
         self.assertEqual(obs_params["observation_start"], "2025-07-02")  # 90d back
         self.assertEqual(obs_params["vintage_dates"], "2025-09-30")
 
+    def test_daily_initial_release_query_uses_observation_window(self):
+        captured = []
+
+        def _capture(path, params):
+            captured.append((path, params))
+            if path == "series":
+                return _META
+            return _initial_releases(_OBS) if params.get("output_type") == 4 else _OBS
+
+        with mock.patch.object(fred, "_request", side_effect=_capture):
+            fred.get_macro_data("vix", "2026-07-14", 365)
+
+        release_requests = [
+            params for path, params in captured
+            if path == "series/observations" and params.get("output_type") == 4
+        ]
+        self.assertEqual(len(release_requests), 1)
+        self.assertEqual(release_requests[0]["realtime_start"], "2025-07-14")
+        self.assertEqual(release_requests[0]["realtime_end"], "2026-07-14")
+        self.assertNotEqual(release_requests[0]["realtime_start"], "1776-07-04")
+
+    def test_long_vintage_range_is_chunked_and_earliest_release_wins(self):
+        observation = {"observations": [{"date": "2015-08-01", "value": "4.4"}]}
+        captured_release_requests = []
+
+        def _response(path, params):
+            if path == "series":
+                return _META
+            if not params.get("output_type") == 4:
+                return observation
+            captured_release_requests.append(params)
+            if len(captured_release_requests) == 1:
+                return {"observations": [{
+                    "date": "2015-08-01", "value": "4.1",
+                    "realtime_start": "2015-09-04",
+                }]}
+            return {"observations": [{
+                "date": "2015-08-01", "value": "4.2",
+                "realtime_start": "2020-01-10",
+            }]}
+
+        with mock.patch.object(fred, "_request", side_effect=_response):
+            out = fred.get_macro_data("unemployment", "2026-07-14", 4000)
+
+        self.assertEqual(len(captured_release_requests), 3)
+        for params in captured_release_requests:
+            start = fred.datetime.strptime(params["realtime_start"], "%Y-%m-%d")
+            end = fred.datetime.strptime(params["realtime_end"], "%Y-%m-%d")
+            self.assertLess((end - start).days, fred.MAX_VINTAGE_WINDOW_DAYS)
+        self.assertEqual(out.observations[0].published_at, "2015-09-04")
+        self.assertEqual(out.observations[0].revision_status, "revised")
+
     def test_point_in_time_uses_cutoff_vintage_and_marks_revision(self):
         from tradingagents.runtime.audit_context import (
             bind_analysis_mode, bind_information_cutoff, bind_run_id,

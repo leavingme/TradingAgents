@@ -102,6 +102,7 @@
   - 2026-07-17 22:30 CST 的真实 systemd timer 新进程已加载 canonical DB fail-closed 版本，正常返回 NVDA `not_due`、exit 0，未读取工作区回退历史、未创建 run、未调用 LLM/vendor；这补足了 CLI/Web 之外的无人值守入口运行态证据。
   - manifest v3 虽排除了纯 evaluation 展示代码，却没有显式绑定会进入后续 agent 历史上下文的评分/计量政策；改变 Hold band 或 horizon 可能在同一 fingerprint 下改变校准语义。v4 现绑定 `post-decision-day-close-v1`、`alpha-exposure-v1`、Hold band `0.02` 与默认 5-session horizon，并将 horizon 默认值统一为 evaluation、settlement、pending CLI/API 与比较器共享的单一常量。
   - 运行中 `/api/evaluations` 的零样本比较已验证：正式 NVDA baseline/challenger 返回 `sample_progress=0:0`、门槛 20、`sufficient=false`，并明确列出两条 `missing_architectures`；实验尚未授权或启动时不会伪造 pair 诊断。
+  - 2026-07-17 22:45 CST 的 systemd timer 独立新进程已实际加载 manifest v4 与统一 evaluation horizon 依赖，正常返回 NVDA `not_due`、exit 0；CLI help、生产 schedule status、Web evaluation API 与 timer 四个正式入口均未出现循环导入或数据库路径分叉。
 
   - 本轮新增纵向上下文 v3、数据库时点过滤、轻量 agent 查询与结构化 agent 回归证据；相关门禁扩大至 127 项并全部通过。
   - 评分身份现逐条保存 `alpha-exposure-v1` 与 Hold band；History Store 会按声明策略重算并校验 exposure、directional hit 与 score，rollup 按评分策略隔离，baseline/challenger 评分策略不唯一或不一致时比较器 fail closed，防止伪造分数或换评分尺冒充 agent 改进。相关纵向、history、memory、runtime、结构化 agent、调度与 CLI/Web 回归 202 项通过。

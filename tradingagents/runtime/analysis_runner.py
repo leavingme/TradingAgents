@@ -18,7 +18,11 @@ from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.graph.checkpointer import get_checkpointer, thread_id
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import write_report_tree
-from tradingagents.architecture import architecture_fingerprint, build_architecture_manifest
+from tradingagents.architecture import (
+    architecture_experiment_input_identity,
+    architecture_fingerprint,
+    build_architecture_manifest,
+)
 
 from .config_builder import build_runtime_config
 from .events import AnalysisEvent, AnalysisRequest, AnalysisResult, utc_timestamp
@@ -362,6 +366,10 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
         if stats_event is not None:
             yield stats_event
         decision_as_of = utc_timestamp()
+        experiment_input = architecture_experiment_input_identity({
+            **init_agent_state,
+            **final_state,
+        })
         yield AnalysisEvent(
             type="run_completed",
             run_id=request.run_id,
@@ -371,6 +379,9 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
                 "decision": final_state.get("final_trade_decision"),
                 "decision_status": final_state.get("decision_status", "unavailable"),
                 "decision_as_of": decision_as_of,
+                "architecture_input_schema": experiment_input["schema"],
+                "architecture_input_fingerprint": experiment_input["fingerprint"],
+                "architecture_input_complete": experiment_input["complete"],
                 "report_path": str(report_path),
             },
         )

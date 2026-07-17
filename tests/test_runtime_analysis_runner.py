@@ -196,6 +196,11 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert isinstance(completed.content, dict)
     assert completed.content["decision"] == "Hold"
     assert completed.content["decision_as_of"] == completed.timestamp
+    assert completed.content["architecture_input_schema"] == (
+        "tradingagents/research-manager-pre-context-input/v1"
+    )
+    assert len(completed.content["architecture_input_fingerprint"]) == 64
+    assert completed.content["architecture_input_complete"] is False
     assert Path(completed.content["report_path"]).exists()
     stored = history_store.get_run("run-1")
     manifest = json.loads(stored["architecture_manifest_json"])

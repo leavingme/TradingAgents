@@ -74,6 +74,9 @@ def test_history_migrates_legacy_evaluations_to_explicit_scoring_policy(tmp_path
     assert columns["analysis_data_status"]["dflt_value"] == "'not_observed'"
     assert columns["analysis_evidence_fingerprint"]["dflt_value"] is None
     assert int(columns["analysis_evidence_complete"]["dflt_value"]) == 0
+    assert columns["architecture_input_schema"]["dflt_value"] is None
+    assert columns["architecture_input_fingerprint"]["dflt_value"] is None
+    assert int(columns["architecture_input_complete"]["dflt_value"]) == 0
 
 
 def test_analysis_evidence_identity_ignores_execution_noise_but_binds_results():
@@ -423,12 +426,13 @@ def test_longitudinal_context_is_structured_audited_and_cutoff_safe(
     context = json.loads(store.get_longitudinal_context(
         "NVDA", information_cutoff="2026-07-10T16:00:01-04:00"
     ))
-    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v6"
+    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v7"
     assert context["same_symbol_outcomes"][0]["run_id"] == "evaluated-nvda"
     assert context["same_symbol_outcomes"][0]["directional_hit"] is True
     assert context["same_symbol_outcomes"][0]["measurement_version"] == "post-decision-day-close-v1"
     assert context["same_symbol_outcomes"][0]["analysis_data_status"] == "not_observed"
     assert context["same_symbol_outcomes"][0]["analysis_evidence_complete"] == 0
+    assert context["same_symbol_outcomes"][0]["architecture_input_complete"] == 0
     assert "reflection" not in context["same_symbol_outcomes"][0]
     rollup = context["same_symbol_architecture_rollups"][0]
     assert rollup["sample_count"] == 1

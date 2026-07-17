@@ -19,6 +19,9 @@ AGENT_ARCHITECTURE_VERSION = os.environ.get(
 )
 
 IMPLEMENTATION_DIGEST_SCOPE = "tradingagents/**/*.py"
+ARCHITECTURE_EXPERIMENT_INPUT_SCHEMA = (
+    "tradingagents/research-manager-pre-context-input/v1"
+)
 _SCALAR_DECISION_CONFIG_KEYS = (
     "max_debate_rounds",
     "max_risk_discuss_rounds",
@@ -134,3 +137,48 @@ def build_architecture_manifest(
 def architecture_fingerprint(manifest: dict[str, Any]) -> str:
     canonical = json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def architecture_experiment_input_identity(state: dict[str, Any]) -> dict[str, Any]:
+    """Fingerprint the state immediately before the supported RM context branch.
+
+    The current shadow template changes only Research Manager longitudinal-context
+    injection. Its treatment fields are intentionally absent from this manifest;
+    upstream instrument context and debate history must otherwise be identical for
+    a pair to support causal attribution.
+    """
+    debate = state.get("investment_debate_state")
+    debate_history = debate.get("history") if isinstance(debate, dict) else None
+    instrument_context = state.get("instrument_context")
+    manifest = {
+        "schema": ARCHITECTURE_EXPERIMENT_INPUT_SCHEMA,
+        "ticker": state.get("company_of_interest"),
+        "analysis_date": state.get("trade_date"),
+        "asset_type": state.get("asset_type"),
+        "instrument_context": instrument_context,
+        "investment_debate_history": debate_history,
+    }
+    complete = bool(instrument_context) and bool(debate_history)
+    try:
+        canonical = json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError):
+        # Unsupported objects must not acquire potentially unstable repr-based
+        # identities. Retain an auditable but deliberately incomplete marker.
+        complete = False
+        canonical = json.dumps({
+            "schema": ARCHITECTURE_EXPERIMENT_INPUT_SCHEMA,
+            "ticker": state.get("company_of_interest"),
+            "analysis_date": state.get("trade_date"),
+            "asset_type": state.get("asset_type"),
+            "serialization_error": True,
+        }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return {
+        "schema": ARCHITECTURE_EXPERIMENT_INPUT_SCHEMA,
+        "fingerprint": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        "complete": complete,
+    }

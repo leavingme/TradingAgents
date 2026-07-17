@@ -740,6 +740,7 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         "mean_score": 0.03,
         "analysis_data_status_counts": {"not_observed": 1},
         "analysis_evidence_complete_count": 0,
+        "architecture_input_complete_count": 0,
         "runtime_seconds_sample_count": 1,
         "mean_runtime_seconds": 120.0,
         "llm_calls_sample_count": 1,

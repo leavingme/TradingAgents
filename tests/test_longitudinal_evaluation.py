@@ -21,6 +21,11 @@ def _comparable_input_evidence(index: int) -> dict:
         "analysis_data_status": "available",
         "analysis_evidence_complete": True,
         "analysis_evidence_fingerprint": f"evidence-{index}",
+        "architecture_input_schema": (
+            "tradingagents/research-manager-pre-context-input/v1"
+        ),
+        "architecture_input_complete": True,
+        "architecture_input_fingerprint": f"branch-input-{index}",
     }
 
 
@@ -64,6 +69,11 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
             "decision": "Rating: Buy",
             "decision_status": "validated",
             "decision_as_of": "2026-07-01T21:00:00+00:00",
+            "architecture_input_schema": (
+                "tradingagents/research-manager-pre-context-input/v1"
+            ),
+            "architecture_input_fingerprint": "upstream-state-1",
+            "architecture_input_complete": True,
         },
     ))
     store.mark_finished(
@@ -117,6 +127,11 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert rows[0]["analysis_data_status"] == "not_observed"
     assert rows[0]["analysis_evidence_complete"] == 0
     assert len(rows[0]["analysis_evidence_fingerprint"]) == 64
+    assert rows[0]["architecture_input_schema"] == (
+        "tradingagents/research-manager-pre-context-input/v1"
+    )
+    assert rows[0]["architecture_input_fingerprint"] == "upstream-state-1"
+    assert rows[0]["architecture_input_complete"] == 1
     assert rows[0]["hold_band"] == 0.02
     lightweight = store.list_decision_evaluations(
         ticker="nvda",
@@ -596,4 +611,44 @@ def test_architecture_pairing_requires_identical_analysis_input_evidence():
     )
     assert comparison["paired"]["sample_count"] == 19
     assert comparison["paired"]["evidence_mismatches_excluded"] == 1
+    assert comparison["passes_paired_gate"] is False
+
+
+def test_paired_comparison_excludes_changed_pre_treatment_agent_state():
+    evaluations = []
+    for index in range(20):
+        for version, score in (("baseline", 0.01), ("challenger", 0.02)):
+            evaluations.append({
+                "ticker": "NVDA",
+                "analysis_date": f"2026-01-{index + 1:02d}",
+                "horizon_sessions": 5,
+                "architecture_version": version,
+                "architecture_fingerprint": f"fingerprint-{version}",
+                "measurement_version": "post-decision-day-close-v1",
+                "scoring_version": "alpha-exposure-v1",
+                "hold_band": 0.02,
+                "directional_hit": True,
+                "raw_return": 0.03,
+                "benchmark_return": 0.01,
+                "alpha_return": 0.02,
+                "entry_date": f"2026-06-{index + 1:02d}",
+                "exit_date": f"2026-07-{index + 1:02d}",
+                "stock_entry_close": 100.0,
+                "stock_exit_close": 103.0,
+                "benchmark_entry_close": 500.0,
+                "benchmark_exit_close": 505.0,
+                "stock_entry_source_id": f"ohlcv:test:stock-entry:{index}",
+                "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
+                "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
+                "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "run_started_at": _shadow_started_at(index, version),
+                "score": score,
+                **_comparable_input_evidence(index),
+            })
+    evaluations[-1]["architecture_input_fingerprint"] = "different-upstream-state"
+    comparison = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert comparison["paired"]["sample_count"] == 19
+    assert comparison["paired"]["architecture_input_mismatches_excluded"] == 1
     assert comparison["passes_paired_gate"] is False

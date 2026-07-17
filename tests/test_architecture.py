@@ -95,3 +95,49 @@ def test_manifest_captures_only_safe_decision_affecting_config(monkeypatch):
     assert architecture.architecture_fingerprint(first) != architecture.architecture_fingerprint(
         second
     )
+
+
+def test_experiment_input_identity_excludes_treatment_and_binds_upstream_state():
+    state = {
+        "company_of_interest": "NVDA",
+        "trade_date": "2026-07-17",
+        "asset_type": "stock",
+        "instrument_context": {"exchange": "NASDAQ", "currency": "USD"},
+        "investment_debate_state": {"history": "Bull: growth\nBear: valuation"},
+        "past_context": "baseline context",
+        "longitudinal_context_mode": "portfolio_only",
+    }
+    baseline = architecture.architecture_experiment_input_identity(state)
+    challenger = architecture.architecture_experiment_input_identity({
+        **state,
+        "past_context": "challenger context",
+        "longitudinal_context_mode": "research_and_portfolio",
+    })
+    changed_upstream = architecture.architecture_experiment_input_identity({
+        **state,
+        "investment_debate_state": {"history": "Different debate"},
+    })
+
+    assert baseline["schema"] == (
+        "tradingagents/research-manager-pre-context-input/v1"
+    )
+    assert baseline["complete"] is True
+    assert baseline["fingerprint"] == challenger["fingerprint"]
+    assert baseline["fingerprint"] != changed_upstream["fingerprint"]
+
+
+def test_experiment_input_identity_marks_missing_branch_inputs_incomplete():
+    identity = architecture.architecture_experiment_input_identity({
+        "company_of_interest": "NVDA",
+        "trade_date": "2026-07-17",
+    })
+    assert identity["complete"] is False
+    assert len(identity["fingerprint"]) == 64
+
+    unsupported = architecture.architecture_experiment_input_identity({
+        "company_of_interest": "NVDA",
+        "trade_date": "2026-07-17",
+        "instrument_context": {"unsupported": object()},
+        "investment_debate_state": {"history": "Debate"},
+    })
+    assert unsupported["complete"] is False

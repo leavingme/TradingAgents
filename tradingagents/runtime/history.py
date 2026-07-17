@@ -179,6 +179,9 @@ class RunHistoryStore:
                         analysis_data_status TEXT NOT NULL DEFAULT 'not_observed',
                         analysis_evidence_fingerprint TEXT,
                         analysis_evidence_complete INTEGER NOT NULL DEFAULT 0,
+                        architecture_input_schema TEXT,
+                        architecture_input_fingerprint TEXT,
+                        architecture_input_complete INTEGER NOT NULL DEFAULT 0,
                         scoring_version       TEXT NOT NULL DEFAULT 'alpha-exposure-v1',
                         hold_band             REAL NOT NULL DEFAULT 0.02,
                         evaluated_at          TEXT NOT NULL,
@@ -249,6 +252,21 @@ class RunHistoryStore:
                     conn.execute(
                         "ALTER TABLE decision_evaluations ADD COLUMN "
                         "analysis_evidence_complete INTEGER NOT NULL DEFAULT 0"
+                    )
+                if "architecture_input_schema" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "architecture_input_schema TEXT"
+                    )
+                if "architecture_input_fingerprint" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "architecture_input_fingerprint TEXT"
+                    )
+                if "architecture_input_complete" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "architecture_input_complete INTEGER NOT NULL DEFAULT 0"
                     )
                 if "hold_band" not in evaluation_columns:
                     conn.execute(
@@ -612,6 +630,17 @@ class RunHistoryStore:
         evidence_identity = analysis_evidence_identity(
             self.get_vendor_calls(str(record["run_id"]))
         )
+        architecture_input_schema = terminal["content"].get(
+            "architecture_input_schema"
+        )
+        architecture_input_fingerprint = terminal["content"].get(
+            "architecture_input_fingerprint"
+        )
+        architecture_input_complete = bool(
+            terminal["content"].get("architecture_input_complete")
+            and architecture_input_schema
+            and architecture_input_fingerprint
+        )
         with self._lock:
             with self._conn() as conn:
                 conn.execute(
@@ -631,8 +660,10 @@ class RunHistoryStore:
                         measurement_version,
                         analysis_data_status, analysis_evidence_fingerprint,
                         analysis_evidence_complete,
+                        architecture_input_schema, architecture_input_fingerprint,
+                        architecture_input_complete,
                         evaluated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record["run_id"], record["horizon_sessions"],
@@ -660,6 +691,9 @@ class RunHistoryStore:
                         evidence_identity["data_status"],
                         evidence_identity["fingerprint"],
                         int(bool(evidence_identity["complete"])),
+                        architecture_input_schema,
+                        architecture_input_fingerprint,
+                        int(architecture_input_complete),
                         evaluated_at,
                     ),
                 )
@@ -817,13 +851,15 @@ class RunHistoryStore:
             "measurement_version",
             "analysis_data_status",
             "analysis_evidence_complete",
+            "architecture_input_schema",
+            "architecture_input_complete",
             "hold_band",
             "architecture_version",
             "architecture_fingerprint",
             "evaluated_at",
         )
         payload = {
-            "schema": "tradingagents/audited-longitudinal-outcomes/v6",
+            "schema": "tradingagents/audited-longitudinal-outcomes/v7",
             "interpretation": (
                 "Historical calibration evidence only. Outcomes do not prove causality, "
                 "may come from a different market regime, and cannot authorize trade levels."

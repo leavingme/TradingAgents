@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from math import isfinite, sqrt
 from statistics import fmean, stdev
 from typing import Any
@@ -95,6 +96,18 @@ def _runtime_cost_value(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return numeric if isfinite(numeric) and numeric >= 0 else None
+
+
+def _utc_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _overlap_adjusted_standard_error(
@@ -297,14 +310,21 @@ def compare_architectures(
     minimum_samples: int = 20,
     minimum_paired_samples: int = 20,
     minimum_score_improvement: float = 0.002,
+    maximum_pair_start_gap_seconds: float = 3600.0,
 ) -> dict[str, Any]:
     """Return a conservative promotion gate, never an automatic mutation.
 
     Pairing uses identical ticker, analysis date, and horizon. Market outcomes
-    must match across variants; ambiguous duplicates or mismatched outcomes are
-    excluded. Even a positive paired result remains ``review_required`` so this
-    function can never mutate or promote the production architecture.
+    must match across variants and both runs must start within the configured
+    shadow window; ambiguous duplicates or mismatched outcomes are excluded.
+    Even a positive paired result remains ``review_required`` so this function
+    can never mutate or promote the production architecture.
     """
+    if (
+        not isfinite(float(maximum_pair_start_gap_seconds))
+        or float(maximum_pair_start_gap_seconds) <= 0
+    ):
+        raise ValueError("maximum_pair_start_gap_seconds must be finite and positive")
     rollups = {
         row["architecture_version"]: row
         for row in architecture_rollups(evaluations)
@@ -393,8 +413,19 @@ def compare_architectures(
     ambiguous_pairs = 0
     outcome_mismatches = 0
     provenance_mismatches = 0
+    temporal_mismatches = 0
+    execution_order_counts = {
+        "baseline_first": 0,
+        "challenger_first": 0,
+        "missing_or_tied": 0,
+    }
+    paired_start_gaps: list[float] = []
     paired_cost_deltas: dict[str, list[float]] = {
         field: [] for field in _RUNTIME_COST_FIELDS
+    }
+    ordered_cost_deltas: dict[str, dict[str, list[float]]] = {
+        order: {field: [] for field in _RUNTIME_COST_FIELDS}
+        for order in ("baseline_first", "challenger_first")
     }
     for variants in grouped.values():
         base_rows = variants.get(baseline, [])
@@ -447,6 +478,23 @@ def compare_architectures(
         ):
             provenance_mismatches += 1
             continue
+        base_started = _utc_timestamp(base_row.get("run_started_at"))
+        challenger_started = _utc_timestamp(challenger_row.get("run_started_at"))
+        if base_started is None or challenger_started is None:
+            temporal_mismatches += 1
+            continue
+        start_gap = abs((challenger_started - base_started).total_seconds())
+        if start_gap > maximum_pair_start_gap_seconds:
+            temporal_mismatches += 1
+            continue
+        paired_start_gaps.append(start_gap)
+        if base_started < challenger_started:
+            execution_order = "baseline_first"
+        elif challenger_started < base_started:
+            execution_order = "challenger_first"
+        else:
+            execution_order = "missing_or_tied"
+        execution_order_counts[execution_order] += 1
         score_delta = float(challenger_row["score"]) - float(base_row["score"])
         paired_deltas.append(score_delta)
         paired_delta_series[str(base_row["ticker"]).upper()].append(
@@ -469,6 +517,8 @@ def compare_architectures(
             delta = challenger_value - base_value
             if isfinite(delta):
                 paired_cost_deltas[field].append(delta)
+                if execution_order in ordered_cost_deltas:
+                    ordered_cost_deltas[execution_order][field].append(delta)
 
     paired_count = len(paired_deltas)
     paired_summary: dict[str, Any] = {
@@ -479,6 +529,8 @@ def compare_architectures(
         "ambiguous_pairs_excluded": ambiguous_pairs,
         "outcome_mismatches_excluded": outcome_mismatches,
         "provenance_mismatches_excluded": provenance_mismatches,
+        "temporal_mismatches_excluded": temporal_mismatches,
+        "maximum_pair_start_gap_seconds": maximum_pair_start_gap_seconds,
     }
     passes_paired_gate = False
     if paired_count:
@@ -519,6 +571,23 @@ def compare_architectures(
             and lower_95 >= minimum_score_improvement
         )
 
+    known_order_pairs = (
+        execution_order_counts["baseline_first"]
+        + execution_order_counts["challenger_first"]
+    )
+    order_imbalance = abs(
+        execution_order_counts["baseline_first"]
+        - execution_order_counts["challenger_first"]
+    )
+    if execution_order_counts["missing_or_tied"]:
+        cost_comparison_status = "unverifiable_order"
+    elif known_order_pairs < 2:
+        cost_comparison_status = "insufficient_order_samples"
+    elif order_imbalance <= 1:
+        cost_comparison_status = "counterbalanced"
+    else:
+        cost_comparison_status = "order_confounded"
+
     return {
         "status": "review_required",
         "reason": (
@@ -532,9 +601,28 @@ def compare_architectures(
         "architecture_fingerprints": fingerprints,
         "scoring_policies": scoring_policies,
         "paired": paired_summary,
+        "execution_order": {
+            **execution_order_counts,
+            "imbalance": order_imbalance,
+            "cost_comparison_status": cost_comparison_status,
+            "mean_start_gap_seconds": (
+                fmean(paired_start_gaps) if paired_start_gaps else None
+            ),
+            "max_start_gap_seconds": max(paired_start_gaps, default=None),
+        },
         "paired_costs": {
             field: _paired_cost_summary(values, paired_count)
             for field, values in paired_cost_deltas.items()
+        },
+        "paired_costs_by_execution_order": {
+            order: {
+                field: _paired_cost_summary(
+                    values,
+                    execution_order_counts[order],
+                )
+                for field, values in fields.items()
+            }
+            for order, fields in ordered_cost_deltas.items()
         },
         "baseline": base,
         "challenger": challenge,

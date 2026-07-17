@@ -255,6 +255,65 @@ def _runs_for_market_date(
     ]
 
 
+def _completed_shadow_pair_count(
+    store: RunHistoryStore,
+    *,
+    symbol: str,
+    analysis_date: str,
+    architecture_versions: tuple[str, ...],
+) -> int:
+    """Count prior dates where every configured shadow variant completed.
+
+    Only fully observed pairs influence the next rotation.  A failed or missing
+    arm cannot enter a paired outcome comparison, so letting it advance the
+    sequence would reintroduce cold/warm-cache imbalance among usable samples.
+    """
+    required = set(architecture_versions)
+    completed_by_date: dict[str, set[str]] = {}
+    for row in store.list_runs(limit=10_000):
+        row_date = str(row.get("analysis_date") or "")
+        version = str(row.get("architecture_version") or "")
+        if (
+            str(row.get("ticker") or "").upper() != symbol
+            or row_date >= analysis_date
+            or version not in required
+            or str(row.get("status")) not in {"completed", "review_required"}
+        ):
+            continue
+        completed_by_date.setdefault(row_date, set()).add(version)
+    return sum(required.issubset(versions) for versions in completed_by_date.values())
+
+
+def _counterbalanced_target_indices(
+    schedule: DailySchedule,
+    *,
+    analysis_dates: dict[int, str],
+    store: RunHistoryStore,
+) -> list[int]:
+    """Rotate same-symbol shadow arms across completed paired observations."""
+    ordered = list(range(len(schedule.targets)))
+    groups: dict[tuple[str, str], list[int]] = {}
+    for index, analysis_date in analysis_dates.items():
+        target = schedule.targets[index]
+        groups.setdefault((target.symbol, analysis_date), []).append(index)
+    for (symbol, analysis_date), positions in groups.items():
+        if len(positions) < 2:
+            continue
+        versions = tuple(
+            schedule.targets[index].architecture_version for index in positions
+        )
+        rotation = _completed_shadow_pair_count(
+            store,
+            symbol=symbol,
+            analysis_date=analysis_date,
+            architecture_versions=versions,
+        ) % len(positions)
+        rotated = positions[rotation:] + positions[:rotation]
+        for destination, source in zip(positions, rotated):
+            ordered[destination] = source
+    return ordered
+
+
 def _parse_timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
@@ -340,13 +399,38 @@ def run_due_analyses(
         if not acquired:
             return [{"status": "locked", "reason": "another scheduler invocation is active"}]
         outcomes: list[dict[str, Any]] = []
-        for target in schedule.targets:
+        analysis_dates: dict[int, str] = {}
+        date_by_symbol: dict[str, str] = {}
+        for index, target in enumerate(schedule.targets):
             if not target.is_due(current):
+                continue
+            if target.symbol not in date_by_symbol:
+                date_by_symbol[target.symbol] = latest_completed_daily_bar_date(
+                    target.symbol, now=current
+                ).date().isoformat()
+            analysis_dates[index] = date_by_symbol[target.symbol]
+        ordered_indices = _counterbalanced_target_indices(
+            schedule,
+            analysis_dates=analysis_dates,
+            store=store,
+        )
+        group_sizes: dict[tuple[str, str], int] = {}
+        for index, analysis_date in analysis_dates.items():
+            target = schedule.targets[index]
+            key = (target.symbol, analysis_date)
+            group_sizes[key] = group_sizes.get(key, 0) + 1
+        group_positions: dict[tuple[str, str], int] = {}
+
+        for target_index in ordered_indices:
+            target = schedule.targets[target_index]
+            analysis_date = analysis_dates.get(target_index)
+            if analysis_date is None:
                 outcomes.append({"symbol": target.symbol, "status": "not_due"})
                 continue
-            analysis_date = latest_completed_daily_bar_date(
-                target.symbol, now=current
-            ).date().isoformat()
+            group_key = (target.symbol, analysis_date)
+            group_positions[group_key] = group_positions.get(group_key, 0) + 1
+            execution_order = group_positions[group_key]
+            execution_group_size = group_sizes[group_key]
             existing = _runs_for_market_date(
                 store,
                 target.symbol,
@@ -369,6 +453,8 @@ def run_due_analyses(
                         "run_status": latest.get("status"),
                         "decision_status": latest.get("decision_status"),
                         "architecture_version": target.architecture_version,
+                        "planned_execution_order": execution_order,
+                        "execution_group_size": execution_group_size,
                         **(
                             {"retry_at": latest["retry_at"]}
                             if latest.get("retry_at")
@@ -409,6 +495,8 @@ def run_due_analyses(
                         "deep_think_llm": request.deep_think_llm,
                         "architecture_version": request.architecture_version,
                         "longitudinal_context_mode": request.longitudinal_context_mode,
+                        "planned_execution_order": execution_order,
+                        "execution_group_size": execution_group_size,
                     }
                 )
                 continue
@@ -423,6 +511,9 @@ def run_due_analyses(
                         "run_id": run_id,
                         "error_type": type(exc).__name__,
                         "error": str(exc),
+                        "architecture_version": target.architecture_version,
+                        "planned_execution_order": execution_order,
+                        "execution_group_size": execution_group_size,
                     }
                 )
                 continue
@@ -434,6 +525,8 @@ def run_due_analyses(
                     "run_id": result.run_id,
                     "decision_status": result.decision_status,
                     "architecture_version": target.architecture_version,
+                    "planned_execution_order": execution_order,
+                    "execution_group_size": execution_group_size,
                     "report_path": str(result.report_path) if result.report_path else None,
                 }
             )

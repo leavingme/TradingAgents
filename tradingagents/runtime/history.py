@@ -552,7 +552,7 @@ class RunHistoryStore:
                 final_stats[str(stats_row["run_id"])] = payload
         for row in rows:
             row["runtime_seconds"] = _elapsed_seconds(
-                row.pop("run_started_at", None), row.pop("run_finished_at", None)
+                row.get("run_started_at"), row.get("run_finished_at")
             )
             stats = final_stats.get(str(row["run_id"]), {})
             for field in ("llm_calls", "tool_calls", "tokens_in", "tokens_out"):

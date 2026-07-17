@@ -70,6 +70,134 @@ def test_schedule_allows_paired_shadow_versions_for_same_symbol():
     ]
 
 
+def test_completed_shadow_pairs_counterbalance_cold_cache_execution_order(
+    tmp_path, monkeypatch
+):
+    common = {
+        "symbol": "NVDA",
+        "timezone": "America/New_York",
+        "run_after": "16:30",
+    }
+    schedule = DailySchedule.from_dict({
+        "enabled": True,
+        "targets": [
+            {**common, "architecture_version": "baseline"},
+            {**common, "architecture_version": "challenger"},
+        ],
+    })
+    store = RunHistoryStore(tmp_path / "runs.db")
+    captured = []
+
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: now,
+    )
+
+    def execute(request):
+        captured.append((request.analysis_date, request.architecture_version))
+        store.create_run(
+            request.run_id,
+            request.ticker,
+            request.analysis_date,
+            request.asset_type,
+            request.selected_analysts,
+            request.llm_provider,
+            request.research_depth,
+            architecture_version=request.architecture_version,
+        )
+        store.mark_finished(request.run_id, "completed")
+        return SimpleNamespace(
+            run_id=request.run_id,
+            decision_status="validated",
+            report_path=None,
+        )
+
+    first = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 16, 45, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+    second = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 20, 16, 45, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert captured == [
+        ("2026-07-17", "baseline"),
+        ("2026-07-17", "challenger"),
+        ("2026-07-20", "challenger"),
+        ("2026-07-20", "baseline"),
+    ]
+    assert [
+        (row["architecture_version"], row["planned_execution_order"])
+        for row in first
+    ] == [
+        ("baseline", 1),
+        ("challenger", 2),
+    ]
+    assert [
+        (row["architecture_version"], row["planned_execution_order"])
+        for row in second
+    ] == [
+        ("challenger", 1),
+        ("baseline", 2),
+    ]
+    assert {row["execution_group_size"] for row in first + second} == {2}
+
+
+def test_incomplete_shadow_pair_does_not_advance_counterbalance(tmp_path, monkeypatch):
+    common = {
+        "symbol": "NVDA",
+        "timezone": "America/New_York",
+        "run_after": "16:30",
+    }
+    schedule = DailySchedule.from_dict({
+        "enabled": True,
+        "targets": [
+            {**common, "architecture_version": "baseline"},
+            {**common, "architecture_version": "challenger"},
+        ],
+    })
+    store = RunHistoryStore(tmp_path / "runs.db")
+    for version, status in (("baseline", "completed"), ("challenger", "failed")):
+        run_id = f"{version}-incomplete-pair"
+        store.create_run(
+            run_id,
+            "NVDA",
+            "2026-07-17",
+            "stock",
+            ["market"],
+            "minimax-cn",
+            1,
+            architecture_version=version,
+        )
+        store.mark_finished(run_id, status)
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: now,
+    )
+
+    result = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 20, 16, 45, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        dry_run=True,
+    )
+
+    assert [row["architecture_version"] for row in result] == [
+        "baseline",
+        "challenger",
+    ]
+
+
 def test_runtime_preferences_reuse_server_models_and_vendor_order(tmp_path):
     path = tmp_path / "web.json"
     path.write_text(

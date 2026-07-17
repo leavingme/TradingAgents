@@ -9,6 +9,13 @@ from tradingagents.runtime.events import AnalysisEvent
 from tradingagents.runtime.history import RunHistoryStore
 
 
+def _shadow_started_at(index: int, version: str) -> str:
+    baseline_first = index % 2 == 0
+    is_first = (version == "baseline") == baseline_first
+    minute = 0 if is_first else 1
+    return f"2026-01-{index + 1:02d}T20:{minute:02d}:00+00:00"
+
+
 def test_deterministic_direction_and_hold_scoring():
     assert score_outcome("Buy", 0.03)["directional_hit"] is True
     assert score_outcome("Sell", -0.03)["directional_hit"] is True
@@ -78,6 +85,8 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert rows[0]["evaluated_by_run_id"] == "run-2"
     assert rows[0]["directional_hit"] == 1
     assert rows[0]["runtime_seconds"] == 150.0
+    assert rows[0]["run_started_at"] == "2026-07-01T20:00:00+00:00"
+    assert rows[0]["run_finished_at"] == "2026-07-01T20:02:30+00:00"
     assert rows[0]["llm_calls"] == 12
     assert rows[0]["tool_calls"] == 24
     assert rows[0]["tokens_in"] == 1200
@@ -205,6 +214,7 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
                 "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
                 "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "run_started_at": _shadow_started_at(index, version),
                 "runtime_seconds": 100.0 if version == "baseline" else 80.0,
                 "llm_calls": 10 if version == "baseline" else 8,
                 "tool_calls": 20 if version == "baseline" else 18,
@@ -226,6 +236,20 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert comparison["paired_costs"]["tokens_in"]["mean_delta"] == -200.0
     assert comparison["paired_costs"]["tokens_in"]["mean_reduction"] == 200.0
     assert comparison["paired_costs"]["runtime_seconds"]["mean_reduction"] == 20.0
+    assert comparison["execution_order"]["baseline_first"] == 10
+    assert comparison["execution_order"]["challenger_first"] == 10
+    assert comparison["execution_order"]["cost_comparison_status"] == "counterbalanced"
+    assert comparison["paired_costs_by_execution_order"]["baseline_first"][
+        "tokens_in"
+    ]["sample_count"] == 10
+
+    evaluations[-1]["run_started_at"] = "2026-01-20T22:00:00+00:00"
+    delayed = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert delayed["paired"]["sample_count"] == 19
+    assert delayed["paired"]["temporal_mismatches_excluded"] == 1
+    assert delayed["passes_paired_gate"] is False
 
 
 def test_architecture_comparison_rejects_mixed_configuration_fingerprints():
@@ -317,6 +341,7 @@ def test_architecture_pairing_requires_identical_ohlcv_provenance():
                 "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
                 "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "run_started_at": _shadow_started_at(index, version),
                 "score": score,
             })
     # Same prices are insufficient when one challenger used a different source.
@@ -356,6 +381,7 @@ def test_architecture_pairing_uses_student_t_not_normal_lower_bound():
                 "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
                 "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "run_started_at": _shadow_started_at(index, version),
                 "score": score,
             })
     comparison = compare_architectures(
@@ -392,6 +418,7 @@ def test_architecture_pairing_corrects_overlapping_horizon_autocorrelation():
                 "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
                 "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "run_started_at": _shadow_started_at(index, version),
                 "score": score,
             })
 

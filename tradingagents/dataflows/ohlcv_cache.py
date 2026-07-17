@@ -210,6 +210,11 @@ def _timezone_for_cache_key(cache_key: str) -> str | None:
     return _DEFAULT_MARKET_TIMEZONE
 
 
+def market_timezone_for_cache_key(cache_key: str) -> str:
+    """Return the canonical exchange timezone used for a daily OHLCV key."""
+    return _timezone_for_cache_key(cache_key) or "UTC"
+
+
 def _market_close_for_cache_key(cache_key: str) -> time:
     upper = cache_key.upper()
     for suffix, close_at in _MARKET_CLOSES.items():
@@ -219,7 +224,7 @@ def _market_close_for_cache_key(cache_key: str) -> time:
 
 
 def _local_now(cache_key: str, now: datetime | None = None) -> datetime:
-    timezone = ZoneInfo(_timezone_for_cache_key(cache_key) or "UTC")
+    timezone = ZoneInfo(market_timezone_for_cache_key(cache_key))
     if now is None:
         return datetime.now(timezone)
     if now.tzinfo is None:

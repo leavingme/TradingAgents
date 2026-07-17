@@ -73,16 +73,19 @@ def _outcome_measurement():
         benchmark_return=0.03,
         alpha_return=0.02,
         horizon_sessions=5,
-        entry_date="2026-01-05",
-        exit_date="2026-01-12",
+        entry_date="2026-01-06",
+        exit_date="2026-01-13",
         stock_entry_close=100.0,
         stock_exit_close=105.0,
         benchmark_entry_close=400.0,
         benchmark_exit_close=412.0,
-        stock_entry_source_id="ohlcv:test:stock-entry:2026-01-05",
-        stock_exit_source_id="ohlcv:test:stock-exit:2026-01-12",
-        benchmark_entry_source_id="ohlcv:test:bench-entry:2026-01-05",
-        benchmark_exit_source_id="ohlcv:test:bench-exit:2026-01-12",
+        stock_entry_source_id="ohlcv:test:stock-entry:2026-01-06",
+        stock_exit_source_id="ohlcv:test:stock-exit:2026-01-13",
+        benchmark_entry_source_id="ohlcv:test:bench-entry:2026-01-06",
+        benchmark_exit_source_id="ohlcv:test:bench-exit:2026-01-13",
+        decision_as_of="2026-01-05T22:00:00+00:00",
+        decision_timezone="America/New_York",
+        entry_cutoff_date="2026-01-05",
     )
 
 
@@ -563,13 +566,14 @@ class TestDeferredReflection:
             "NVDA",
             "2026-01-05",
             return_details=True,
+            decision_as_of="2026-01-05T22:00:00+00:00",
         )
         assert isinstance(measurement, OutcomeMeasurement)
         assert measurement.entry_date == "2026-01-06"
         assert measurement.exit_date == "2026-01-13"
         assert measurement.stock_entry_close == 100.0
         assert measurement.benchmark_entry_close == 400.0
-        assert measurement.measurement_version == "next-common-close-v1"
+        assert measurement.measurement_version == "post-decision-day-close-v1"
         assert measurement.stock_entry_source_id == "ohlcv:test:NVDA:2026-01-06"
         assert measurement.benchmark_exit_source_id == "ohlcv:test:SPY:2026-01-13"
 
@@ -580,6 +584,37 @@ class TestDeferredReflection:
             fetch.return_value = pd.DataFrame({"Date": ["2026-04-19"], "Close": [100.0]})
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-04-19")
         assert raw is None and alpha is None and days is None
+
+    def test_fetch_returns_uses_decision_market_day_not_old_analysis_day(
+        self, monkeypatch
+    ):
+        dates = pd.date_range("2026-01-05", periods=12, freq="B")
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        monkeypatch.setattr(
+            "tradingagents.dataflows.stockstats_utils.load_ohlcv",
+            lambda symbol, end: pd.DataFrame({
+                "Date": dates,
+                "Close": [400.0 + i if symbol == "SPY" else 100.0 + i for i in range(12)],
+            }),
+        )
+        monkeypatch.setattr(
+            "tradingagents.dataflows.config.get_config",
+            lambda: {"data_cache_dir": "/tmp/audited-cache"},
+        )
+        monkeypatch.setattr(
+            "tradingagents.dataflows.ohlcv_model.resolve_ohlcv_source_id",
+            lambda cache_dir, cache_key, date: f"ohlcv:test:{cache_key}:{date}",
+        )
+        measurement = TradingAgentsGraph._fetch_returns(
+            mock_graph,
+            "NVDA",
+            "2026-01-05",
+            return_details=True,
+            decision_as_of="2026-01-12T22:00:00+00:00",
+        )
+        assert measurement.entry_cutoff_date == "2026-01-12"
+        assert measurement.entry_date == "2026-01-13"
+        assert measurement.exit_date == "2026-01-20"
 
     def test_fetch_returns_delisted(self):
         """Empty DataFrame → returns (None, None, None), no crash."""
@@ -712,8 +747,10 @@ class TestDeferredReflection:
         mock_graph._fetch_returns.assert_not_called()
         assert len(log.get_pending_entries()) == 1
 
-    def test_resolve_marks_entry_completed(self, tmp_path):
+    def test_resolve_marks_entry_completed(self, tmp_path, monkeypatch):
         """After resolve, get_pending_entries() is empty and the entry has a REFLECTION."""
+        from tradingagents.runtime.history import history_store
+
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
         mock_reflector = MagicMock()
@@ -722,7 +759,30 @@ class TestDeferredReflection:
         mock_graph.memory_log = log
         mock_graph.reflector = mock_reflector
         mock_graph._fetch_returns = MagicMock(return_value=_outcome_measurement())
+        monkeypatch.setattr(
+            history_store,
+            "list_unevaluated_validated_runs",
+            lambda **kwargs: [{
+                "run_id": "prior-run",
+                "analysis_date": "2026-01-05",
+                "architecture_version": "baseline",
+            }],
+        )
+        monkeypatch.setattr(history_store, "get_run", lambda run_id: {
+            "events": [{
+                "type": "run_completed",
+                "timestamp": "2026-01-05T22:00:00+00:00",
+                "content": {
+                    "decision": DECISION_BUY,
+                    "decision_status": "validated",
+                    "decision_as_of": "2026-01-05T22:00:00+00:00",
+                },
+            }],
+        })
+        recorded = []
+        monkeypatch.setattr(history_store, "add_decision_evaluation", recorded.append)
         TradingAgentsGraph._resolve_pending_entries(mock_graph, "NVDA")
+        assert len(recorded) == 1
         assert log.get_pending_entries() == []
         entries = log.load_entries()
         assert len(entries) == 1
@@ -743,14 +803,20 @@ class TestDeferredReflection:
         mock_graph.reflector = MagicMock()
         mock_graph.reflector.reflect_on_final_decision.return_value = "Lesson."
         mock_graph._fetch_returns.return_value = _outcome_measurement()
-        monkeypatch.setattr(history_store, "find_runs", lambda **kwargs: [{
+        monkeypatch.setattr(history_store, "list_unevaluated_validated_runs", lambda **kwargs: [{
             "run_id": "prior-run",
+            "analysis_date": "2026-01-05",
             "architecture_version": "baseline",
         }])
         monkeypatch.setattr(history_store, "get_run", lambda run_id: {
             "events": [{
                 "type": "run_completed",
-                "content": {"decision": DECISION_BUY, "decision_status": "validated"},
+                "timestamp": "2026-01-05T22:00:00+00:00",
+                "content": {
+                    "decision": DECISION_BUY,
+                    "decision_status": "validated",
+                    "decision_as_of": "2026-01-05T22:00:00+00:00",
+                },
             }],
         })
         monkeypatch.setattr(
@@ -776,18 +842,35 @@ class TestDeferredReflection:
         mock_graph.reflector = MagicMock()
         mock_graph.reflector.reflect_on_final_decision.return_value = "Lesson."
         mock_graph._fetch_returns.return_value = _outcome_measurement()
-        monkeypatch.setattr(history_store, "find_runs", lambda **kwargs: [
-            {"run_id": "baseline-run", "architecture_version": "baseline"},
-            {"run_id": "challenger-run", "architecture_version": "challenger"},
+        monkeypatch.setattr(history_store, "list_unevaluated_validated_runs", lambda **kwargs: [
+            {
+                "run_id": "baseline-run",
+                "analysis_date": "2026-01-05",
+                "architecture_version": "baseline",
+            },
+            {
+                "run_id": "challenger-run",
+                "analysis_date": "2026-01-05",
+                "architecture_version": "challenger",
+            },
         ])
         decisions = {
             "baseline-run": DECISION_BUY,
             "challenger-run": DECISION_SELL,
         }
+        decision_times = {
+            "baseline-run": "2026-01-05T22:00:00+00:00",
+            "challenger-run": "2026-01-06T22:00:00+00:00",
+        }
         monkeypatch.setattr(history_store, "get_run", lambda run_id: {
             "events": [{
                 "type": "run_completed",
-                "content": {"decision": decisions[run_id], "decision_status": "validated"},
+                "timestamp": decision_times[run_id],
+                "content": {
+                    "decision": decisions[run_id],
+                    "decision_status": "validated",
+                    "decision_as_of": decision_times[run_id],
+                },
             }],
         })
         recorded = []
@@ -804,6 +887,13 @@ class TestDeferredReflection:
             (row["scoring_version"], row["hold_band"])
             for row in recorded
         } == {("alpha-exposure-v1", 0.02)}
+        assert {
+            row["measurement_version"] for row in recorded
+        } == {"post-decision-day-close-v1"}
+        assert {
+            call.kwargs["decision_as_of"]
+            for call in mock_graph._fetch_returns.call_args_list
+        } == set(decision_times.values())
 
 
 # ---------------------------------------------------------------------------

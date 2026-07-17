@@ -163,6 +163,9 @@ class RunHistoryStore:
                         stock_exit_source_id   TEXT,
                         benchmark_entry_source_id TEXT,
                         benchmark_exit_source_id  TEXT,
+                        decision_as_of        TEXT,
+                        decision_timezone     TEXT,
+                        entry_cutoff_date     TEXT,
                         raw_return            REAL NOT NULL,
                         benchmark_return      REAL NOT NULL,
                         alpha_return          REAL NOT NULL,
@@ -244,6 +247,9 @@ class RunHistoryStore:
                     "stock_exit_source_id TEXT",
                     "benchmark_entry_source_id TEXT",
                     "benchmark_exit_source_id TEXT",
+                    "decision_as_of TEXT",
+                    "decision_timezone TEXT",
+                    "entry_cutoff_date TEXT",
                 ):
                     name = column.split()[0]
                     if name not in evaluation_columns:
@@ -336,6 +342,33 @@ class RunHistoryStore:
             with self._conn() as conn:
                 return [dict(row) for row in conn.execute(query, params).fetchall()]
 
+    def list_unevaluated_validated_runs(
+        self,
+        *,
+        ticker: str,
+        horizon_sessions: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Return validated runs whose fixed-horizon outcome is still absent."""
+        with self._lock:
+            with self._conn() as conn:
+                return [
+                    dict(row)
+                    for row in conn.execute(
+                        """
+                        SELECT runs.*
+                        FROM runs
+                        LEFT JOIN decision_evaluations
+                          ON decision_evaluations.run_id = runs.run_id
+                         AND decision_evaluations.horizon_sessions = ?
+                        WHERE UPPER(runs.ticker) = ?
+                          AND runs.decision_status = 'validated'
+                          AND decision_evaluations.run_id IS NULL
+                        ORDER BY runs.analysis_date, runs.created_at, runs.run_id
+                        """,
+                        (int(horizon_sessions), ticker.upper()),
+                    ).fetchall()
+                ]
+
     def update_run_architecture(
         self,
         run_id: str,
@@ -364,6 +397,13 @@ class RunHistoryStore:
 
     def add_decision_evaluation(self, record: dict[str, Any]) -> None:
         """Persist one immutable fixed-horizon outcome for an analyzed run."""
+        from tradingagents.agents.utils.rating import parse_rating
+        from tradingagents.dataflows.ohlcv_cache import (
+            market_timezone_for_cache_key,
+            symbol_to_cache_key,
+        )
+        from tradingagents.dataflows.symbol_utils import normalize_symbol
+        from tradingagents.dataflows.utils import safe_ticker_component
         from tradingagents.evaluation.outcomes import (
             DEFAULT_HOLD_BAND,
             OUTCOME_MEASUREMENT_VERSION,
@@ -371,13 +411,68 @@ class RunHistoryStore:
             score_outcome,
         )
 
-        required_provenance = (
-            "entry_date",
-            "exit_date",
+        run_record = self.get_run(str(record.get("run_id") or ""))
+        if run_record is None:
+            raise ValueError("decision evaluation run_id does not exist")
+        terminal = next(
+            (
+                event
+                for event in reversed(run_record.get("events", []))
+                if event.get("type") == "run_completed"
+                and isinstance(event.get("content"), dict)
+                and event["content"].get("decision_status") == "validated"
+            ),
+            None,
+        )
+        if terminal is None:
+            raise ValueError(
+                "decision evaluation requires a validated terminal run event"
+            )
+        terminal_decision = terminal["content"].get("decision")
+        terminal_decision_as_of = terminal["content"].get(
+            "decision_as_of"
+        ) or terminal.get("timestamp")
+        if not isinstance(terminal_decision, str) or not terminal_decision.strip():
+            raise ValueError("validated terminal run event lacks a decision")
+        if str(record.get("ticker", "")).upper() != str(
+            run_record.get("ticker", "")
+        ).upper():
+            raise ValueError(
+                "decision evaluation ticker does not match its original run"
+            )
+        identity_fields = ("analysis_date", "architecture_version")
+        for field in identity_fields:
+            if str(record.get(field)) != str(run_record.get(field)):
+                raise ValueError(
+                    f"decision evaluation {field} does not match its original run"
+                )
+        record_fingerprint = str(
+            record.get("architecture_fingerprint", "legacy-unspecified")
+        )
+        if record_fingerprint != str(run_record.get("architecture_fingerprint")):
+            raise ValueError(
+                "decision evaluation architecture_fingerprint does not match its original run"
+            )
+        if parse_rating(str(record.get("rating") or "")) != parse_rating(
+            terminal_decision
+        ):
+            raise ValueError(
+                "decision evaluation rating does not match its original run decision"
+            )
+
+        required_source_ids = (
             "stock_entry_source_id",
             "stock_exit_source_id",
             "benchmark_entry_source_id",
             "benchmark_exit_source_id",
+        )
+        required_provenance = (
+            "entry_date",
+            "exit_date",
+            *required_source_ids,
+            "decision_as_of",
+            "decision_timezone",
+            "entry_cutoff_date",
         )
         missing = [field for field in required_provenance if not record.get(field)]
         if missing:
@@ -387,13 +482,50 @@ class RunHistoryStore:
         entry_date = datetime.fromisoformat(str(record["entry_date"])).date()
         exit_date = datetime.fromisoformat(str(record["exit_date"])).date()
         analysis_date = datetime.fromisoformat(str(record["analysis_date"])).date()
-        if entry_date <= analysis_date:
+        entry_cutoff_date = datetime.fromisoformat(
+            str(record["entry_cutoff_date"])
+        ).date()
+        if entry_date <= entry_cutoff_date:
             raise ValueError(
-                "decision evaluation entry_date must follow analysis_date"
+                "decision evaluation entry_date must follow entry_cutoff_date"
+            )
+        if entry_cutoff_date < analysis_date:
+            raise ValueError(
+                "decision evaluation entry_cutoff_date cannot precede analysis_date"
+            )
+        decision_as_of = _canonical_utc_timestamp(
+            record["decision_as_of"], "decision_as_of"
+        )
+        terminal_as_of = _canonical_utc_timestamp(
+            terminal_decision_as_of, "terminal decision_as_of"
+        )
+        if decision_as_of != terminal_as_of:
+            raise ValueError(
+                "decision evaluation decision_as_of does not match its original run"
+            )
+        try:
+            from zoneinfo import ZoneInfo
+
+            decision_timezone = str(record["decision_timezone"])
+            expected_timezone = market_timezone_for_cache_key(
+                symbol_to_cache_key(
+                    safe_ticker_component(normalize_symbol(str(record["ticker"])))
+                )
+            )
+            if decision_timezone != expected_timezone:
+                raise ValueError("decision timezone does not match ticker market")
+            decision_local_date = datetime.fromisoformat(decision_as_of).astimezone(
+                ZoneInfo(decision_timezone)
+            ).date()
+        except Exception as exc:
+            raise ValueError("decision evaluation decision_timezone is invalid") from exc
+        if decision_local_date != entry_cutoff_date:
+            raise ValueError(
+                "decision evaluation entry_cutoff_date does not match decision_as_of"
             )
         if exit_date <= entry_date:
             raise ValueError("decision evaluation exit_date must follow entry_date")
-        for field in required_provenance[2:]:
+        for field in required_source_ids:
             if not str(record[field]).startswith("ohlcv:"):
                 raise ValueError(f"decision evaluation {field} is not an OHLCV source ID")
         numeric_fields = (
@@ -417,6 +549,8 @@ class RunHistoryStore:
             record.get("evaluated_at") or _now(),
             "evaluated_at",
         )
+        if datetime.fromisoformat(evaluated_at).date() < exit_date:
+            raise ValueError("decision evaluation cannot precede its exit_date")
         scoring_version = str(
             record.get("scoring_version") or OUTCOME_SCORING_VERSION
         ).strip()
@@ -467,13 +601,14 @@ class RunHistoryStore:
                         benchmark_entry_close, benchmark_exit_close,
                         stock_entry_source_id, stock_exit_source_id,
                         benchmark_entry_source_id, benchmark_exit_source_id,
+                        decision_as_of, decision_timezone, entry_cutoff_date,
                         raw_return,
                         benchmark_return, alpha_return, exposure,
                         directional_hit, score, architecture_version,
                         architecture_fingerprint, scoring_version, hold_band,
                         measurement_version,
                         evaluated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record["run_id"], record["horizon_sessions"],
@@ -487,6 +622,9 @@ class RunHistoryStore:
                         record.get("stock_exit_source_id"),
                         record.get("benchmark_entry_source_id"),
                         record.get("benchmark_exit_source_id"),
+                        decision_as_of,
+                        decision_timezone,
+                        record["entry_cutoff_date"],
                         record["raw_return"], record["benchmark_return"],
                         record["alpha_return"], record["exposure"],
                         int(bool(record["directional_hit"])), record["score"],
@@ -639,6 +777,9 @@ class RunHistoryStore:
             "stock_exit_source_id",
             "benchmark_entry_source_id",
             "benchmark_exit_source_id",
+            "decision_as_of",
+            "decision_timezone",
+            "entry_cutoff_date",
             "raw_return",
             "benchmark_return",
             "alpha_return",
@@ -653,7 +794,7 @@ class RunHistoryStore:
             "evaluated_at",
         )
         payload = {
-            "schema": "tradingagents/audited-longitudinal-outcomes/v4",
+            "schema": "tradingagents/audited-longitudinal-outcomes/v5",
             "interpretation": (
                 "Historical calibration evidence only. Outcomes do not prove causality, "
                 "may come from a different market regime, and cannot authorize trade levels."

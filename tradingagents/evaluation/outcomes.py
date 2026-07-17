@@ -19,7 +19,7 @@ _EXPOSURE = {
 }
 
 OUTCOME_SCORING_VERSION = "alpha-exposure-v1"
-OUTCOME_MEASUREMENT_VERSION = "next-common-close-v1"
+OUTCOME_MEASUREMENT_VERSION = "post-decision-day-close-v1"
 LEGACY_OUTCOME_MEASUREMENT_VERSION = "decision-close-v1"
 DEFAULT_HOLD_BAND = 0.02
 
@@ -222,6 +222,9 @@ class OutcomeMeasurement:
     stock_exit_source_id: str
     benchmark_entry_source_id: str
     benchmark_exit_source_id: str
+    decision_as_of: str
+    decision_timezone: str
+    entry_cutoff_date: str
     measurement_version: str = OUTCOME_MEASUREMENT_VERSION
 
 

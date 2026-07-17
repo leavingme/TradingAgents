@@ -680,6 +680,16 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         run_id="evaluated-run",
         content={"llm_calls": 9, "tool_calls": 18, "tokens_in": 900, "tokens_out": 180},
     ))
+    history_store.add_event("evaluated-run", AnalysisEvent(
+        type="run_completed",
+        run_id="evaluated-run",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-01T21:00:00+00:00",
+        },
+    ))
     history_store.mark_finished(
         "evaluated-run", "completed", finished_at="2026-07-01T20:02:00+00:00"
     )
@@ -700,6 +710,9 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-09",
         "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-02",
         "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-09",
+        "decision_as_of": "2026-07-01T21:00:00+00:00",
+        "decision_timezone": "America/New_York",
+        "entry_cutoff_date": "2026-07-01",
         "raw_return": 0.04,
         "benchmark_return": 0.01,
         "alpha_return": 0.03,
@@ -716,7 +729,7 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
     assert response["rollups"] == [{
         "architecture_version": "baseline",
         "architecture_fingerprint": "legacy-unspecified",
-        "measurement_version": "next-common-close-v1",
+        "measurement_version": "post-decision-day-close-v1",
         "scoring_version": "alpha-exposure-v1",
         "hold_band": 0.02,
         "horizon_sessions": 5,

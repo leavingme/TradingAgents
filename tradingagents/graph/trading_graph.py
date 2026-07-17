@@ -238,9 +238,9 @@ class TradingAgentsGraph:
     def _fetch_returns(
         self, ticker: str, trade_date: str, holding_days: int = 5,
         benchmark: str = "SPY", as_of_date: str | None = None,
-        return_details: bool = False,
+        return_details: bool = False, decision_as_of: str | None = None,
     ):
-        """Fetch an information-safe raw/alpha return after ``trade_date``.
+        """Fetch an information-safe raw/alpha return after the decision day.
 
         ``benchmark`` is the index used as the alpha baseline (resolved by the
         caller via ``_resolve_benchmark``). Returns ``(raw_return, alpha_return,
@@ -249,15 +249,44 @@ class TradingAgentsGraph:
         """
         from tradingagents.dataflows.stockstats_utils import load_ohlcv
         from tradingagents.dataflows.config import get_config
-        from tradingagents.dataflows.ohlcv_cache import symbol_to_cache_key
+        from tradingagents.dataflows.ohlcv_cache import (
+            market_timezone_for_cache_key,
+            symbol_to_cache_key,
+        )
         from tradingagents.dataflows.ohlcv_model import resolve_ohlcv_source_id
         from tradingagents.dataflows.symbol_utils import normalize_symbol
         from tradingagents.evaluation import OutcomeMeasurement
         import pandas as pd
+        from zoneinfo import ZoneInfo
 
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
-            end = start + timedelta(days=holding_days + 7)
+            canonical_ticker = normalize_symbol(ticker)
+            ticker_cache_key = symbol_to_cache_key(
+                safe_ticker_component(canonical_ticker)
+            )
+            decision_timezone = market_timezone_for_cache_key(ticker_cache_key)
+            if decision_as_of is None:
+                if return_details:
+                    raise ValueError("audited outcome requires decision_as_of")
+                entry_cutoff_date = start.date()
+                canonical_decision_as_of = None
+            else:
+                parsed_decision = datetime.fromisoformat(
+                    str(decision_as_of).replace("Z", "+00:00")
+                )
+                if parsed_decision.tzinfo is None or parsed_decision.utcoffset() is None:
+                    raise ValueError("decision_as_of must include a timezone")
+                entry_cutoff_date = max(
+                    start.date(),
+                    parsed_decision.astimezone(ZoneInfo(decision_timezone)).date(),
+                )
+                canonical_decision_as_of = parsed_decision.astimezone(
+                    ZoneInfo("UTC")
+                ).isoformat()
+            end = datetime.combine(entry_cutoff_date, datetime.min.time()) + timedelta(
+                days=holding_days + 7
+            )
             end_str = as_of_date or end.strftime("%Y-%m-%d")
 
             # Use the canonical configured OHLCV route/cache for both legs.
@@ -281,13 +310,13 @@ class TradingAgentsGraph:
             stock_closes = closes(stock, ticker).rename(columns={"Close": "stock_close"})
             bench_closes = closes(bench, benchmark).rename(columns={"Close": "benchmark_close"})
             common = stock_closes.merge(bench_closes, on="Date", how="inner").sort_values("Date")
-            start_date = pd.Timestamp(trade_date)
+            cutoff_date = pd.Timestamp(entry_cutoff_date)
             end_date = pd.Timestamp(end_str)
-            common = common[(common["Date"] > start_date) & (common["Date"] <= end_date)]
-            # The recommendation may be formed after the analysis-date close,
-            # so that close is never an executable entry. A 5-session horizon
-            # requires the first later common close plus five subsequent common
-            # closes. Never relabel a shorter outcome as 5d.
+            common = common[(common["Date"] > cutoff_date) & (common["Date"] <= end_date)]
+            # A daily close on the decision's local market date may already
+            # precede a live recommendation, so it is never an executable
+            # entry. Require the first later common close plus five subsequent
+            # common closes; never relabel a shorter outcome as 5d.
             if len(common) < holding_days + 1:
                 return None if return_details else (None, None, None)
             entry = common.iloc[0]
@@ -330,6 +359,9 @@ class TradingAgentsGraph:
                     stock_exit_source_id=source_id(ticker, exit_date),
                     benchmark_entry_source_id=source_id(benchmark, entry_date),
                     benchmark_exit_source_id=source_id(benchmark, exit_date),
+                    decision_as_of=str(canonical_decision_as_of),
+                    decision_timezone=decision_timezone,
+                    entry_cutoff_date=entry_cutoff_date.isoformat(),
                 )
             return raw, alpha, holding_days
         except Exception as e:
@@ -340,146 +372,117 @@ class TradingAgentsGraph:
             return None if return_details else (None, None, None)
 
     def _resolve_pending_entries(self, ticker: str, as_of_date: str | None = None) -> None:
-        """Resolve pending log entries for ticker at the start of a new run.
+        """Resolve every unevaluated validated SQLite run for ``ticker``.
 
-        Fetches returns for each same-ticker pending entry, generates reflections,
-        then writes all updates in a single atomic batch write to avoid redundant I/O.
-        Skips entries whose price data is not yet available (too recent or delisted).
-
-        Trade-off: only same-ticker entries are resolved per run.  Entries for
-        other tickers accumulate until that ticker is run again.
+        SQLite, not the compatibility Markdown log, is the pending-work source.
+        Each run is measured from its own persisted decision timestamp so two
+        runs sharing an analysis date cannot inherit an earlier run's entry.
         """
-        pending = [e for e in self.memory_log.get_pending_entries() if e["ticker"] == ticker]
-        if not pending:
-            return
+        from tradingagents.agents.utils.rating import parse_rating
+        from tradingagents.evaluation import OutcomeMeasurement, score_outcome
+        from tradingagents.runtime.audit_context import current_run_id
+        from tradingagents.runtime.history import history_store
 
+        prior_runs = history_store.list_unevaluated_validated_runs(ticker=ticker)
+        if not prior_runs:
+            return
         benchmark = self._resolve_benchmark(ticker)
-        updates = []
-        for entry in pending:
+        resolved_by_date: dict[str, OutcomeMeasurement] = {}
+        for prior_run in prior_runs:
+            run_record = history_store.get_run(prior_run["run_id"])
+            terminal = next(
+                (
+                    event
+                    for event in reversed((run_record or {}).get("events", []))
+                    if event.get("type") == "run_completed"
+                    and isinstance(event.get("content"), dict)
+                ),
+                None,
+            )
+            decision = terminal["content"].get("decision") if terminal else None
+            decision_as_of = (
+                terminal["content"].get("decision_as_of") if terminal else None
+            ) or (terminal.get("timestamp") if terminal else None)
+            if not isinstance(decision, str) or not decision.strip():
+                raise RuntimeError(
+                    "validated historical run lacks its own persisted decision: "
+                    f"{prior_run['run_id']}"
+                )
+            if not isinstance(decision_as_of, str) or not decision_as_of.strip():
+                raise RuntimeError(
+                    "validated historical run lacks decision_as_of: "
+                    f"{prior_run['run_id']}"
+                )
             measurement = self._fetch_returns(
                 ticker,
-                entry["date"],
+                prior_run["analysis_date"],
                 benchmark=benchmark,
                 as_of_date=as_of_date,
                 return_details=True,
+                decision_as_of=decision_as_of,
             )
             if measurement is None:
-                continue  # price not available yet — try again next run
-            from tradingagents.evaluation import OutcomeMeasurement
+                continue
+            if not isinstance(measurement, OutcomeMeasurement):
+                raise RuntimeError("audited outcome resolver returned no provenance")
+            rating = parse_rating(decision)
+            scored = score_outcome(rating, measurement.alpha_return)
+            history_store.add_decision_evaluation({
+                "run_id": prior_run["run_id"],
+                "horizon_sessions": measurement.horizon_sessions,
+                "evaluated_by_run_id": current_run_id(),
+                "ticker": ticker,
+                "analysis_date": prior_run["analysis_date"],
+                "rating": rating,
+                "benchmark": benchmark,
+                "raw_return": measurement.raw_return,
+                "benchmark_return": measurement.benchmark_return,
+                "alpha_return": measurement.alpha_return,
+                "exposure": scored["exposure"],
+                "directional_hit": scored["directional_hit"],
+                "score": scored["score"],
+                "scoring_version": scored["scoring_version"],
+                "hold_band": scored["hold_band"],
+                "architecture_version": prior_run.get(
+                    "architecture_version", "legacy"
+                ),
+                "architecture_fingerprint": prior_run.get(
+                    "architecture_fingerprint", "legacy-unspecified"
+                ),
+                **measurement.__dict__,
+            })
+            resolved_by_date.setdefault(prior_run["analysis_date"], measurement)
 
-            if isinstance(measurement, OutcomeMeasurement):
-                raw = measurement.raw_return
-                alpha = measurement.alpha_return
-                days = measurement.horizon_sessions
-                measurement_fields = {
-                    "entry_date": measurement.entry_date,
-                    "exit_date": measurement.exit_date,
-                    "stock_entry_close": measurement.stock_entry_close,
-                    "stock_exit_close": measurement.stock_exit_close,
-                    "benchmark_entry_close": measurement.benchmark_entry_close,
-                    "benchmark_exit_close": measurement.benchmark_exit_close,
-                    "stock_entry_source_id": measurement.stock_entry_source_id,
-                    "stock_exit_source_id": measurement.stock_exit_source_id,
-                    "benchmark_entry_source_id": measurement.benchmark_entry_source_id,
-                    "benchmark_exit_source_id": measurement.benchmark_exit_source_id,
-                    "measurement_version": measurement.measurement_version,
-                }
-            else:
-                # Compatibility for test doubles and older programmatic
-                # subclasses. Such results cannot be persisted as audited
-                # evaluations when matching prior runs exist.
-                raw, alpha, days = measurement
-                measurement_fields = {}
-            reflection = self.reflector.reflect_on_final_decision(
-                final_decision=entry.get("decision", ""),
-                raw_return=raw,
-                alpha_return=alpha,
-                benchmark_name=benchmark,
-            )
-            updates.append({
+        # Markdown reflection remains a best-effort compatibility view. It is
+        # updated only after canonical SQLite persistence succeeds and never
+        # controls whether a run is eligible for future settlement.
+        markdown_updates = []
+        for entry in self.memory_log.get_pending_entries():
+            if entry.get("ticker") != ticker:
+                continue
+            measurement = resolved_by_date.get(str(entry.get("date")))
+            if measurement is None:
+                continue
+            try:
+                reflection = self.reflector.reflect_on_final_decision(
+                    final_decision=entry.get("decision", ""),
+                    raw_return=measurement.raw_return,
+                    alpha_return=measurement.alpha_return,
+                    benchmark_name=benchmark,
+                )
+            except Exception as exc:
+                logger.warning("Could not write compatibility reflection: %s", exc)
+                continue
+            markdown_updates.append({
                 "ticker": ticker,
                 "trade_date": entry["date"],
-                "raw_return": raw,
-                "alpha_return": alpha,
-                "holding_days": days,
+                "raw_return": measurement.raw_return,
+                "alpha_return": measurement.alpha_return,
+                "holding_days": measurement.horizon_sessions,
                 "reflection": reflection,
-                **measurement_fields,
             })
-
-        if updates:
-            from tradingagents.agents.utils.rating import parse_rating
-            from tradingagents.evaluation import score_outcome
-            from tradingagents.runtime.audit_context import current_run_id
-            from tradingagents.runtime.history import history_store
-
-            for update in updates:
-                prior_runs = history_store.find_runs(
-                    ticker=ticker,
-                    analysis_date=update["trade_date"],
-                    decision_status="validated",
-                )
-                for prior_run in prior_runs:
-                    run_record = history_store.get_run(prior_run["run_id"])
-                    terminal = next(
-                        (
-                            event
-                            for event in reversed((run_record or {}).get("events", []))
-                            if event.get("type") == "run_completed"
-                            and isinstance(event.get("content"), dict)
-                        ),
-                        None,
-                    )
-                    decision = terminal["content"].get("decision") if terminal else None
-                    if not isinstance(decision, str) or not decision.strip():
-                        raise RuntimeError(
-                            "validated historical run lacks its own persisted decision: "
-                            f"{prior_run['run_id']}"
-                        )
-                    rating = parse_rating(decision)
-                    scored = score_outcome(rating, update["alpha_return"])
-                    history_store.add_decision_evaluation({
-                        "run_id": prior_run["run_id"],
-                        "horizon_sessions": update["holding_days"],
-                        "evaluated_by_run_id": current_run_id(),
-                        "ticker": ticker,
-                        "analysis_date": update["trade_date"],
-                        "rating": rating,
-                        "benchmark": benchmark,
-                        "raw_return": update["raw_return"],
-                        "benchmark_return": update["raw_return"] - update["alpha_return"],
-                        "alpha_return": update["alpha_return"],
-                        "exposure": scored["exposure"],
-                        "directional_hit": scored["directional_hit"],
-                        "score": scored["score"],
-                        "scoring_version": scored["scoring_version"],
-                        "hold_band": scored["hold_band"],
-                        "architecture_version": prior_run.get(
-                            "architecture_version", "legacy"
-                        ),
-                        "architecture_fingerprint": prior_run.get(
-                            "architecture_fingerprint", "legacy-unspecified"
-                        ),
-                        "measurement_version": update["measurement_version"],
-                        "entry_date": update["entry_date"],
-                        "exit_date": update["exit_date"],
-                        "stock_entry_close": update["stock_entry_close"],
-                        "stock_exit_close": update["stock_exit_close"],
-                        "benchmark_entry_close": update["benchmark_entry_close"],
-                        "benchmark_exit_close": update["benchmark_exit_close"],
-                        "stock_entry_source_id": update["stock_entry_source_id"],
-                        "stock_exit_source_id": update["stock_exit_source_id"],
-                        "benchmark_entry_source_id": update[
-                            "benchmark_entry_source_id"
-                        ],
-                        "benchmark_exit_source_id": update[
-                            "benchmark_exit_source_id"
-                        ],
-                    })
-            # SQLite is the canonical longitudinal record. Only mark the
-            # compatibility Markdown entry resolved after structured outcome
-            # persistence succeeds, so a crash cannot silently lose the
-            # evaluation while making it ineligible for retry.
-            self.memory_log.batch_update_with_outcomes(updates)
+        if markdown_updates:
+            self.memory_log.batch_update_with_outcomes(markdown_updates)
 
     def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
         """Resolve ticker identity once and return the full instrument context.

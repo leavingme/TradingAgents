@@ -48,6 +48,16 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
         run_id="run-1",
         content={"llm_calls": 12, "tool_calls": 24, "tokens_in": 1200, "tokens_out": 240},
     ))
+    store.add_event("run-1", AnalysisEvent(
+        type="run_completed",
+        run_id="run-1",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-01T21:00:00+00:00",
+        },
+    ))
     store.mark_finished(
         "run-1", "completed", finished_at="2026-07-01T20:02:30+00:00"
     )
@@ -69,6 +79,9 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
         "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-09",
         "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-02",
         "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-09",
+        "decision_as_of": "2026-07-01T21:00:00+00:00",
+        "decision_timezone": "America/New_York",
+        "entry_cutoff_date": "2026-07-01",
         "raw_return": 0.05,
         "benchmark_return": 0.02,
         "alpha_return": 0.03,
@@ -92,7 +105,7 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert rows[0]["tokens_in"] == 1200
     assert rows[0]["tokens_out"] == 240
     assert rows[0]["scoring_version"] == "alpha-exposure-v1"
-    assert rows[0]["measurement_version"] == "next-common-close-v1"
+    assert rows[0]["measurement_version"] == "post-decision-day-close-v1"
     assert rows[0]["hold_band"] == 0.02
     lightweight = store.list_decision_evaluations(
         ticker="nvda",
@@ -105,6 +118,16 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
         "run-future", "NVDA", "2026-07-02", "stock", ["market"],
         "minimax-cn", 1, architecture_version="baseline",
     )
+    store.add_event("run-future", AnalysisEvent(
+        type="run_completed",
+        run_id="run-future",
+        timestamp="2026-07-02T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-02T21:00:00+00:00",
+        },
+    ))
     store.add_decision_evaluation({
         **record,
         "run_id": "run-future",
@@ -115,6 +138,8 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
         "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-10",
         "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-03",
         "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-10",
+        "decision_as_of": "2026-07-02T21:00:00+00:00",
+        "entry_cutoff_date": "2026-07-02",
         "evaluated_at": "2026-07-20T16:00:00-04:00",
     })
     newest = store.list_decision_evaluations(
@@ -139,27 +164,67 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     with pytest.raises(ValueError, match="mutually exclusive"):
         store.list_decision_evaluations(ticker="NVDA", exclude_ticker="AAPL")
     with pytest.raises(ValueError, match="score does not match"):
-        store.add_decision_evaluation({**record, "run_id": "bad-score", "score": 99.0})
+        store.add_decision_evaluation({**record, "score": 99.0})
     with pytest.raises(ValueError, match="unsupported.*scoring_version"):
         store.add_decision_evaluation({
             **record,
-            "run_id": "bad-version",
             "scoring_version": "unknown-v2",
         })
-    with pytest.raises(ValueError, match="entry_date must follow analysis_date"):
+    with pytest.raises(ValueError, match="entry_date must follow entry_cutoff_date"):
         store.add_decision_evaluation({
             **record,
-            "run_id": "lookahead-entry",
             "entry_date": record["analysis_date"],
         })
+    with pytest.raises(ValueError, match="does not match its original run"):
+        store.add_decision_evaluation({
+            **record,
+            "decision_as_of": "2026-07-02T21:00:00+00:00",
+        })
+    with pytest.raises(ValueError, match="ticker does not match its original run"):
+        store.add_decision_evaluation({**record, "ticker": "AAPL"})
+    with pytest.raises(ValueError, match="decision_timezone is invalid"):
+        store.add_decision_evaluation({
+            **record,
+            "decision_timezone": "Asia/Hong_Kong",
+        })
+
+
+def test_history_lists_validated_runs_without_markdown_or_existing_outcome(tmp_path):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    store.create_run(
+        "pending-outcome", "NVDA", "2026-07-01", "stock", ["market"],
+        "minimax-cn", 1,
+    )
+    store.add_event("pending-outcome", AnalysisEvent(
+        type="run_completed",
+        run_id="pending-outcome",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-01T21:00:00+00:00",
+        },
+    ))
+    rows = store.list_unevaluated_validated_runs(ticker="nvda")
+    assert [row["run_id"] for row in rows] == ["pending-outcome"]
 
 
 def test_history_rejects_evaluation_without_exact_ohlcv_provenance(tmp_path):
     store = RunHistoryStore(tmp_path / "runs.db")
     store.create_run(
         "run-unsafe", "NVDA", "2026-07-01", "stock", ["market"],
-        "minimax-cn", 1,
+        "minimax-cn", 1, architecture_version="baseline",
     )
+    store.add_event("run-unsafe", AnalysisEvent(
+        type="run_completed",
+        run_id="run-unsafe",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-01T21:00:00+00:00",
+        },
+    ))
     with pytest.raises(ValueError, match="lacks audited provenance"):
         store.add_decision_evaluation({
             "run_id": "run-unsafe",
@@ -321,7 +386,7 @@ def test_architecture_comparison_rejects_mixed_measurement_policies():
                 "measurement_version": (
                     "decision-close-v1"
                     if version == "baseline"
-                    else "next-common-close-v1"
+                    else "post-decision-day-close-v1"
                 ),
                 "horizon_sessions": 5,
                 "directional_hit": True,

@@ -68,6 +68,9 @@ def test_history_migrates_legacy_evaluations_to_explicit_scoring_policy(tmp_path
     assert columns["scoring_version"]["dflt_value"] == "'alpha-exposure-v1'"
     assert columns["measurement_version"]["dflt_value"] == "'decision-close-v1'"
     assert float(columns["hold_band"]["dflt_value"]) == 0.02
+    assert columns["decision_as_of"]["dflt_value"] is None
+    assert columns["decision_timezone"]["dflt_value"] is None
+    assert columns["entry_cutoff_date"]["dflt_value"] is None
 
 
 def test_history_store_crud(tmp_path: Path):
@@ -336,6 +339,16 @@ def test_longitudinal_context_is_structured_audited_and_cutoff_safe(
         "evaluated-nvda", "NVDA", "2026-07-01", "stock", ["market"],
         "minimax-cn", 1, architecture_version="baseline",
     )
+    store.add_event("evaluated-nvda", AnalysisEvent(
+        type="run_completed",
+        run_id="evaluated-nvda",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-01T21:00:00+00:00",
+        },
+    ))
     store.add_decision_evaluation({
         "run_id": "evaluated-nvda",
         "horizon_sessions": 5,
@@ -353,6 +366,9 @@ def test_longitudinal_context_is_structured_audited_and_cutoff_safe(
         "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-09",
         "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-02",
         "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-09",
+        "decision_as_of": "2026-07-01T21:00:00+00:00",
+        "decision_timezone": "America/New_York",
+        "entry_cutoff_date": "2026-07-01",
         "raw_return": 0.05,
         "benchmark_return": 0.02,
         "alpha_return": 0.03,
@@ -369,10 +385,10 @@ def test_longitudinal_context_is_structured_audited_and_cutoff_safe(
     context = json.loads(store.get_longitudinal_context(
         "NVDA", information_cutoff="2026-07-10T16:00:01-04:00"
     ))
-    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v4"
+    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v5"
     assert context["same_symbol_outcomes"][0]["run_id"] == "evaluated-nvda"
     assert context["same_symbol_outcomes"][0]["directional_hit"] is True
-    assert context["same_symbol_outcomes"][0]["measurement_version"] == "next-common-close-v1"
+    assert context["same_symbol_outcomes"][0]["measurement_version"] == "post-decision-day-close-v1"
     assert "reflection" not in context["same_symbol_outcomes"][0]
     rollup = context["same_symbol_architecture_rollups"][0]
     assert rollup["sample_count"] == 1

@@ -49,8 +49,13 @@ from .financial_validation import (
 )
 import threading
 import re
+from collections import OrderedDict
 
 _local_state = threading.local()
+_financial_cache_condition = threading.Condition()
+_shared_financial_cache: OrderedDict[tuple, tuple[str, dict]] = OrderedDict()
+_shared_financial_inflight: set[tuple] = set()
+_SHARED_FINANCIAL_CACHE_LIMIT = 64
 
 from .duckduckgo_search import (
     get_global_news_duckduckgo,
@@ -436,8 +441,17 @@ def route_to_vendor(method: str, *args, **kwargs):
 
         # Outer call, perform reconciliation and caching
         ticker = args[0]
-        freq = args[1] if len(args) > 1 else "quarterly"
-        curr_date = args[2] if len(args) > 2 and args[2] else None
+        if method == "get_fundamentals":
+            # Vendor contract: get_fundamentals(ticker, curr_date=None).  The
+            # other three financial methods use (ticker, freq, curr_date).
+            # Treating the second fundamentals argument as ``freq`` silently
+            # drops a point-in-time cutoff and also splits the reconciliation
+            # cache into two keys for the same logical snapshot.
+            freq = "quarterly"
+            curr_date = args[1] if len(args) > 1 and args[1] else None
+        else:
+            freq = args[1] if len(args) > 1 and args[1] else "quarterly"
+            curr_date = args[2] if len(args) > 2 and args[2] else None
 
         impl_ids = tuple(
             id(VENDOR_METHODS[m][v])
@@ -446,11 +460,30 @@ def route_to_vendor(method: str, *args, **kwargs):
             if m in VENDOR_METHODS and v in VENDOR_METHODS[m]
         )
         cache_key = (ticker, freq, curr_date, impl_ids)
-        if not hasattr(_local_state, "financial_cache"):
-            _local_state.financial_cache = {}
+        from tradingagents.runtime.audit_context import current_run_id
 
-        if cache_key in _local_state.financial_cache:
-            cached_vendor, cached_data_dict = _local_state.financial_cache[cache_key]
+        run_id = current_run_id()
+        shared_cache_key = (run_id, *cache_key) if run_id else None
+        cached_result = None
+        if shared_cache_key is not None:
+            with _financial_cache_condition:
+                while (
+                    shared_cache_key in _shared_financial_inflight
+                    and shared_cache_key not in _shared_financial_cache
+                ):
+                    _financial_cache_condition.wait()
+                cached_result = _shared_financial_cache.get(shared_cache_key)
+                if cached_result is not None:
+                    _shared_financial_cache.move_to_end(shared_cache_key)
+                else:
+                    _shared_financial_inflight.add(shared_cache_key)
+        else:
+            if not hasattr(_local_state, "financial_cache"):
+                _local_state.financial_cache = {}
+            cached_result = _local_state.financial_cache.get(cache_key)
+
+        if cached_result is not None:
+            cached_vendor, cached_data_dict = cached_result
             if method in cached_data_dict:
                 started = time.monotonic()
                 record_attempt(
@@ -468,6 +501,7 @@ def route_to_vendor(method: str, *args, **kwargs):
         last_no_data = None
         first_error = None
         reconciled = False
+        completed_result = None
 
         try:
             # Fetch verified close price
@@ -688,7 +722,22 @@ def route_to_vendor(method: str, *args, **kwargs):
                         data_dict["get_fundamentals"] = render_financial_data(fd_data, [])
                         log_financial_audit(ticker, vendor, "get_fundamentals", "verified", fd_data)
 
-                    _local_state.financial_cache[cache_key] = (vendor, data_dict)
+                    completed_result = (vendor, data_dict)
+                    if shared_cache_key is not None:
+                        with _financial_cache_condition:
+                            _shared_financial_cache[shared_cache_key] = completed_result
+                            _shared_financial_cache.move_to_end(shared_cache_key)
+                            while len(_shared_financial_cache) > _SHARED_FINANCIAL_CACHE_LIMIT:
+                                evicted = False
+                                for old_key in tuple(_shared_financial_cache):
+                                    if old_key not in _shared_financial_inflight:
+                                        _shared_financial_cache.pop(old_key, None)
+                                        evicted = True
+                                        break
+                                if not evicted:
+                                    break
+                    else:
+                        _local_state.financial_cache[cache_key] = completed_result
                     record_attempt(
                         vendor, "available", started, attempt=attempt,
                         selected=True, result=data_dict.get(method),
@@ -723,8 +772,14 @@ def route_to_vendor(method: str, *args, **kwargs):
 
         finally:
             _local_state.in_reconciliation = False
+            if shared_cache_key is not None:
+                with _financial_cache_condition:
+                    _shared_financial_inflight.discard(shared_cache_key)
+                    _financial_cache_condition.notify_all()
 
-        cached_vendor, cached_data_dict = _local_state.financial_cache[cache_key]
+        if completed_result is None:
+            raise RuntimeError(f"Financial reconciliation completed without cache data for '{method}'")
+        cached_vendor, cached_data_dict = completed_result
         if method in cached_data_dict:
             return cached_data_dict[method]
         raise NoUsableFinancialDataError(

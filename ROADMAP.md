@@ -170,6 +170,7 @@
 - [x] run-scoped vendor ledger 按 `run_id + call_id + attempt` 追加保存；审计落盘失败时禁止生成可执行报告。
 - [x] Longbridge 个股新闻使用 `longbridge_mcp → longbridge`，全球新闻使用 CLI 结构化搜索；MCP `news_search` 的 epoch 时间问题修复前不注册为全球新闻来源。
 - [x] 财务 MCP/CLI 原始 JSON 直接映射 `FinancialMetric`，完成跨报表勾稽、期间一致性及 ROE/ROA/TTM EPS/PE/净现金/EV-EBITDA 的确定性计算。
+  - 2026-07-17 真实连续运行发现 reconciliation 把 `get_fundamentals(ticker, curr_date)` 的第二参误读为 `freq`，会让历史截止日不进入三张子报表 validator，并因不同 cache key 重复抓取；现已按方法 contract 归一化签名，并以 `run_id + ticker + freq + curr_date + vendor implementation` 做有界跨线程 singleflight。并发测试证明四个逻辑工具只执行一次四表抓取且保留 3 条独立 cache-hit audit；同输入 live run `97b21b3475a54dccb41e5cd135f68b9b` 中每种财务方法从 5 条 attempt 降为 2 条，总 vendor attempt 从 49 降为 41，最终 `validated` 且自动 review 无 P0。财务/vendor/runtime 针对性测试 64 项通过。
 
 ### 决策与安全门禁
 

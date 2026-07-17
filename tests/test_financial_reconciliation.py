@@ -1,6 +1,9 @@
 import json
 import os
 import shutil
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 import pytest
 from unittest import mock
 
@@ -128,6 +131,147 @@ def test_cross_statement_reconciliation_cash_mismatch(mock_financial_data):
         with pytest.raises(NoUsableFinancialDataError) as exc_info:
             interface.route_to_vendor("get_income_statement", "MOCK", "quarterly", "2026-07-10")
         assert "Cash balance mismatch" in str(exc_info.value)
+
+
+@pytest.mark.unit
+def test_run_scoped_financial_reconciliation_is_singleflight_across_tool_threads(
+    mock_financial_data,
+):
+    is_data = mock_financial_data({
+        "Q1 2026": {"Revenue": 1000, "Net Income": 200, "Operating Profit": 300}
+    })
+    bs_data = mock_financial_data({
+        "Q1 2026": {
+            "Total Assets": 5000,
+            "Total Liabilities": 3000,
+            "Total Equity": 2000,
+            "Cash and Equivalents": 1000,
+        }
+    })
+    cf_data = mock_financial_data({
+        "Q1 2026": {
+            "Operating Cash Flow": 300,
+            "Net Income": 200,
+            "Cash and Equivalents": 1000,
+        }
+    })
+    fd_data = mock_financial_data({"Q1 2026": {"Revenue": 1000}})
+    payloads = {
+        "get_income_statement": is_data,
+        "get_balance_sheet": bs_data,
+        "get_cashflow": cf_data,
+        "get_fundamentals": fd_data,
+    }
+    calls = {method: 0 for method in payloads}
+    call_guard = threading.Lock()
+    start = threading.Barrier(4)
+    audit_records = []
+
+    def vendor(method):
+        def fetch(*args, **kwargs):
+            with call_guard:
+                calls[method] += 1
+            time.sleep(0.02)
+            return payloads[method]
+        return fetch
+
+    vendor_methods = {
+        method: {"mock_vendor": vendor(method)} for method in payloads
+    }
+
+    def invoke(method):
+        start.wait()
+        if method == "get_fundamentals":
+            return interface.route_to_vendor(method, "MOCK", None)
+        return interface.route_to_vendor(method, "MOCK", "quarterly", None)
+
+    with interface._financial_cache_condition:
+        interface._shared_financial_cache.clear()
+        interface._shared_financial_inflight.clear()
+    with mock.patch.dict(interface.VENDOR_METHODS, vendor_methods, clear=False), \
+         mock.patch("tradingagents.dataflows.interface.get_vendor", return_value="mock_vendor"), \
+         mock.patch(
+             "tradingagents.runtime.audit_context.current_run_id",
+             return_value="run-financial-singleflight",
+         ), \
+         mock.patch(
+             "tradingagents.dataflows.interface._record_vendor_verification",
+             side_effect=lambda *args, **kwargs: audit_records.append((args, kwargs)),
+         ):
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(invoke, payloads))
+
+    assert all(isinstance(result, str) and result for result in results)
+    assert calls == {method: 1 for method in payloads}
+    cache_hits = [
+        (args, kwargs) for args, kwargs in audit_records
+        if len(args) > 3 and args[3] == "cache_hit"
+    ]
+    assert len(cache_hits) == 3
+    assert all(kwargs.get("selected") is True for _, kwargs in cache_hits)
+
+
+@pytest.mark.unit
+def test_get_fundamentals_second_argument_is_propagated_as_point_in_time_date(
+    mock_financial_data,
+):
+    payloads = {
+        "get_income_statement": mock_financial_data({
+            "Q1 2026": {"Revenue": 1000, "Net Income": 200}
+        }),
+        "get_balance_sheet": mock_financial_data({
+            "Q1 2026": {
+                "Total Assets": 5000,
+                "Total Liabilities": 3000,
+                "Total Equity": 2000,
+                "Cash and Equivalents": 1000,
+            }
+        }),
+        "get_cashflow": mock_financial_data({
+            "Q1 2026": {
+                "Operating Cash Flow": 300,
+                "Net Income": 200,
+                "Cash and Equivalents": 1000,
+            }
+        }),
+        "get_fundamentals": mock_financial_data({"Q1 2026": {"Revenue": 1000}}),
+    }
+    received = {method: [] for method in payloads}
+
+    def vendor(method):
+        def fetch(*args, **kwargs):
+            received[method].append(args)
+            return payloads[method]
+        return fetch
+
+    vendor_methods = {
+        method: {"mock_vendor": vendor(method)} for method in payloads
+    }
+    vendor_methods["get_stock_data"] = {
+        "mock_vendor": lambda *args, **kwargs: "Date,Close\n2026-07-10,100.0\n"
+    }
+    with interface._financial_cache_condition:
+        interface._shared_financial_cache.clear()
+        interface._shared_financial_inflight.clear()
+    with mock.patch.dict(interface.VENDOR_METHODS, vendor_methods, clear=False), \
+         mock.patch("tradingagents.dataflows.interface.get_vendor", return_value="mock_vendor"), \
+         mock.patch(
+             "tradingagents.runtime.audit_context.current_run_id",
+             return_value="run-financial-cutoff",
+         ), \
+         mock.patch(
+             "tradingagents.dataflows.interface._record_vendor_verification",
+             return_value=None,
+         ):
+        result = interface.route_to_vendor(
+            "get_fundamentals", "MOCK", "2026-07-10"
+        )
+
+    assert result
+    assert received["get_income_statement"] == [("MOCK", "quarterly", "2026-07-10")]
+    assert received["get_balance_sheet"] == [("MOCK", "quarterly", "2026-07-10")]
+    assert received["get_cashflow"] == [("MOCK", "quarterly", "2026-07-10")]
+    assert received["get_fundamentals"] == [("MOCK", "2026-07-10")]
 
 
 @pytest.mark.unit

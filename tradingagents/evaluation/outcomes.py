@@ -143,8 +143,16 @@ def score_outcome(
     }
 
 
-def architecture_rollups(evaluations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Aggregate immutable evaluation rows by architecture and horizon."""
+def architecture_rollups(
+    evaluations: list[dict[str, Any]],
+    *,
+    include_runtime_costs: bool = True,
+) -> list[dict[str, Any]]:
+    """Aggregate immutable evaluations without mixing architecture fingerprints.
+
+    Runtime cost metrics belong in operator-facing optimization views. Callers
+    constructing investment-agent context can exclude them explicitly.
+    """
     groups: dict[tuple[str, str, int], list[dict[str, Any]]] = defaultdict(list)
     for row in evaluations:
         groups[(
@@ -164,15 +172,16 @@ def architecture_rollups(evaluations: list[dict[str, Any]]) -> list[dict[str, An
             "mean_alpha_return": fmean(float(row["alpha_return"]) for row in rows),
             "mean_score": fmean(float(row["score"]) for row in rows),
         }
-        for field in _RUNTIME_COST_FIELDS:
-            values = [
-                value
-                for row in rows
-                if (value := _runtime_cost_value(row.get(field))) is not None
-            ]
-            rollup[f"{field}_sample_count"] = len(values)
-            if values:
-                rollup[f"mean_{field}"] = fmean(values)
+        if include_runtime_costs:
+            for field in _RUNTIME_COST_FIELDS:
+                values = [
+                    value
+                    for row in rows
+                    if (value := _runtime_cost_value(row.get(field))) is not None
+                ]
+                rollup[f"{field}_sample_count"] = len(values)
+                if values:
+                    rollup[f"mean_{field}"] = fmean(values)
         output.append(rollup)
     return output
 

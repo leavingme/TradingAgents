@@ -38,6 +38,18 @@ def _elapsed_seconds(started_at: Any, finished_at: Any) -> float | None:
     return elapsed if math.isfinite(elapsed) and elapsed >= 0 else None
 
 
+def _canonical_utc_timestamp(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field} must be a timestamp string")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ISO timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must include a timezone")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 def _default_db_path() -> Path:
     configured = os.environ.get("TRADINGAGENTS_DB")
     if configured:
@@ -371,6 +383,10 @@ class RunHistoryStore:
                 raise ValueError(f"decision evaluation {field} must be finite")
             if field.endswith("_close") and value <= 0:
                 raise ValueError(f"decision evaluation {field} must be positive")
+        evaluated_at = _canonical_utc_timestamp(
+            record.get("evaluated_at") or _now(),
+            "evaluated_at",
+        )
         with self._lock:
             with self._conn() as conn:
                 conn.execute(
@@ -405,7 +421,7 @@ class RunHistoryStore:
                         int(bool(record["directional_hit"])), record["score"],
                         record["architecture_version"],
                         record.get("architecture_fingerprint", "legacy-unspecified"),
-                        record.get("evaluated_at") or _now(),
+                        evaluated_at,
                     ),
                 )
 
@@ -413,24 +429,46 @@ class RunHistoryStore:
         self,
         *,
         ticker: str | None = None,
+        exclude_ticker: str | None = None,
+        evaluated_before: str | None = None,
         limit: int = 1000,
+        include_runtime_metrics: bool = True,
     ) -> list[dict[str, Any]]:
-        query = (
-            "SELECT decision_evaluations.*, "
-            "runs.started_at AS run_started_at, runs.finished_at AS run_finished_at "
-            "FROM decision_evaluations "
-            "LEFT JOIN runs ON runs.run_id=decision_evaluations.run_id"
-        )
+        if ticker is not None and exclude_ticker is not None:
+            raise ValueError("ticker and exclude_ticker are mutually exclusive")
+        if include_runtime_metrics:
+            query = (
+                "SELECT decision_evaluations.*, "
+                "runs.started_at AS run_started_at, runs.finished_at AS run_finished_at "
+                "FROM decision_evaluations "
+                "LEFT JOIN runs ON runs.run_id=decision_evaluations.run_id"
+            )
+        else:
+            query = "SELECT decision_evaluations.* FROM decision_evaluations"
+        clauses: list[str] = []
         params: list[Any] = []
         if ticker is not None:
-            query += " WHERE UPPER(decision_evaluations.ticker)=?"
+            clauses.append("UPPER(decision_evaluations.ticker)=?")
             params.append(ticker.upper())
-        query += " ORDER BY decision_evaluations.evaluated_at DESC LIMIT ?"
+        if exclude_ticker is not None:
+            clauses.append("UPPER(decision_evaluations.ticker)<>?")
+            params.append(exclude_ticker.upper())
+        if evaluated_before is not None:
+            clauses.append(
+                "julianday(decision_evaluations.evaluated_at) <= julianday(?)"
+            )
+            params.append(_canonical_utc_timestamp(evaluated_before, "evaluated_before"))
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += (
+            " ORDER BY julianday(decision_evaluations.evaluated_at) DESC, "
+            "decision_evaluations.evaluated_at DESC LIMIT ?"
+        )
         params.append(limit)
         with self._lock:
             with self._conn() as conn:
                 rows = [dict(row) for row in conn.execute(query, params).fetchall()]
-                if not rows:
+                if not rows or not include_runtime_metrics:
                     return rows
                 run_ids = list(dict.fromkeys(str(row["run_id"]) for row in rows))
                 stats_rows: list[sqlite3.Row] = []
@@ -486,32 +524,26 @@ class RunHistoryStore:
         """
         from tradingagents.evaluation import architecture_rollups
 
-        cutoff = None
-        if information_cutoff:
-            cutoff = datetime.fromisoformat(information_cutoff.replace("Z", "+00:00"))
-            if cutoff.tzinfo is None or cutoff.utcoffset() is None:
-                raise ValueError("information_cutoff must include a timezone")
-            cutoff = cutoff.astimezone(timezone.utc)
-
-        rows = self.list_decision_evaluations(limit=5000)
-        visible: list[dict[str, Any]] = []
-        for row in rows:
-            evaluated_at = datetime.fromisoformat(
-                str(row["evaluated_at"]).replace("Z", "+00:00")
-            )
-            if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
-                evaluated_at = evaluated_at.replace(tzinfo=timezone.utc)
-            if cutoff is not None and evaluated_at.astimezone(timezone.utc) > cutoff:
-                continue
-            visible.append(row)
-
-        normalized_ticker = ticker.upper()
-        same = [row for row in visible if str(row["ticker"]).upper() == normalized_ticker][
-            :same_symbol_limit
-        ]
-        cross = [row for row in visible if str(row["ticker"]).upper() != normalized_ticker][
-            :cross_symbol_limit
-        ]
+        scan_limit = 5000
+        cutoff_value = (
+            _canonical_utc_timestamp(information_cutoff, "information_cutoff")
+            if information_cutoff
+            else None
+        )
+        same_cohort = self.list_decision_evaluations(
+            ticker=ticker,
+            limit=scan_limit,
+            include_runtime_metrics=False,
+            evaluated_before=cutoff_value,
+        )
+        cross_cohort = self.list_decision_evaluations(
+            exclude_ticker=ticker,
+            limit=scan_limit,
+            include_runtime_metrics=False,
+            evaluated_before=cutoff_value,
+        )
+        same = same_cohort[:same_symbol_limit]
+        cross = cross_cohort[:cross_symbol_limit]
         selected = [*same, *cross]
         if not selected:
             return ""
@@ -544,11 +576,20 @@ class RunHistoryStore:
             "evaluated_at",
         )
         payload = {
-            "schema": "tradingagents/audited-longitudinal-outcomes/v1",
+            "schema": "tradingagents/audited-longitudinal-outcomes/v2",
             "interpretation": (
                 "Historical calibration evidence only. Outcomes do not prove causality, "
                 "may come from a different market regime, and cannot authorize trade levels."
             ),
+            "selection": {
+                "order": "evaluated_at_descending",
+                "scan_limit": scan_limit,
+                "same_symbol_rollup_scope": "all_scanned_same_symbol_outcomes",
+                "same_symbol_scanned_count": len(same_cohort),
+                "same_symbol_included_count": len(same),
+                "cross_symbol_scanned_count": len(cross_cohort),
+                "cross_symbol_included_count": len(cross),
+            },
             "same_symbol_outcomes": [
                 {key: (bool(row[key]) if key == "directional_hit" else row[key]) for key in fields}
                 for row in same
@@ -557,7 +598,10 @@ class RunHistoryStore:
                 {key: (bool(row[key]) if key == "directional_hit" else row[key]) for key in fields}
                 for row in cross
             ],
-            "architecture_rollups": architecture_rollups(selected),
+            "same_symbol_architecture_rollups": architecture_rollups(
+                same_cohort,
+                include_runtime_costs=False,
+            ),
         }
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 

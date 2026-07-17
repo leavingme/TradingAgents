@@ -389,7 +389,7 @@ class TestResearchManagerAgent:
         rm = create_research_manager(llm)
         state = _make_rm_state()
         state["past_context"] = (
-            '{"schema":"tradingagents/audited-longitudinal-outcomes/v1"}'
+            '{"schema":"tradingagents/audited-longitudinal-outcomes/v2"}'
         )
         rm(state)
         prompt = captured["prompt"]

@@ -304,7 +304,9 @@ def test_vendor_summary_reports_mixed_domain_as_partial_not_unavailable():
     }]
 
 
-def test_longitudinal_context_is_structured_audited_and_cutoff_safe(tmp_path):
+def test_longitudinal_context_is_structured_audited_and_cutoff_safe(
+    tmp_path, monkeypatch
+):
     store = RunHistoryStore(tmp_path / "runs.db")
     store.create_run(
         "evaluated-nvda", "NVDA", "2026-07-01", "stock", ["market"],
@@ -343,8 +345,69 @@ def test_longitudinal_context_is_structured_audited_and_cutoff_safe(tmp_path):
     context = json.loads(store.get_longitudinal_context(
         "NVDA", information_cutoff="2026-07-10T16:00:01-04:00"
     ))
-    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v1"
+    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v2"
     assert context["same_symbol_outcomes"][0]["run_id"] == "evaluated-nvda"
     assert context["same_symbol_outcomes"][0]["directional_hit"] is True
     assert "reflection" not in context["same_symbol_outcomes"][0]
-    assert context["architecture_rollups"][0]["sample_count"] == 1
+    rollup = context["same_symbol_architecture_rollups"][0]
+    assert rollup["sample_count"] == 1
+    assert "runtime_seconds_sample_count" not in rollup
+
+    stored = store.list_decision_evaluations()[0]
+    rows = [
+        {
+            **stored,
+            "run_id": f"same-{index}",
+            "analysis_date": f"2026-07-0{index + 1}",
+            "evaluated_at": f"2026-07-{12 - index:02d}T20:00:00+00:00",
+        }
+        for index in range(3)
+    ]
+    rows.append({
+        **stored,
+        "run_id": "cross-1",
+        "ticker": "AAPL",
+        "evaluated_at": "2026-07-09T20:00:00+00:00",
+    })
+    query_options = []
+
+    def fake_list_decision_evaluations(**kwargs):
+        query_options.append(kwargs)
+        return rows[:3] if kwargs.get("ticker") else rows[3:]
+
+    monkeypatch.setattr(
+        store,
+        "list_decision_evaluations",
+        fake_list_decision_evaluations,
+    )
+    compact = json.loads(store.get_longitudinal_context(
+        "NVDA",
+        same_symbol_limit=1,
+        cross_symbol_limit=1,
+    ))
+    assert compact["selection"] == {
+        "order": "evaluated_at_descending",
+        "scan_limit": 5000,
+        "same_symbol_rollup_scope": "all_scanned_same_symbol_outcomes",
+        "same_symbol_scanned_count": 3,
+        "same_symbol_included_count": 1,
+        "cross_symbol_scanned_count": 1,
+        "cross_symbol_included_count": 1,
+    }
+    assert len(compact["same_symbol_outcomes"]) == 1
+    assert len(compact["cross_symbol_outcomes"]) == 1
+    assert compact["same_symbol_architecture_rollups"][0]["sample_count"] == 3
+    assert query_options == [
+        {
+            "ticker": "NVDA",
+            "limit": 5000,
+            "include_runtime_metrics": False,
+            "evaluated_before": None,
+        },
+        {
+            "exclude_ticker": "NVDA",
+            "limit": 5000,
+            "include_runtime_metrics": False,
+            "evaluated_before": None,
+        },
+    ]

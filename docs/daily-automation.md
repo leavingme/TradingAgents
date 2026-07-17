@@ -57,9 +57,15 @@ journalctl --user -u tradingagents-daily.service -n 100 --no-pager
 架构版本、rating、基准、原始收益、基准收益、alpha、方向命中和确定性 score 均可
 追溯。每条结果还必须保存 entry/exit 交易日、标的与基准的四个收盘价，以及来自
 逐交易日 `ohlcv_audit.jsonl` 的四个稳定 source ID；旧版只有日期范围而没有逐日
-provenance 的缓存记录不能用于结算。正式 runtime 会把这些 SQLite 定量结果以固定 JSON schema 注入 Research
-Manager 和 Portfolio Manager；不会把 LLM 生成的 Markdown 反思当成可信证据。
-历史 `point_in_time` 只允许看到 `evaluated_at <= information_cutoff` 的结果。
+provenance 的缓存记录不能用于结算。正式 runtime 会把这些 SQLite 定量结果以固定
+JSON schema 注入 Research Manager 和 Portfolio Manager；不会把 LLM 生成的 Markdown
+反思当成可信证据。v2 上下文保留最近的同标的/跨标的逐条结果及明确的扫描/截断计数，
+但架构 rollup 只使用截止时点前扫描到的完整同标的 cohort，不再把跨标的结果或最近
+样本截断混入同一均值。token、调用数和耗时仅用于 operator-facing 架构优化查询，
+不会注入投资决策上下文。历史 `point_in_time` 只允许看到
+`evaluated_at <= information_cutoff` 的结果；cutoff 与同/跨标的范围在 SQLite 排序和
+LIMIT 之前执行，避免未来结果或其他标的大量样本挤掉当时已经存在的同标的证据。
+新写入的 `evaluated_at` 统一规范为 UTC，旧偏移时间也按真实时刻而非字符串排序。
 查询方式：
 
 ```bash

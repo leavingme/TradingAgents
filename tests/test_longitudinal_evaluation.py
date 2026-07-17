@@ -62,6 +62,7 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
         "directional_hit": True,
         "score": 0.03,
         "architecture_version": "baseline",
+        "evaluated_at": "2026-07-10T20:00:00+00:00",
     }
     store.add_decision_evaluation(record)
     store.add_decision_evaluation(record)
@@ -74,6 +75,44 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert rows[0]["tool_calls"] == 24
     assert rows[0]["tokens_in"] == 1200
     assert rows[0]["tokens_out"] == 240
+    lightweight = store.list_decision_evaluations(
+        ticker="nvda",
+        include_runtime_metrics=False,
+    )
+    assert "runtime_seconds" not in lightweight[0]
+    assert "tokens_in" not in lightweight[0]
+
+    store.create_run(
+        "run-future", "NVDA", "2026-07-02", "stock", ["market"],
+        "minimax-cn", 1, architecture_version="baseline",
+    )
+    store.add_decision_evaluation({
+        **record,
+        "run_id": "run-future",
+        "analysis_date": "2026-07-02",
+        "evaluated_at": "2026-07-20T16:00:00-04:00",
+    })
+    newest = store.list_decision_evaluations(
+        ticker="NVDA",
+        limit=1,
+        include_runtime_metrics=False,
+    )
+    assert newest[0]["evaluated_at"] == "2026-07-20T20:00:00+00:00"
+    cutoff_rows = store.list_decision_evaluations(
+        ticker="NVDA",
+        evaluated_before="2026-07-15T20:00:00+00:00",
+        limit=1,
+        include_runtime_metrics=False,
+    )
+    assert [row["run_id"] for row in cutoff_rows] == ["run-1"]
+    assert store.list_decision_evaluations(
+        exclude_ticker="NVDA",
+        include_runtime_metrics=False,
+    ) == []
+    with pytest.raises(ValueError, match="timezone"):
+        store.list_decision_evaluations(evaluated_before="2026-07-15")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        store.list_decision_evaluations(ticker="NVDA", exclude_ticker="AAPL")
 
 
 def test_history_rejects_evaluation_without_exact_ohlcv_provenance(tmp_path):

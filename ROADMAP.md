@@ -101,6 +101,7 @@
   - 架构比较器过去在每臂达到 20 个结果前提前返回，付费实验可能累计 40 次运行后才暴露 vendor evidence 或 pre-treatment state 全部漂移。现在零/单臂阶段先返回 `sample_progress` / `missing_architectures`，首个双臂 evaluation 再计算有效 pair 数和所有 exclusion counters；样本不足仍保持 `insufficient_data` / `passes_paired_gate=false`，让 operator 能尽早发现半对失败或停止不可归因实验，而不降低晋级门槛。
   - 2026-07-17 22:30 CST 的真实 systemd timer 新进程已加载 canonical DB fail-closed 版本，正常返回 NVDA `not_due`、exit 0，未读取工作区回退历史、未创建 run、未调用 LLM/vendor；这补足了 CLI/Web 之外的无人值守入口运行态证据。
   - manifest v3 虽排除了纯 evaluation 展示代码，却没有显式绑定会进入后续 agent 历史上下文的评分/计量政策；改变 Hold band 或 horizon 可能在同一 fingerprint 下改变校准语义。v4 现绑定 `post-decision-day-close-v1`、`alpha-exposure-v1`、Hold band `0.02` 与默认 5-session horizon，并将 horizon 默认值统一为 evaluation、settlement、pending CLI/API 与比较器共享的单一常量。
+  - 运行中 `/api/evaluations` 的零样本比较已验证：正式 NVDA baseline/challenger 返回 `sample_progress=0:0`、门槛 20、`sufficient=false`，并明确列出两条 `missing_architectures`；实验尚未授权或启动时不会伪造 pair 诊断。
 
   - 本轮新增纵向上下文 v3、数据库时点过滤、轻量 agent 查询与结构化 agent 回归证据；相关门禁扩大至 127 项并全部通过。
   - 评分身份现逐条保存 `alpha-exposure-v1` 与 Hold band；History Store 会按声明策略重算并校验 exposure、directional hit 与 score，rollup 按评分策略隔离，baseline/challenger 评分策略不唯一或不一致时比较器 fail closed，防止伪造分数或换评分尺冒充 agent 改进。相关纵向、history、memory、runtime、结构化 agent、调度与 CLI/Web 回归 202 项通过。

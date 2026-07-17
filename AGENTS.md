@@ -363,6 +363,7 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - agent 架构 paired comparison 必须要求 baseline/challenger 的分析输入 evidence fingerprint 完整且相同；fingerprint 绑定 vendor、规范化参数、状态与结果 hash，忽略 call ID、延迟和执行时间噪声。输入不同或成功结果缺 hash 的 pair 必须排除，不得把数据源退化/漂移归因于 agent 架构改进。
 - 当前 PM-only / RM+PM 纵向上下文实验还必须要求 Research Manager 分叉前的 agent-state fingerprint 完整且相同；该指纹绑定 instrument context 与完整 debate history，并排除 treatment 自身。独立重跑造成的上游 LLM 输出漂移必须排除；若实验分叉点改变，需新增对应的 pre-treatment schema 或共享 snapshot/replay，不得沿用不匹配的指纹冒充因果证据。
 - 同标的 paired shadow 会近似翻倍 LLM 成本，启用 schedule 必须显式设置 `paired_shadow_authorized=true`。当前只允许恰好两个共享时区、运行时点、资产类型、工作日和 analysts 的 arm，并分别使用 `portfolio_only` / `research_and_portfolio`，以隔离已支持的 Research Manager context treatment；只改 `enabled=true` 或改变上游输入必须 fail closed。
+- agent architecture fingerprint 只应覆盖真正影响决策的实现：agents、graph、dataflows、LLM clients，以及影响请求、配置、时间审计和纵向上下文的 canonical runtime 模块。scheduler、CLI、报表和 evaluation 展示等纯运维代码不得切碎长期 cohort；若新增会改变决策输入、prompt、validator、模型 wire format 或风险语义的模块，必须同步加入 manifest digest scope。
 
 ## 需要定期检查的事项
 

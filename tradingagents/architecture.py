@@ -18,7 +18,22 @@ AGENT_ARCHITECTURE_VERSION = os.environ.get(
     "2026-07-17.2",
 )
 
-IMPLEMENTATION_DIGEST_SCOPE = "tradingagents/**/*.py"
+_DECISION_IMPLEMENTATION_GLOBS = (
+    "architecture.py",
+    "default_config.py",
+    "agents/**/*.py",
+    "dataflows/**/*.py",
+    "graph/**/*.py",
+    "llm_clients/**/*.py",
+    "runtime/analysis_runner.py",
+    "runtime/audit_context.py",
+    "runtime/config_builder.py",
+    "runtime/events.py",
+    "runtime/history.py",
+)
+IMPLEMENTATION_DIGEST_SCOPE = tuple(
+    f"tradingagents/{pattern}" for pattern in _DECISION_IMPLEMENTATION_GLOBS
+)
 ARCHITECTURE_EXPERIMENT_INPUT_SCHEMA = (
     "tradingagents/research-manager-pre-context-input/v1"
 )
@@ -46,11 +61,12 @@ _MAPPING_DECISION_CONFIG_KEYS = (
 
 def _digest_python_sources(source_root: Path) -> str:
     root = source_root.resolve()
-    sources = sorted(
+    sources = sorted({
         path
-        for path in root.rglob("*.py")
+        for pattern in _DECISION_IMPLEMENTATION_GLOBS
+        for path in root.glob(pattern)
         if path.is_file() and "__pycache__" not in path.parts
-    )
+    })
     if not sources:
         raise RuntimeError(f"no Python implementation sources found under {root}")
     digest = hashlib.sha256()
@@ -120,10 +136,10 @@ def build_architecture_manifest(
 ) -> dict[str, Any]:
     """Return the canonical agent topology/model manifest for one run."""
     return {
-        "schema": "tradingagents/agent-architecture-manifest/v2",
+        "schema": "tradingagents/agent-architecture-manifest/v3",
         "version": version,
         "implementation_digest": architecture_implementation_digest(),
-        "implementation_digest_scope": IMPLEMENTATION_DIGEST_SCOPE,
+        "implementation_digest_scope": list(IMPLEMENTATION_DIGEST_SCOPE),
         "selected_analysts": sorted(str(item).lower() for item in selected_analysts),
         "research_depth": research_depth,
         "llm_provider": llm_provider.lower() if llm_provider else None,

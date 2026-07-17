@@ -484,7 +484,7 @@ def test_dry_run_does_not_create_history(tmp_path, monkeypatch):
     assert result[0]["data_vendors"]["news_data"] == "longbridge_mcp, longbridge"
     assert result[0]["custom_backend_configured"] is True
     assert result[0]["architecture_manifest_schema"] == (
-        "tradingagents/agent-architecture-manifest/v2"
+        "tradingagents/agent-architecture-manifest/v3"
     )
     assert len(result[0]["architecture_fingerprint"]) == 64
     assert result[0]["architecture_manifest"]["decision_config"][

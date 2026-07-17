@@ -145,11 +145,14 @@ agent、symbol、规范化参数、fallback 状态、结果 hash 和数据观察
 20 个独立样本。Student-t 临界值也使用向下取整的等效样本量，不继续沿用偏大的
 原始 pair 数作为自由度。
 每个 run 还保存包含 analyst 集合、研究深度、模型和
-纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint。manifest v2 还包含
-路径无关的 `tradingagents/**/*.py` 实现摘要，以及非密钥的有效 vendor、风险策略、
+纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint。manifest v3 还包含
+路径无关的决策实现摘要，以及非密钥的有效 vendor、风险策略、
 输出语言、推理强度、temperature、benchmark 和新闻配置；源码或决策配置变化会自动
 拆分 fingerprint cohort。摘要不包含绝对路径、环境变量值、backend URL、凭据或
-非 Python 文件；backend 只记录是否使用自定义端点。
+非 Python 文件；backend 只记录是否使用自定义端点。manifest v3 的实现摘要只覆盖
+agents、graph、dataflows、LLM clients，以及影响请求、配置、时间审计和纵向上下文的
+canonical runtime 模块；scheduler、CLI、报表与 evaluation 展示代码不再因纯运维
+修改切碎长期 agent cohort。
 rollup 按版本、fingerprint 和 horizon 分组，同一版本混入多个 fingerprint 时直接拒绝
 比较；评分版本与 Hold band 也属于 cohort 身份，baseline/challenger 必须各自唯一且
 完全一致。改变评分尺必须形成新 cohort，不能被报告成 agent 提升。即使成对 score

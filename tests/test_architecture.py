@@ -8,13 +8,22 @@ def test_implementation_digest_is_path_independent_and_content_sensitive(tmp_pat
     second = tmp_path / "second"
     for root in (first, second):
         (root / "agents").mkdir(parents=True)
+        (root / "automation").mkdir(parents=True)
         (root / "agents" / "prompt.py").write_text("PROMPT = 'one'\n", encoding="utf-8")
+        (root / "automation" / "daily.py").write_text(
+            "OPERATIONAL = 'one'\n", encoding="utf-8"
+        )
         (root / "ignored.txt").write_text("not executable\n", encoding="utf-8")
 
     first_digest = architecture.architecture_implementation_digest(first)
     (second / "ignored.txt").write_text("different docs\n", encoding="utf-8")
     second_digest = architecture.architecture_implementation_digest(second)
     assert first_digest == second_digest
+
+    (second / "automation" / "daily.py").write_text(
+        "OPERATIONAL = 'two'\n", encoding="utf-8"
+    )
+    assert architecture.architecture_implementation_digest(second) == first_digest
 
     (second / "agents" / "prompt.py").write_text("PROMPT = 'two'\n", encoding="utf-8")
     assert architecture.architecture_implementation_digest(second) != first_digest
@@ -44,8 +53,9 @@ def test_manifest_fingerprint_changes_with_effective_implementation(monkeypatch)
     )
     second = manifest()
 
-    assert first["schema"] == "tradingagents/agent-architecture-manifest/v2"
-    assert first["implementation_digest_scope"] == "tradingagents/**/*.py"
+    assert first["schema"] == "tradingagents/agent-architecture-manifest/v3"
+    assert "tradingagents/agents/**/*.py" in first["implementation_digest_scope"]
+    assert "tradingagents/automation/**/*.py" not in first["implementation_digest_scope"]
     assert architecture.architecture_fingerprint(first) != architecture.architecture_fingerprint(
         second
     )

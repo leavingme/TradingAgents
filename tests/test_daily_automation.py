@@ -30,6 +30,23 @@ def _schedule() -> DailySchedule:
     )
 
 
+def test_systemd_assets_preserve_long_run_and_persistent_timer_contract():
+    workspace = Path(__file__).resolve().parents[1]
+    service = (workspace / "deploy/systemd/tradingagents-daily.service").read_text(
+        encoding="utf-8"
+    )
+    timer = (workspace / "deploy/systemd/tradingagents-daily.timer").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Type=oneshot" in service
+    assert "TimeoutStartSec=infinity" in service
+    assert "scripts/daily_analysis.py run" in service
+    assert "OnCalendar=*:0/15" in timer
+    assert "Persistent=true" in timer
+    assert "RandomizedDelaySec=30" in timer
+
+
 def test_target_due_uses_exchange_local_time():
     target = _schedule().targets[0]
     before = datetime(2026, 7, 17, 16, 29, tzinfo=ZoneInfo("America/New_York"))

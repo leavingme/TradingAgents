@@ -3,7 +3,9 @@
 每日自动化由用户级 systemd timer 托管。timer 每 15 分钟唤醒一次轻量调度器；
 调度器以每个标的的交易所本地时区判断是否已经到达 `run_after`，随后通过
 `tradingagents.runtime.run_analysis_once()` 启动 canonical runtime。timer 本身
-不直接运行 Graph，也不保存任何凭据。
+不直接运行 Graph，也不保存任何凭据。仓库 service 明确设置
+`TimeoutStartSec=infinity`；用户级 systemd manager 常见的 90 秒默认启动超时不能
+截断通常需要 5–10 分钟的完整分析。
 
 ## 配置
 

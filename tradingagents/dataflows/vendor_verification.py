@@ -15,16 +15,7 @@ def _default_db_path() -> Path:
     configured = os.environ.get("TRADINGAGENTS_DB")
     if configured:
         return Path(configured)
-    home_path = Path.home() / ".tradingagents" / "runs.db"
-    fallback_path = Path.cwd() / ".tradingagents" / "runs.db"
-    try:
-        home_path.parent.mkdir(parents=True, exist_ok=True)
-        probe_path = home_path.parent / ".vendor_verification_write_test"
-        probe_path.write_text("", encoding="utf-8")
-        probe_path.unlink(missing_ok=True)
-        return home_path
-    except OSError:
-        return fallback_path
+    return Path.home() / ".tradingagents" / "runs.db"
 
 
 class VendorVerificationStore:

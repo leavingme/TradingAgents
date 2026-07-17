@@ -324,8 +324,27 @@ async def get_decision_evaluations(
         ticker=ticker,
         limit=bounded_limit,
     )
+    pending_rows = history_store.list_unevaluated_validated_runs(ticker=ticker)
+    pending = [
+        {
+            "run_id": row.get("run_id"),
+            "ticker": row.get("ticker"),
+            "analysis_date": row.get("analysis_date"),
+            "market_data_date": row.get("market_data_date"),
+            "decision_as_of": row.get("decision_as_of"),
+            "architecture_version": row.get("architecture_version"),
+            "architecture_fingerprint": row.get("architecture_fingerprint"),
+            "started_at": row.get("started_at"),
+            "finished_at": row.get("finished_at"),
+            "horizon_sessions": 5,
+            "status": "awaiting_fixed_horizon_outcome",
+        }
+        for row in pending_rows[:bounded_limit]
+    ]
     payload = {
         "evaluations": evaluations,
+        "pending_evaluation_count": len(pending_rows),
+        "pending_evaluations": pending,
         "rollups": architecture_rollups(evaluations),
     }
     if baseline and challenger:

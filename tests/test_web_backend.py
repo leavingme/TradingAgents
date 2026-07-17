@@ -730,9 +730,44 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         "score": 0.03,
         "architecture_version": "baseline",
     })
+    history_store.create_run(
+        "pending-evaluation-run",
+        "NVDA",
+        "2026-07-10",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        architecture_version="baseline",
+        architecture_fingerprint="pending-fingerprint",
+    )
+    history_store.add_event("pending-evaluation-run", AnalysisEvent(
+        type="run_completed",
+        run_id="pending-evaluation-run",
+        timestamp="2026-07-10T21:00:00+00:00",
+        content={
+            "decision": "Rating: Hold",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-10T21:00:00+00:00",
+        },
+    ))
 
     response = asyncio.run(main.get_decision_evaluations(ticker="nvda", limit=50))
     assert len(response["evaluations"]) == 1
+    assert response["pending_evaluation_count"] == 1
+    assert response["pending_evaluations"] == [{
+        "run_id": "pending-evaluation-run",
+        "ticker": "NVDA",
+        "analysis_date": "2026-07-10",
+        "market_data_date": None,
+        "decision_as_of": "2026-07-10T21:00:00+00:00",
+        "architecture_version": "baseline",
+        "architecture_fingerprint": "pending-fingerprint",
+        "started_at": None,
+        "finished_at": None,
+        "horizon_sessions": 5,
+        "status": "awaiting_fixed_horizon_outcome",
+    }]
     assert response["evaluations"][0]["runtime_seconds"] == 120.0
     assert response["evaluations"][0]["tokens_in"] == 900
     assert response["rollups"] == [{

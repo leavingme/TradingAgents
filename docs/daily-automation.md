@@ -29,6 +29,9 @@ server-side 授权门禁，不影响普通单 arm 每日运行。
 调度器从 `~/.tradingagents/web_config.json` 读取服务端已保存的研究深度、LLM、
 输出语言和 vendor 顺序，因此无人值守运行与 Web 运行使用相同设置。配置和日志中
 不得写 API key、cookie、token 或 webhook。
+运行历史与 vendor 审计默认且唯一使用 `~/.tradingagents/runs.db`；只有显式
+`TRADINGAGENTS_DB` 可以覆盖。canonical 路径不可访问时必须 fail closed，禁止静默
+回退到工作区 `.tradingagents/runs.db` 形成第二套历史。
 
 同一 symbol + 请求截止日 + architecture version 已有 `pending`、`running`、`completed` 或
 `review_required` run 时不会重复启动。`failed`、`cancelled`、`unavailable` 默认
@@ -121,6 +124,12 @@ venv/bin/python3.12 scripts/daily_analysis.py evaluate --ticker NVDA
 curl -s 'http://127.0.0.1:8765/api/evaluations?ticker=NVDA'
 curl -s 'http://127.0.0.1:8765/api/evaluations?ticker=NVDA&baseline=baseline&challenger=challenger'
 ```
+
+CLI 与 API 同时返回 `pending_evaluation_count` / `pending_evaluations`。每条 pending
+记录只来自 SQLite 中 validated 且尚无对应 5-session evaluation 的 run，并显示
+决策时刻、请求日期、实际 market-data date、架构身份与
+`awaiting_fixed_horizon_outcome` 状态。因此 `evaluation_count=0` 时可以区分“尚无首个
+决策”“正常等待固定期限成熟”，而不必从 Markdown 或日志猜测。
 
 待结算集合直接来自 SQLite 中 `decision_status=validated` 且缺少对应 horizon evaluation
 的 run，不再由兼容 Markdown memory log 的 pending 标签驱动。Markdown 反思只做

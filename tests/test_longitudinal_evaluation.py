@@ -236,6 +236,9 @@ def test_history_lists_validated_runs_without_markdown_or_existing_outcome(tmp_p
     ))
     rows = store.list_unevaluated_validated_runs(ticker="nvda")
     assert [row["run_id"] for row in rows] == ["pending-outcome"]
+    assert [row["run_id"] for row in store.list_unevaluated_validated_runs()] == [
+        "pending-outcome"
+    ]
 
 
 def test_history_rejects_evaluation_without_exact_ohlcv_provenance(tmp_path):

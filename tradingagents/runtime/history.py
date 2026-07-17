@@ -55,19 +55,10 @@ def _default_db_path() -> Path:
     configured = os.environ.get("TRADINGAGENTS_DB")
     if configured:
         return Path(configured)
-
-    home_path = Path.home() / ".tradingagents" / "runs.db"
-    fallback_path = Path.cwd() / ".tradingagents" / "runs.db"
-
-    try:
-        home_path.parent.mkdir(parents=True, exist_ok=True)
-        probe_path = home_path.parent / ".write_test"
-        with probe_path.open("w", encoding="utf-8") as probe:
-            probe.write("")
-        probe_path.unlink(missing_ok=True)
-        return home_path
-    except OSError:
-        return fallback_path
+    # Never silently create a second history universe under the working tree.
+    # If the canonical home path is unavailable, initialization must fail
+    # closed; tests and deliberate alternate deployments use TRADINGAGENTS_DB.
+    return Path.home() / ".tradingagents" / "runs.db"
 
 DB_PATH = _default_db_path()
 
@@ -393,27 +384,39 @@ class RunHistoryStore:
     def list_unevaluated_validated_runs(
         self,
         *,
-        ticker: str,
+        ticker: str | None = None,
         horizon_sessions: int = 5,
     ) -> list[dict[str, Any]]:
         """Return validated runs whose fixed-horizon outcome is still absent."""
+        ticker_clause = ""
+        params: list[Any] = [int(horizon_sessions)]
+        if ticker is not None:
+            ticker_clause = "AND UPPER(runs.ticker) = ?"
+            params.append(ticker.upper())
         with self._lock:
             with self._conn() as conn:
                 return [
                     dict(row)
                     for row in conn.execute(
-                        """
-                        SELECT runs.*
+                        f"""
+                        SELECT runs.*, terminal.timestamp AS decision_as_of
                         FROM runs
                         LEFT JOIN decision_evaluations
                           ON decision_evaluations.run_id = runs.run_id
                          AND decision_evaluations.horizon_sessions = ?
-                        WHERE UPPER(runs.ticker) = ?
-                          AND runs.decision_status = 'validated'
+                        LEFT JOIN events AS terminal
+                          ON terminal.id = (
+                              SELECT MAX(candidate.id)
+                              FROM events AS candidate
+                              WHERE candidate.run_id = runs.run_id
+                                AND candidate.event_type = 'run_completed'
+                          )
+                        WHERE runs.decision_status = 'validated'
+                          {ticker_clause}
                           AND decision_evaluations.run_id IS NULL
                         ORDER BY runs.analysis_date, runs.created_at, runs.run_id
                         """,
-                        (int(horizon_sessions), ticker.upper()),
+                        params,
                     ).fetchall()
                 ]
 

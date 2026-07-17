@@ -22,6 +22,22 @@ from tradingagents.evaluation import architecture_rollups, compare_architectures
 from tradingagents.runtime.history import history_store  # noqa: E402
 
 
+def _pending_evaluation_summary(row: dict, horizon_sessions: int = 5) -> dict:
+    return {
+        "run_id": row.get("run_id"),
+        "ticker": row.get("ticker"),
+        "analysis_date": row.get("analysis_date"),
+        "market_data_date": row.get("market_data_date"),
+        "decision_as_of": row.get("decision_as_of"),
+        "architecture_version": row.get("architecture_version"),
+        "architecture_fingerprint": row.get("architecture_fingerprint"),
+        "started_at": row.get("started_at"),
+        "finished_at": row.get("finished_at"),
+        "horizon_sessions": horizon_sessions,
+        "status": "awaiting_fixed_horizon_outcome",
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="TradingAgents post-close daily automation")
     parser.add_argument("command", choices=("run", "status", "evaluate"))
@@ -38,8 +54,13 @@ def main() -> int:
     args = parse_args()
     if args.command == "evaluate":
         evaluations = history_store.list_decision_evaluations(ticker=args.ticker)
+        pending = history_store.list_unevaluated_validated_runs(ticker=args.ticker)
         payload = {
             "evaluation_count": len(evaluations),
+            "pending_evaluation_count": len(pending),
+            "pending_evaluations": [
+                _pending_evaluation_summary(row) for row in pending
+            ],
             "rollups": architecture_rollups(evaluations),
         }
         if args.baseline and args.challenger:

@@ -69,10 +69,13 @@ curl -s http://127.0.0.1:8765/api/evaluations?ticker=NVDA
 
 架构 challenger 的比较要求 baseline/challenger 各至少 20 个已结算样本。由于连续
 实盘样本受行情 regime 混杂，正式 gate 使用相同 ticker + analysis date + horizon 的
-成对 shadow 结果。两边必须有相同 entry/exit 日期、四个收盘价及 raw/alpha outcome，
-缺失或不一致会从配对样本排除。每个 run 还保存包含 analyst 集合、研究深度、模型和
+成对 shadow 结果。两边必须有相同 entry/exit 日期、四个收盘价、四个 stable OHLCV
+source ID 以及 raw/benchmark/alpha outcome；缺失或不一致会从
+配对样本排除并单独计数。小样本 score delta 的 95% 下界使用 Student-t 临界值，
+不使用偏乐观的正态近似。每个 run 还保存包含 analyst 集合、研究深度、模型和
 纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint；
-同一版本混入多个 fingerprint 时直接拒绝比较。即使成对 score delta 的 95% 下界通过
+rollup 按版本、fingerprint 和 horizon 分组，同一版本混入多个 fingerprint 时直接拒绝
+比较。即使成对 score delta 的 95% 下界通过
 阈值，结果也只返回 `review_required`，不得自动晋升或自动修改 prompt/agent 拓扑。
 
 默认禁用的实验模板位于 `config/architecture_experiment.example.json`。它比较

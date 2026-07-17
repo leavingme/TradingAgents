@@ -47,7 +47,7 @@ SQLite attempt 而每 15 分钟无限重试。
 等待重试的 `retry_wait` 本身不代表一次新失败，保持 exit 0。
 
 每日调度请求额外启用 exact-market-date 门禁。若 validator 已成功返回结构化快照，
-但实际 `market_data_date` 仍早于请求截止日，runtime 会在 Graph/LLM 执行前以
+但实际 `market_data_date` 仍早于请求截止日，runtime 会在 Graph/LLM 构造前以
 `market_data_pending` 结束本轮轻量探测；默认每 15 分钟重试，且不占每天两次的正常
 分析失败预算。首次探测 240 分钟后仍未就绪则转为
 `market_data_unavailable`/exit 1，不会用旧日 K 线生成可执行决策。两个窗口分别由

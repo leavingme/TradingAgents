@@ -238,28 +238,25 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert manifest["longitudinal_context_mode"] == "research_and_portfolio"
 
 
-def test_exact_market_date_defers_before_graph_execution(monkeypatch, tmp_path):
+def test_exact_market_date_defers_before_graph_and_llm_construction(
+    monkeypatch, tmp_path
+):
     from tradingagents.runtime import analysis_runner
     from tradingagents.runtime.history import history_store
     from tradingagents.dataflows import market_data_validator
 
-    class NeverStreamCompiledGraph(FakeCompiledGraph):
-        def stream(self, init_state, **kwargs):
-            raise AssertionError("graph must not execute while the daily bar is stale")
-            yield  # pragma: no cover
-
-    class NeverStreamTradingAgentsGraph(FakeTradingAgentsGraph):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.graph = NeverStreamCompiledGraph()
-
     monkeypatch.setattr(
-        analysis_runner, "TradingAgentsGraph", NeverStreamTradingAgentsGraph
+        analysis_runner,
+        "TradingAgentsGraph",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("graph and LLM clients must not be constructed")
+        ),
     )
-    monkeypatch.setattr(
-        market_data_validator,
-        "verified_snapshot_dict",
-        lambda symbol, date: {
+    def stale_snapshot(symbol, date):
+        from tradingagents.dataflows.config import get_config
+
+        assert get_config()["data_vendors"]["core_stock_apis"] == "alpha_vantage"
+        return {
             "symbol": symbol,
             "market_date": "2026-07-16",
             "close": 100.0,
@@ -267,7 +264,10 @@ def test_exact_market_date_defers_before_graph_execution(monkeypatch, tmp_path):
             "vendor_call_id": "settlement-test",
             "calculation_start": "2023-07-17",
             "row_count": 750,
-        },
+        }
+
+    monkeypatch.setattr(
+        market_data_validator, "verified_snapshot_dict", stale_snapshot
     )
     request = AnalysisRequest(
         ticker="NVDA",
@@ -276,6 +276,9 @@ def test_exact_market_date_defers_before_graph_execution(monkeypatch, tmp_path):
         report_dir=tmp_path / "reports",
         run_id="run-market-data-pending",
         require_exact_market_data_date=True,
+        config_overrides={
+            "data_vendors": {"core_stock_apis": "alpha_vantage"}
+        },
     )
 
     result = run_analysis_once(request)

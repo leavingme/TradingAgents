@@ -351,6 +351,7 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
         "tokens_in"
     ]["sample_count"] == 10
 
+    original_started_at = evaluations[-1]["run_started_at"]
     evaluations[-1]["run_started_at"] = "2026-01-20T22:00:00+00:00"
     delayed = compare_architectures(
         evaluations, baseline="baseline", challenger="challenger"
@@ -358,6 +359,15 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert delayed["paired"]["sample_count"] == 19
     assert delayed["paired"]["temporal_mismatches_excluded"] == 1
     assert delayed["passes_paired_gate"] is False
+
+    evaluations[-1]["run_started_at"] = original_started_at
+    evaluations[-1]["market_data_date"] = "2026-06-19"
+    different_market_bar = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert different_market_bar["paired"]["sample_count"] == 19
+    assert different_market_bar["paired"]["outcome_mismatches_excluded"] == 1
+    assert different_market_bar["passes_paired_gate"] is False
 
 
 def test_architecture_comparison_rejects_mixed_configuration_fingerprints():

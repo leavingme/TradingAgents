@@ -97,6 +97,83 @@ def _runtime_cost_value(value: Any) -> float | None:
     return numeric if isfinite(numeric) and numeric >= 0 else None
 
 
+def _overlap_adjusted_standard_error(
+    series_by_ticker: dict[str, list[tuple[str, str, str, float]]],
+    *,
+    horizon_sessions: int,
+) -> dict[str, Any]:
+    """Estimate paired-mean uncertainty without treating overlapping outcomes as IID.
+
+    Consecutive daily evaluations of a multi-session horizon reuse market-return
+    observations.  We therefore calculate an overlap-aware Bartlett/Newey-West
+    estimate within each ticker and conservatively retain the larger of it and
+    the ordinary IID standard error.  Cross-ticker covariance is intentionally
+    not invented.  The stored entry/exit dates decide whether two windows
+    actually overlap, so gaps in a schedule do not create synthetic covariance.
+    """
+    ordered = {
+        ticker: sorted(rows, key=lambda row: (row[1], row[0]))
+        for ticker, rows in series_by_ticker.items()
+    }
+    values = [row[3] for rows in ordered.values() for row in rows]
+    sample_count = len(values)
+    if sample_count < 2:
+        return {
+            "standard_error": None,
+            "iid_standard_error": None,
+            "overlap_adjusted_standard_error": None,
+            "overlap_effective_sample_size": float(sample_count),
+            "autocorrelation_lags": 0,
+            "overlap_pairs_used": 0,
+            "standard_error_method": "max(iid, overlap-aware-newey-west)",
+        }
+
+    mean_delta = fmean(values)
+    iid_standard_error = stdev(values) / sqrt(sample_count)
+    max_sequence_lag = max((len(rows) - 1 for rows in ordered.values()), default=0)
+    autocorrelation_lags = min(max(int(horizon_sessions) - 1, 0), max_sequence_lag)
+    long_run_sum = sum((value - mean_delta) ** 2 for value in values)
+    overlap_pairs_used = 0
+    if autocorrelation_lags:
+        for rows in ordered.values():
+            for lag in range(1, min(autocorrelation_lags, len(rows) - 1) + 1):
+                weight = 1.0 - lag / (autocorrelation_lags + 1.0)
+                covariance_sum = 0.0
+                for index in range(lag, len(rows)):
+                    older = rows[index - lag]
+                    newer = rows[index]
+                    if newer[1] > older[2]:
+                        continue
+                    covariance_sum += (
+                        (newer[3] - mean_delta) * (older[3] - mean_delta)
+                    )
+                    overlap_pairs_used += 1
+                long_run_sum += 2.0 * weight * covariance_sum
+
+    overlap_variance = max(long_run_sum, 0.0) / (
+        sample_count * (sample_count - 1)
+    )
+    overlap_standard_error = sqrt(overlap_variance)
+    selected_standard_error = max(iid_standard_error, overlap_standard_error)
+    effective_sample_size = (
+        float(sample_count)
+        if selected_standard_error == 0.0
+        else min(
+            float(sample_count),
+            sample_count * (iid_standard_error / selected_standard_error) ** 2,
+        )
+    )
+    return {
+        "standard_error": selected_standard_error,
+        "iid_standard_error": iid_standard_error,
+        "overlap_adjusted_standard_error": overlap_standard_error,
+        "overlap_effective_sample_size": effective_sample_size,
+        "autocorrelation_lags": autocorrelation_lags,
+        "overlap_pairs_used": overlap_pairs_used,
+        "standard_error_method": "max(iid, overlap-aware-newey-west)",
+    }
+
+
 def _scoring_policy(row: dict[str, Any]) -> tuple[str, float]:
     version = str(row.get("scoring_version") or OUTCOME_SCORING_VERSION)
     hold_band = float(row.get("hold_band", DEFAULT_HOLD_BAND))
@@ -309,6 +386,9 @@ def compare_architectures(
         grouped[(str(ticker).upper(), str(analysis_date), horizon_sessions)][version].append(row)
 
     paired_deltas: list[float] = []
+    paired_delta_series: dict[
+        str, list[tuple[str, str, str, float]]
+    ] = defaultdict(list)
     paired_hit_deltas: list[float] = []
     ambiguous_pairs = 0
     outcome_mismatches = 0
@@ -367,7 +447,16 @@ def compare_architectures(
         ):
             provenance_mismatches += 1
             continue
-        paired_deltas.append(float(challenger_row["score"]) - float(base_row["score"]))
+        score_delta = float(challenger_row["score"]) - float(base_row["score"])
+        paired_deltas.append(score_delta)
+        paired_delta_series[str(base_row["ticker"]).upper()].append(
+            (
+                str(base_row["analysis_date"]),
+                str(base_row["entry_date"]),
+                str(base_row["exit_date"]),
+                score_delta,
+            )
+        )
         paired_hit_deltas.append(
             float(bool(challenger_row["directional_hit"]))
             - float(bool(base_row["directional_hit"]))
@@ -385,6 +474,8 @@ def compare_architectures(
     paired_summary: dict[str, Any] = {
         "sample_count": paired_count,
         "minimum_required": minimum_paired_samples,
+        "minimum_score_improvement": minimum_score_improvement,
+        "horizon_sessions": horizon_sessions,
         "ambiguous_pairs_excluded": ambiguous_pairs,
         "outcome_mismatches_excluded": outcome_mismatches,
         "provenance_mismatches_excluded": provenance_mismatches,
@@ -392,8 +483,23 @@ def compare_architectures(
     passes_paired_gate = False
     if paired_count:
         mean_delta = fmean(paired_deltas)
-        standard_error = stdev(paired_deltas) / sqrt(paired_count) if paired_count > 1 else None
-        critical_value = _student_t_critical_95(paired_count)
+        uncertainty = _overlap_adjusted_standard_error(
+            paired_delta_series,
+            horizon_sessions=horizon_sessions,
+        )
+        standard_error = uncertainty["standard_error"]
+        effective_sample_count = (
+            max(
+                2,
+                min(
+                    paired_count,
+                    int(uncertainty["overlap_effective_sample_size"] + 1e-12),
+                ),
+            )
+            if paired_count > 1
+            else paired_count
+        )
+        critical_value = _student_t_critical_95(effective_sample_count)
         lower_95 = (
             mean_delta - critical_value * standard_error
             if standard_error is not None and critical_value is not None
@@ -402,9 +508,10 @@ def compare_architectures(
         paired_summary.update({
             "mean_score_delta": mean_delta,
             "mean_hit_rate_delta": fmean(paired_hit_deltas),
-            "standard_error": standard_error,
             "critical_value": critical_value,
+            "critical_effective_sample_count": effective_sample_count,
             "lower_95_score_delta": lower_95,
+            **uncertainty,
         })
         passes_paired_gate = (
             paired_count >= minimum_paired_samples

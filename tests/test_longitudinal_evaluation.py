@@ -365,3 +365,53 @@ def test_architecture_pairing_uses_student_t_not_normal_lower_bound():
     normal_lower = paired["mean_score_delta"] - 1.96 * paired["standard_error"]
     assert paired["critical_value"] == 2.093
     assert paired["lower_95_score_delta"] < normal_lower
+
+
+def test_architecture_pairing_corrects_overlapping_horizon_autocorrelation():
+    evaluations = []
+    deltas = [0.001] * 10 + [0.009] * 10
+    for index, delta in enumerate(deltas):
+        for version, score in (("baseline", 0.0), ("challenger", delta)):
+            evaluations.append({
+                "ticker": "NVDA",
+                "analysis_date": f"2026-06-{index + 1:02d}",
+                "architecture_version": version,
+                "architecture_fingerprint": f"{version}-fp",
+                "horizon_sessions": 5,
+                "directional_hit": True,
+                "raw_return": 0.03,
+                "benchmark_return": 0.01,
+                "alpha_return": 0.02,
+                "entry_date": f"2026-06-{index + 1:02d}",
+                "exit_date": f"2026-06-{index + 6:02d}",
+                "stock_entry_close": 100.0,
+                "stock_exit_close": 103.0,
+                "benchmark_entry_close": 500.0,
+                "benchmark_exit_close": 505.0,
+                "stock_entry_source_id": f"ohlcv:test:stock-entry:{index}",
+                "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
+                "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
+                "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "score": score,
+            })
+
+    comparison = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    paired = comparison["paired"]
+    iid_lower = (
+        paired["mean_score_delta"]
+        - paired["critical_value"] * paired["iid_standard_error"]
+    )
+
+    assert iid_lower > 0.002
+    assert paired["lower_95_score_delta"] < 0.002
+    assert paired["overlap_adjusted_standard_error"] > paired["iid_standard_error"]
+    assert paired["standard_error"] == paired["overlap_adjusted_standard_error"]
+    assert paired["autocorrelation_lags"] == 4
+    assert paired["overlap_pairs_used"] == 70
+    assert paired["overlap_effective_sample_size"] < 6
+    assert paired["critical_effective_sample_count"] == 5
+    assert paired["critical_value"] == 2.776
+    assert paired["standard_error_method"] == "max(iid, overlap-aware-newey-west)"
+    assert comparison["passes_paired_gate"] is False

@@ -82,7 +82,13 @@ curl -s 'http://127.0.0.1:8765/api/evaluations?ticker=NVDA&baseline=baseline&cha
 成对 shadow 结果。两边必须有相同 entry/exit 日期、四个收盘价、四个 stable OHLCV
 source ID 以及 raw/benchmark/alpha outcome；缺失或不一致会从
 配对样本排除并单独计数。小样本 score delta 的 95% 下界使用 Student-t 临界值，
-不使用偏乐观的正态近似。每个 run 还保存包含 analyst 集合、研究深度、模型和
+不使用偏乐观的正态近似。日频固定期限结果会共享部分市场交易日，因此标准误还会
+按 ticker 和实际 entry/exit 窗口执行最多 `horizon - 1` 阶的 Bartlett/Newey-West
+自相关校正，并取 IID 与校正值中更保守的一项；输出同时保留两者、使用的 lag、
+重叠 pair 数和不确定性等效样本量，避免把 20 个彼此重叠的 5-session 结果误当成
+20 个独立样本。Student-t 临界值也使用向下取整的等效样本量，不继续沿用偏大的
+原始 pair 数作为自由度。
+每个 run 还保存包含 analyst 集合、研究深度、模型和
 纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint。manifest v2 还包含
 路径无关的 `tradingagents/**/*.py` 实现摘要，以及非密钥的有效 vendor、风险策略、
 输出语言、推理强度、temperature、benchmark 和新闻配置；源码或决策配置变化会自动

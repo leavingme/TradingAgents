@@ -161,9 +161,51 @@ class ScheduledTarget:
 class DailySchedule:
     enabled: bool
     targets: tuple[ScheduledTarget, ...]
+    paired_shadow_authorized: bool = False
     max_attempts_per_date: int = 2
     retry_after_minutes: int = 60
     stale_active_after_minutes: int = 360
+
+    def __post_init__(self) -> None:
+        identities = [
+            (target.symbol, target.architecture_version) for target in self.targets
+        ]
+        if len(identities) != len(set(identities)):
+            raise ValueError("daily schedule contains duplicate symbol/architecture targets")
+        groups: dict[str, list[ScheduledTarget]] = {}
+        for target in self.targets:
+            groups.setdefault(target.symbol, []).append(target)
+        shadow_groups = {symbol: rows for symbol, rows in groups.items() if len(rows) > 1}
+        for symbol, rows in shadow_groups.items():
+            if len(rows) != 2:
+                raise ValueError(
+                    f"paired shadow schedule for {symbol} must contain exactly two arms"
+                )
+            shared_inputs = {
+                (
+                    row.timezone,
+                    row.run_after,
+                    row.asset_type,
+                    row.weekdays,
+                    row.selected_analysts,
+                )
+                for row in rows
+            }
+            if len(shared_inputs) != 1:
+                raise ValueError(
+                    f"paired shadow arms for {symbol} must share schedule and analysts"
+                )
+            if {row.longitudinal_context_mode for row in rows} != {
+                "portfolio_only", "research_and_portfolio"
+            }:
+                raise ValueError(
+                    f"paired shadow arms for {symbol} must isolate the supported "
+                    "Research Manager context treatment"
+                )
+        if self.enabled and shadow_groups and not self.paired_shadow_authorized:
+            raise ValueError(
+                "enabled paired shadow schedule requires paired_shadow_authorized=true"
+            )
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "DailySchedule":
@@ -171,9 +213,7 @@ class DailySchedule:
         if not isinstance(raw_targets, list):
             raise ValueError("daily schedule targets must be a list")
         targets = tuple(ScheduledTarget.from_dict(item) for item in raw_targets)
-        identities = [(target.symbol, target.architecture_version) for target in targets]
-        if len(identities) != len(set(identities)):
-            raise ValueError("daily schedule contains duplicate symbol/architecture targets")
+        paired_shadow_authorized = payload.get("paired_shadow_authorized") is True
         max_attempts = int(payload.get("max_attempts_per_date", 2))
         retry_minutes = int(payload.get("retry_after_minutes", 60))
         stale_minutes = int(payload.get("stale_active_after_minutes", 360))
@@ -186,6 +226,7 @@ class DailySchedule:
         return cls(
             enabled=payload.get("enabled") is True,
             targets=targets,
+            paired_shadow_authorized=paired_shadow_authorized,
             max_attempts_per_date=max_attempts,
             retry_after_minutes=retry_minutes,
             stale_active_after_minutes=stale_minutes,

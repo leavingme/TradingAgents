@@ -1,5 +1,6 @@
 {
   "enabled": false,
+  "paired_shadow_authorized": false,
   "max_attempts_per_date": 1,
   "retry_after_minutes": 60,
   "stale_active_after_minutes": 360,

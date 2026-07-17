@@ -57,6 +57,7 @@ def main() -> int:
     if args.command == "status":
         payload = {
             "enabled": schedule.enabled,
+            "paired_shadow_authorized": schedule.paired_shadow_authorized,
             "max_attempts_per_date": schedule.max_attempts_per_date,
             "retry_after_minutes": schedule.retry_after_minutes,
             "stale_active_after_minutes": schedule.stale_active_after_minutes,

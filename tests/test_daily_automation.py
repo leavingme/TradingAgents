@@ -74,8 +74,13 @@ def test_schedule_allows_paired_shadow_versions_for_same_symbol():
     }
     schedule = DailySchedule.from_dict({
         "enabled": True,
+        "paired_shadow_authorized": True,
         "targets": [
-            {**common, "architecture_version": "baseline"},
+            {
+                **common,
+                "architecture_version": "baseline",
+                "longitudinal_context_mode": "portfolio_only",
+            },
             {
                 **common,
                 "architecture_version": "challenger",
@@ -86,6 +91,71 @@ def test_schedule_allows_paired_shadow_versions_for_same_symbol():
     assert [target.architecture_version for target in schedule.targets] == [
         "baseline", "challenger"
     ]
+    assert schedule.paired_shadow_authorized is True
+
+
+def test_enabled_paired_shadow_requires_explicit_cost_authorization():
+    common = {
+        "symbol": "NVDA",
+        "timezone": "America/New_York",
+        "run_after": "16:30",
+    }
+    with pytest.raises(ValueError, match="paired_shadow_authorized=true"):
+        DailySchedule.from_dict({
+            "enabled": True,
+            "targets": [
+                {
+                    **common,
+                    "architecture_version": "baseline",
+                    "longitudinal_context_mode": "portfolio_only",
+                },
+                {
+                    **common,
+                    "architecture_version": "challenger",
+                    "longitudinal_context_mode": "research_and_portfolio",
+                },
+            ],
+        })
+    direct_targets = (
+        ScheduledTarget.from_dict({
+            **common,
+            "architecture_version": "baseline",
+            "longitudinal_context_mode": "portfolio_only",
+        }),
+        ScheduledTarget.from_dict({
+            **common,
+            "architecture_version": "challenger",
+            "longitudinal_context_mode": "research_and_portfolio",
+        }),
+    )
+    with pytest.raises(ValueError, match="paired_shadow_authorized=true"):
+        DailySchedule(enabled=True, targets=direct_targets)
+
+
+def test_paired_shadow_rejects_non_comparable_upstream_inputs():
+    common = {
+        "symbol": "NVDA",
+        "timezone": "America/New_York",
+        "run_after": "16:30",
+        "longitudinal_context_mode": "portfolio_only",
+    }
+    with pytest.raises(ValueError, match="share schedule and analysts"):
+        DailySchedule.from_dict({
+            "enabled": False,
+            "targets": [
+                {
+                    **common,
+                    "architecture_version": "baseline",
+                    "selected_analysts": ["market"],
+                },
+                {
+                    **common,
+                    "architecture_version": "challenger",
+                    "longitudinal_context_mode": "research_and_portfolio",
+                    "selected_analysts": ["market", "news"],
+                },
+            ],
+        })
 
 
 def test_completed_shadow_pairs_counterbalance_cold_cache_execution_order(
@@ -98,9 +168,18 @@ def test_completed_shadow_pairs_counterbalance_cold_cache_execution_order(
     }
     schedule = DailySchedule.from_dict({
         "enabled": True,
+        "paired_shadow_authorized": True,
         "targets": [
-            {**common, "architecture_version": "baseline"},
-            {**common, "architecture_version": "challenger"},
+            {
+                **common,
+                "architecture_version": "baseline",
+                "longitudinal_context_mode": "portfolio_only",
+            },
+            {
+                **common,
+                "architecture_version": "challenger",
+                "longitudinal_context_mode": "research_and_portfolio",
+            },
         ],
     })
     store = RunHistoryStore(tmp_path / "runs.db")
@@ -178,9 +257,18 @@ def test_incomplete_shadow_pair_does_not_advance_counterbalance(tmp_path, monkey
     }
     schedule = DailySchedule.from_dict({
         "enabled": True,
+        "paired_shadow_authorized": True,
         "targets": [
-            {**common, "architecture_version": "baseline"},
-            {**common, "architecture_version": "challenger"},
+            {
+                **common,
+                "architecture_version": "baseline",
+                "longitudinal_context_mode": "portfolio_only",
+            },
+            {
+                **common,
+                "architecture_version": "challenger",
+                "longitudinal_context_mode": "research_and_portfolio",
+            },
         ],
     })
     store = RunHistoryStore(tmp_path / "runs.db")

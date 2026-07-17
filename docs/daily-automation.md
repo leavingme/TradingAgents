@@ -20,6 +20,12 @@ symbol + 请求截止日 + architecture version；实际验证的 `market_data_d
 runtime 另行审计。因此同一标的可以做成对 shadow 实验，同时每个版本仍独立遵守
 重试和成本上限。
 
+同一标的配置两个架构 arm 时，schema 只接受当前可归因的 RM-context 实验：恰好
+两个 arm 必须共享时区、运行时点、资产类型、工作日和 analysts，并分别使用
+`portfolio_only` 与 `research_and_portfolio`。启用此类 schedule 还必须显式设置
+`paired_shadow_authorized=true`；否则加载直接失败。这是近似双倍 LLM 成本的
+server-side 授权门禁，不影响普通单 arm 每日运行。
+
 调度器从 `~/.tradingagents/web_config.json` 读取服务端已保存的研究深度、LLM、
 输出语言和 vendor 顺序，因此无人值守运行与 Web 运行使用相同设置。配置和日志中
 不得写 API key、cookie、token 或 webhook。
@@ -160,7 +166,9 @@ canonical runtime 会为 CLI、Web、skill 和 timer 自动安装运行级统计
 
 默认禁用的实验模板位于 `config/architecture_experiment.example.json`。它比较
 PM-only baseline 与 Research Manager + PM challenger。启用会把 LLM 成本近似翻倍，
-因此不得替换正式 `daily_schedule.json`，除非用户明确批准实验预算。可先只做校验：
+因此不得替换正式 `daily_schedule.json`，除非用户明确批准实验预算；获批后必须同时
+把模板的 `enabled` 与 `paired_shadow_authorized` 改为 `true`。只改 `enabled` 会被
+确定性拒绝。可先在临时副本中完成授权位与 schema 校验：
 
 ```bash
 TRADINGAGENTS_DAILY_SCHEDULE=config/architecture_experiment.example.json \

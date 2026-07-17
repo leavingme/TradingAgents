@@ -310,6 +310,21 @@ def architecture_rollups(
             "mean_raw_return": fmean(float(row["raw_return"]) for row in rows),
             "mean_alpha_return": fmean(float(row["alpha_return"]) for row in rows),
             "mean_score": fmean(float(row["score"]) for row in rows),
+            "analysis_data_status_counts": {
+                status: sum(
+                    1
+                    for row in rows
+                    if str(row.get("analysis_data_status") or "not_observed")
+                    == status
+                )
+                for status in sorted({
+                    str(row.get("analysis_data_status") or "not_observed")
+                    for row in rows
+                })
+            },
+            "analysis_evidence_complete_count": sum(
+                bool(row.get("analysis_evidence_complete")) for row in rows
+            ),
         }
         if include_runtime_costs:
             for field in _RUNTIME_COST_FIELDS:
@@ -463,6 +478,7 @@ def compare_architectures(
     ambiguous_pairs = 0
     outcome_mismatches = 0
     provenance_mismatches = 0
+    evidence_mismatches = 0
     temporal_mismatches = 0
     execution_order_counts = {
         "baseline_first": 0,
@@ -487,6 +503,19 @@ def compare_architectures(
             continue
         base_row = base_rows[0]
         challenger_row = challenger_rows[0]
+        base_evidence = base_row.get("analysis_evidence_fingerprint")
+        challenger_evidence = challenger_row.get("analysis_evidence_fingerprint")
+        if (
+            not bool(base_row.get("analysis_evidence_complete"))
+            or not bool(challenger_row.get("analysis_evidence_complete"))
+            or not base_evidence
+            or not challenger_evidence
+            or base_evidence != challenger_evidence
+            or base_row.get("analysis_data_status")
+            != challenger_row.get("analysis_data_status")
+        ):
+            evidence_mismatches += 1
+            continue
         exact_fields = ("entry_date", "exit_date")
         provenance_fields = (
             "stock_entry_source_id",
@@ -579,6 +608,7 @@ def compare_architectures(
         "ambiguous_pairs_excluded": ambiguous_pairs,
         "outcome_mismatches_excluded": outcome_mismatches,
         "provenance_mismatches_excluded": provenance_mismatches,
+        "evidence_mismatches_excluded": evidence_mismatches,
         "temporal_mismatches_excluded": temporal_mismatches,
         "maximum_pair_start_gap_seconds": maximum_pair_start_gap_seconds,
     }

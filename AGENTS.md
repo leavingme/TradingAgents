@@ -359,6 +359,7 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - Langfuse、OpenTelemetry 或其他外部可观测平台只能作为可选异步镜像，不能替代
   SQLite/runtime 权威事件链。采样、网络失败、外部服务停机或未配置凭据不得影响
   分析执行、SSE 历史回放和本地审计完整性。
+- agent 架构 paired comparison 必须要求 baseline/challenger 的分析输入 evidence fingerprint 完整且相同；fingerprint 绑定 vendor、规范化参数、状态与结果 hash，忽略 call ID、延迟和执行时间噪声。输入不同或成功结果缺 hash 的 pair 必须排除，不得把数据源退化/漂移归因于 agent 架构改进。
 
 ## 需要定期检查的事项
 

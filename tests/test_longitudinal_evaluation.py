@@ -16,6 +16,14 @@ def _shadow_started_at(index: int, version: str) -> str:
     return f"2026-01-{index + 1:02d}T20:{minute:02d}:00+00:00"
 
 
+def _comparable_input_evidence(index: int) -> dict:
+    return {
+        "analysis_data_status": "available",
+        "analysis_evidence_complete": True,
+        "analysis_evidence_fingerprint": f"evidence-{index}",
+    }
+
+
 def test_deterministic_direction_and_hold_scoring():
     assert score_outcome("Buy", 0.03)["directional_hit"] is True
     assert score_outcome("Sell", -0.03)["directional_hit"] is True
@@ -106,6 +114,9 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert rows[0]["tokens_out"] == 240
     assert rows[0]["scoring_version"] == "alpha-exposure-v1"
     assert rows[0]["measurement_version"] == "post-decision-day-close-v1"
+    assert rows[0]["analysis_data_status"] == "not_observed"
+    assert rows[0]["analysis_evidence_complete"] == 0
+    assert len(rows[0]["analysis_evidence_fingerprint"]) == 64
     assert rows[0]["hold_band"] == 0.02
     lightweight = store.list_decision_evaluations(
         ticker="nvda",
@@ -299,6 +310,7 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
                 "tokens_in": 1000 if version == "baseline" else 800,
                 "tokens_out": 200 if version == "baseline" else 180,
                 "score": score,
+                **_comparable_input_evidence(index),
             })
     comparison = compare_architectures(
         evaluations, baseline="baseline", challenger="challenger"
@@ -446,6 +458,7 @@ def test_architecture_pairing_requires_identical_ohlcv_provenance():
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
                 "run_started_at": _shadow_started_at(index, version),
                 "score": score,
+                **_comparable_input_evidence(index),
             })
     # Same prices are insufficient when one challenger used a different source.
     evaluations[-1]["benchmark_exit_source_id"] = "ohlcv:other:bench-exit:19"
@@ -486,6 +499,7 @@ def test_architecture_pairing_uses_student_t_not_normal_lower_bound():
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
                 "run_started_at": _shadow_started_at(index, version),
                 "score": score,
+                **_comparable_input_evidence(index),
             })
     comparison = compare_architectures(
         evaluations, baseline="baseline", challenger="challenger"
@@ -523,6 +537,7 @@ def test_architecture_pairing_corrects_overlapping_horizon_autocorrelation():
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
                 "run_started_at": _shadow_started_at(index, version),
                 "score": score,
+                **_comparable_input_evidence(index),
             })
 
     comparison = compare_architectures(
@@ -544,4 +559,41 @@ def test_architecture_pairing_corrects_overlapping_horizon_autocorrelation():
     assert paired["critical_effective_sample_count"] == 5
     assert paired["critical_value"] == 2.776
     assert paired["standard_error_method"] == "max(iid, overlap-aware-newey-west)"
+    assert comparison["passes_paired_gate"] is False
+
+
+def test_architecture_pairing_requires_identical_analysis_input_evidence():
+    evaluations = []
+    for index in range(20):
+        for version, score in (("baseline", 0.0), ("challenger", 0.01)):
+            evaluations.append({
+                "ticker": "NVDA",
+                "analysis_date": f"2026-06-{index + 1:02d}",
+                "architecture_version": version,
+                "architecture_fingerprint": f"{version}-fp",
+                "horizon_sessions": 5,
+                "directional_hit": True,
+                "raw_return": 0.03,
+                "benchmark_return": 0.01,
+                "alpha_return": 0.02,
+                "entry_date": f"2026-06-{index + 1:02d}",
+                "exit_date": f"2026-07-{index + 1:02d}",
+                "stock_entry_close": 100.0,
+                "stock_exit_close": 103.0,
+                "benchmark_entry_close": 500.0,
+                "benchmark_exit_close": 505.0,
+                "stock_entry_source_id": f"ohlcv:test:stock-entry:{index}",
+                "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
+                "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
+                "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "run_started_at": _shadow_started_at(index, version),
+                "score": score,
+                **_comparable_input_evidence(index),
+            })
+    evaluations[-1]["analysis_evidence_fingerprint"] = "different-input"
+    comparison = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert comparison["paired"]["sample_count"] == 19
+    assert comparison["paired"]["evidence_mismatches_excluded"] == 1
     assert comparison["passes_paired_gate"] is False

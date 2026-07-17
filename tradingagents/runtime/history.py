@@ -1,6 +1,7 @@
 """Core runtime store to persist execution history and events to SQLite."""
 
 import json
+import hashlib
 import math
 import os
 import sqlite3
@@ -175,6 +176,9 @@ class RunHistoryStore:
                         architecture_version  TEXT NOT NULL,
                         architecture_fingerprint TEXT NOT NULL DEFAULT 'legacy-unspecified',
                         measurement_version TEXT NOT NULL DEFAULT 'decision-close-v1',
+                        analysis_data_status TEXT NOT NULL DEFAULT 'not_observed',
+                        analysis_evidence_fingerprint TEXT,
+                        analysis_evidence_complete INTEGER NOT NULL DEFAULT 0,
                         scoring_version       TEXT NOT NULL DEFAULT 'alpha-exposure-v1',
                         hold_band             REAL NOT NULL DEFAULT 0.02,
                         evaluated_at          TEXT NOT NULL,
@@ -230,6 +234,21 @@ class RunHistoryStore:
                     conn.execute(
                         "ALTER TABLE decision_evaluations ADD COLUMN "
                         "measurement_version TEXT NOT NULL DEFAULT 'decision-close-v1'"
+                    )
+                if "analysis_data_status" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "analysis_data_status TEXT NOT NULL DEFAULT 'not_observed'"
+                    )
+                if "analysis_evidence_fingerprint" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "analysis_evidence_fingerprint TEXT"
+                    )
+                if "analysis_evidence_complete" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "analysis_evidence_complete INTEGER NOT NULL DEFAULT 0"
                     )
                 if "hold_band" not in evaluation_columns:
                     conn.execute(
@@ -590,6 +609,9 @@ class RunHistoryStore:
             raise ValueError(
                 "decision evaluation directional_hit does not match its scoring policy"
             )
+        evidence_identity = analysis_evidence_identity(
+            self.get_vendor_calls(str(record["run_id"]))
+        )
         with self._lock:
             with self._conn() as conn:
                 conn.execute(
@@ -607,8 +629,10 @@ class RunHistoryStore:
                         directional_hit, score, architecture_version,
                         architecture_fingerprint, scoring_version, hold_band,
                         measurement_version,
+                        analysis_data_status, analysis_evidence_fingerprint,
+                        analysis_evidence_complete,
                         evaluated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record["run_id"], record["horizon_sessions"],
@@ -633,6 +657,9 @@ class RunHistoryStore:
                         scoring_version,
                         hold_band,
                         measurement_version,
+                        evidence_identity["data_status"],
+                        evidence_identity["fingerprint"],
+                        int(bool(evidence_identity["complete"])),
                         evaluated_at,
                     ),
                 )
@@ -788,13 +815,15 @@ class RunHistoryStore:
             "score",
             "scoring_version",
             "measurement_version",
+            "analysis_data_status",
+            "analysis_evidence_complete",
             "hold_band",
             "architecture_version",
             "architecture_fingerprint",
             "evaluated_at",
         )
         payload = {
-            "schema": "tradingagents/audited-longitudinal-outcomes/v5",
+            "schema": "tradingagents/audited-longitudinal-outcomes/v6",
             "interpretation": (
                 "Historical calibration evidence only. Outcomes do not prove causality, "
                 "may come from a different market regime, and cannot authorize trade levels."
@@ -1137,6 +1166,69 @@ def summarize_vendor_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
         "trajectories": [
             item for item in trajectories if item["status"] != "available"
         ],
+    }
+
+
+ANALYSIS_EVIDENCE_SCHEMA = "tradingagents/analysis-input-evidence/v1"
+
+
+def analysis_evidence_identity(calls: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fingerprint the immutable vendor evidence available to one analysis run.
+
+    Volatile execution metadata and opaque call IDs are excluded. Repeated
+    semantically identical rows remain repeated, while arguments are parsed and
+    canonicalized so JSON key order cannot split an otherwise identical pair.
+    """
+    normalized: list[dict[str, Any]] = []
+    successful_statuses = {"available", "cache_hit"}
+    evidence_complete = bool(calls)
+    for call in calls:
+        arguments: Any = call.get("arguments_json")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                arguments = arguments.strip()
+        status = str(call.get("status") or "")
+        result_hash = str(call.get("result_hash") or "").strip() or None
+        if status in successful_statuses and result_hash is None:
+            evidence_complete = False
+        normalized.append({
+            "category": call.get("category"),
+            "method": call.get("method"),
+            "agent": call.get("agent"),
+            "symbol": call.get("symbol"),
+            "attempt": int(call.get("attempt") or 0),
+            "vendor": call.get("vendor"),
+            "status": status,
+            "selected": bool(call.get("selected")),
+            "arguments": arguments,
+            "result_hash": result_hash,
+            "error_type": call.get("error_type"),
+            "calculation_start": call.get("calculation_start"),
+            "requested_end": call.get("requested_end"),
+            "data_latest_date": call.get("data_latest_date"),
+        })
+    normalized.sort(
+        key=lambda item: json.dumps(
+            item, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+    )
+    manifest = {
+        "schema": ANALYSIS_EVIDENCE_SCHEMA,
+        "attempts": normalized,
+    }
+    payload = json.dumps(
+        manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    summary = summarize_vendor_calls(calls)
+    return {
+        "schema": ANALYSIS_EVIDENCE_SCHEMA,
+        "fingerprint": hashlib.sha256(payload).hexdigest(),
+        "complete": evidence_complete,
+        "data_status": summary["data_status"],
+        "call_count": summary["call_count"],
+        "attempt_count": summary["attempt_count"],
     }
 
 

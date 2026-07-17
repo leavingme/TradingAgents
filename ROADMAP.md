@@ -92,6 +92,7 @@
 
   - 本轮新增纵向上下文 v3、数据库时点过滤、轻量 agent 查询与结构化 agent 回归证据；相关门禁扩大至 127 项并全部通过。
   - 评分身份现逐条保存 `alpha-exposure-v1` 与 Hold band；History Store 会按声明策略重算并校验 exposure、directional hit 与 score，rollup 按评分策略隔离，baseline/challenger 评分策略不唯一或不一致时比较器 fail closed，防止伪造分数或换评分尺冒充 agent 改进。相关纵向、history、memory、runtime、结构化 agent、调度与 CLI/Web 回归 202 项通过。
+  - agent architecture manifest 升级到 v2：fingerprint 纳入路径无关的完整 `tradingagents/**/*.py` 实现摘要和经过白名单规范化的有效决策配置（vendor、风险、语言、推理、temperature、benchmark、新闻等），不保存绝对路径、backend URL 或凭据。源码、prompt、schema、validator、拓扑或决策配置变化会自动拆分 cohort，不再依赖人工记得修改版本标签；相关门禁 205 项通过，首次摘要约 20.6 ms、进程内缓存命中约 0.002 ms。
 
 ### 第三阶段：核心研究能力（8–10）
 

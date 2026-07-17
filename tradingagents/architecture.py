@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from functools import lru_cache
+from math import isfinite
+from pathlib import Path
 from typing import Any
 
 
@@ -14,6 +17,91 @@ AGENT_ARCHITECTURE_VERSION = os.environ.get(
     "TRADINGAGENTS_ARCHITECTURE_VERSION",
     "2026-07-17.2",
 )
+
+IMPLEMENTATION_DIGEST_SCOPE = "tradingagents/**/*.py"
+_SCALAR_DECISION_CONFIG_KEYS = (
+    "max_debate_rounds",
+    "max_risk_discuss_rounds",
+    "output_language",
+    "google_thinking_level",
+    "openai_reasoning_effort",
+    "anthropic_effort",
+    "temperature",
+    "max_recur_limit",
+    "benchmark_ticker",
+    "news_article_limit",
+    "global_news_article_limit",
+    "global_news_lookback_days",
+)
+_MAPPING_DECISION_CONFIG_KEYS = (
+    "data_vendors",
+    "tool_vendors",
+    "trade_risk_policy",
+    "benchmark_map",
+)
+
+
+def _digest_python_sources(source_root: Path) -> str:
+    root = source_root.resolve()
+    sources = sorted(
+        path
+        for path in root.rglob("*.py")
+        if path.is_file() and "__pycache__" not in path.parts
+    )
+    if not sources:
+        raise RuntimeError(f"no Python implementation sources found under {root}")
+    digest = hashlib.sha256()
+    for path in sources:
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+@lru_cache(maxsize=1)
+def _default_implementation_digest() -> str:
+    return _digest_python_sources(Path(__file__).resolve().parent)
+
+
+def architecture_implementation_digest(source_root: Path | None = None) -> str:
+    """Hash the effective TradingAgents Python implementation without paths or secrets."""
+    if source_root is None:
+        return _default_implementation_digest()
+    return _digest_python_sources(source_root)
+
+
+def _safe_scalar(value: Any) -> bool:
+    if isinstance(value, (str, bool, int)):
+        return True
+    return isinstance(value, float) and isfinite(value)
+
+
+def _safe_decision_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    if not config:
+        return {}
+    output = {
+        key: config.get(key)
+        for key in _SCALAR_DECISION_CONFIG_KEYS
+        if _safe_scalar(config.get(key))
+    }
+    for key in _MAPPING_DECISION_CONFIG_KEYS:
+        value = config.get(key)
+        if not isinstance(value, dict):
+            continue
+        output[key] = {
+            str(item_key): item_value
+            for item_key, item_value in sorted(value.items(), key=lambda item: str(item[0]))
+            if _safe_scalar(item_value)
+        }
+    queries = config.get("global_news_queries")
+    if isinstance(queries, (list, tuple)):
+        output["global_news_queries"] = [
+            item for item in queries if isinstance(item, str)
+        ]
+    output["custom_backend_configured"] = bool(config.get("backend_url"))
+    return output
 
 
 def build_architecture_manifest(
@@ -25,17 +113,21 @@ def build_architecture_manifest(
     quick_think_llm: str | None,
     deep_think_llm: str | None,
     longitudinal_context_mode: str = "research_and_portfolio",
+    effective_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the canonical agent topology/model manifest for one run."""
     return {
-        "schema": "tradingagents/agent-architecture-manifest/v1",
+        "schema": "tradingagents/agent-architecture-manifest/v2",
         "version": version,
+        "implementation_digest": architecture_implementation_digest(),
+        "implementation_digest_scope": IMPLEMENTATION_DIGEST_SCOPE,
         "selected_analysts": sorted(str(item).lower() for item in selected_analysts),
         "research_depth": research_depth,
         "llm_provider": llm_provider.lower() if llm_provider else None,
         "quick_think_llm": quick_think_llm,
         "deep_think_llm": deep_think_llm,
         "longitudinal_context_mode": longitudinal_context_mode,
+        "decision_config": _safe_decision_config(effective_config),
     }
 
 

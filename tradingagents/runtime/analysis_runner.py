@@ -198,6 +198,7 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
         quick_think_llm=config.get("quick_think_llm"),
         deep_think_llm=config.get("deep_think_llm"),
         longitudinal_context_mode=request.longitudinal_context_mode,
+        effective_config=config,
     )
     history_store.update_run_architecture(
         request.run_id,

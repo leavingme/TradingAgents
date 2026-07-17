@@ -543,6 +543,7 @@ class TradingAgentsGraph:
             quick_think_llm=self.config.get("quick_think_llm"),
             deep_think_llm=self.config.get("deep_think_llm"),
             longitudinal_context_mode=longitudinal_context_mode,
+            effective_config=self.config,
         )
         history_store.create_run(
             run_id=run_id,

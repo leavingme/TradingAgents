@@ -83,7 +83,11 @@ curl -s 'http://127.0.0.1:8765/api/evaluations?ticker=NVDA&baseline=baseline&cha
 source ID 以及 raw/benchmark/alpha outcome；缺失或不一致会从
 配对样本排除并单独计数。小样本 score delta 的 95% 下界使用 Student-t 临界值，
 不使用偏乐观的正态近似。每个 run 还保存包含 analyst 集合、研究深度、模型和
-纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint；
+纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint。manifest v2 还包含
+路径无关的 `tradingagents/**/*.py` 实现摘要，以及非密钥的有效 vendor、风险策略、
+输出语言、推理强度、temperature、benchmark 和新闻配置；源码或决策配置变化会自动
+拆分 fingerprint cohort。摘要不包含绝对路径、环境变量值、backend URL、凭据或
+非 Python 文件；backend 只记录是否使用自定义端点。
 rollup 按版本、fingerprint 和 horizon 分组，同一版本混入多个 fingerprint 时直接拒绝
 比较；评分版本与 Hold band 也属于 cohort 身份，baseline/challenger 必须各自唯一且
 完全一致。改变评分尺必须形成新 cohort，不能被报告成 agent 提升。即使成对 score

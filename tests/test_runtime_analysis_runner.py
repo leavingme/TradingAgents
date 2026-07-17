@@ -286,6 +286,13 @@ def test_exact_market_date_defers_before_graph_and_llm_construction(
     assert result.decision_status == "market_data_pending"
     assert result.decision is None
     assert not any(event.type == "run_completed" for event in result.events)
+    stats = [event.content for event in result.events if event.type == "stats"]
+    assert stats == [{
+        "llm_calls": 0,
+        "tool_calls": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+    }]
     pending = result.events[-1]
     assert pending.type == "market_data_status"
     assert pending.content["status"] == "pending_provider_settlement"
@@ -293,6 +300,27 @@ def test_exact_market_date_defers_before_graph_and_llm_construction(
     stored = history_store.get_run(request.run_id)
     assert stored["status"] == "market_data_pending"
     assert stored["decision_status"] == "market_data_pending"
+
+
+def test_exact_market_date_runs_when_verified_candle_matches(monkeypatch, tmp_path):
+    from tradingagents.runtime import analysis_runner
+
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", FakeTradingAgentsGraph)
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-17",
+        selected_analysts=("market",),
+        report_dir=tmp_path / "reports",
+        run_id="run-exact-market-data-ready",
+        require_exact_market_data_date=True,
+    )
+
+    result = run_analysis_once(request)
+
+    assert result.decision_status == "validated"
+    assert result.decision == "Hold"
+    completed = next(event for event in result.events if event.type == "run_completed")
+    assert completed.content["market_data_date"] == "2026-07-17"
 
 
 def test_canonical_runtime_injects_sqlite_longitudinal_context(monkeypatch, tmp_path):

@@ -133,6 +133,29 @@ def test_history_persists_only_verified_market_dates_on_or_before_request(tmp_pa
     with pytest.raises(ValueError, match="run_id does not exist"):
         store.update_run_market_data_date("missing-run", "2026-07-03")
 
+    store.create_run(
+        "event-market-date", "NVDA", "2026-07-05", "stock", ["market"],
+        "minimax-cn", 1,
+    )
+    store.add_event(
+        "event-market-date",
+        AnalysisEvent(
+            type="market_data_status",
+            run_id="event-market-date",
+            content={"status": "verified", "market_data_date": "2026-07-03"},
+        ),
+    )
+    assert store.get_run("event-market-date")["market_data_date"] == "2026-07-03"
+    with pytest.raises(ValueError, match="cannot follow"):
+        store.add_event(
+            "event-market-date",
+            AnalysisEvent(
+                type="market_data_status",
+                run_id="event-market-date",
+                content={"status": "verified", "market_data_date": "2026-07-06"},
+            ),
+        )
+
 
 def test_history_store_crud(tmp_path: Path):
     db_file = tmp_path / "test_history.db"

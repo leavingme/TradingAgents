@@ -998,6 +998,34 @@ class RunHistoryStore:
                 report_path = None
                 error = None
                 decision_status = None
+                market_data_date = None
+                if (
+                    event.type in {"market_data_status", "run_completed"}
+                    and isinstance(event.content, dict)
+                    and event.content.get("market_data_date")
+                ):
+                    try:
+                        verified_market_date = datetime.strptime(
+                            str(event.content["market_data_date"]), "%Y-%m-%d"
+                        ).date()
+                    except ValueError as exc:
+                        raise ValueError(
+                            "event market_data_date must be YYYY-MM-DD"
+                        ) from exc
+                    run_row = conn.execute(
+                        "SELECT analysis_date FROM runs WHERE run_id=?",
+                        (run_id,),
+                    ).fetchone()
+                    if run_row is None:
+                        raise ValueError("run_id does not exist")
+                    requested_date = datetime.strptime(
+                        str(run_row["analysis_date"]), "%Y-%m-%d"
+                    ).date()
+                    if verified_market_date > requested_date:
+                        raise ValueError(
+                            "event market_data_date cannot follow analysis_date"
+                        )
+                    market_data_date = verified_market_date.isoformat()
                 if event.type == "run_completed" and isinstance(event.content, dict):
                     decision_status = event.content.get("decision_status", "unavailable")
                     status = (
@@ -1016,10 +1044,14 @@ class RunHistoryStore:
                         status=CASE WHEN ? = 'running' THEN status ELSE ? END,
                         report_path=COALESCE(?, report_path),
                         error=COALESCE(?, error),
-                        decision_status=COALESCE(?, decision_status)
+                        decision_status=COALESCE(?, decision_status),
+                        market_data_date=COALESCE(?, market_data_date)
                     WHERE run_id=?
                     """,
-                    (cnt, status, status, report_path, error, decision_status, run_id),
+                    (
+                        cnt, status, status, report_path, error, decision_status,
+                        market_data_date, run_id,
+                    ),
                 )
 
     def mark_finished(self, run_id: str, status: str, finished_at: str | None = None) -> None:

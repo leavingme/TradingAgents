@@ -117,6 +117,7 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
                 "horizon_sessions": 5,
                 "directional_hit": hit,
                 "raw_return": 0.03,
+                "benchmark_return": 0.01,
                 "alpha_return": 0.02,
                 "entry_date": f"2026-06-{index + 1:02d}",
                 "exit_date": f"2026-07-{index + 1:02d}",
@@ -124,6 +125,10 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
                 "stock_exit_close": 103.0,
                 "benchmark_entry_close": 500.0,
                 "benchmark_exit_close": 505.0,
+                "stock_entry_source_id": f"ohlcv:test:stock-entry:{index}",
+                "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
+                "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
+                "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
                 "score": score,
             })
     comparison = compare_architectures(
@@ -133,6 +138,7 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert comparison["passes_paired_gate"] is True
     assert comparison["paired"]["sample_count"] == 20
     assert comparison["paired"]["lower_95_score_delta"] == 0.01
+    assert comparison["paired"]["critical_value"] == 2.093
 
 
 def test_architecture_comparison_rejects_mixed_configuration_fingerprints():
@@ -157,3 +163,94 @@ def test_architecture_comparison_rejects_mixed_configuration_fingerprints():
         evaluations, baseline="baseline", challenger="challenger"
     )
     assert comparison["status"] == "invalid_comparison"
+
+
+def test_architecture_rollups_do_not_merge_mixed_fingerprints():
+    rows = [
+        {
+            "architecture_version": "candidate",
+            "architecture_fingerprint": fingerprint,
+            "horizon_sessions": 5,
+            "directional_hit": True,
+            "raw_return": score,
+            "alpha_return": score,
+            "score": score,
+        }
+        for fingerprint, score in (("fp-a", 0.01), ("fp-b", 0.02))
+    ]
+    rollups = architecture_rollups(rows)
+    assert len(rollups) == 2
+    assert {row["architecture_fingerprint"] for row in rollups} == {"fp-a", "fp-b"}
+
+
+def test_architecture_pairing_requires_identical_ohlcv_provenance():
+    evaluations = []
+    for index in range(20):
+        for version, score in (("baseline", 0.0), ("challenger", 0.01)):
+            evaluations.append({
+                "run_id": f"{version}-{index}",
+                "ticker": "NVDA",
+                "analysis_date": f"2026-06-{index + 1:02d}",
+                "architecture_version": version,
+                "architecture_fingerprint": f"{version}-fp",
+                "horizon_sessions": 5,
+                "directional_hit": version == "challenger",
+                "raw_return": 0.03,
+                "benchmark_return": 0.01,
+                "alpha_return": 0.02,
+                "entry_date": f"2026-06-{index + 1:02d}",
+                "exit_date": f"2026-07-{index + 1:02d}",
+                "stock_entry_close": 100.0,
+                "stock_exit_close": 103.0,
+                "benchmark_entry_close": 500.0,
+                "benchmark_exit_close": 505.0,
+                "stock_entry_source_id": f"ohlcv:test:stock-entry:{index}",
+                "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
+                "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
+                "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "score": score,
+            })
+    # Same prices are insufficient when one challenger used a different source.
+    evaluations[-1]["benchmark_exit_source_id"] = "ohlcv:other:bench-exit:19"
+    comparison = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert comparison["paired"]["sample_count"] == 19
+    assert comparison["paired"]["provenance_mismatches_excluded"] == 1
+    assert comparison["passes_paired_gate"] is False
+
+
+def test_architecture_pairing_uses_student_t_not_normal_lower_bound():
+    evaluations = []
+    deltas = [0.001 if index % 2 else 0.005 for index in range(20)]
+    for index, delta in enumerate(deltas):
+        for version, score in (("baseline", 0.0), ("challenger", delta)):
+            evaluations.append({
+                "ticker": "NVDA",
+                "analysis_date": f"2026-05-{index + 1:02d}",
+                "architecture_version": version,
+                "architecture_fingerprint": f"{version}-fp",
+                "horizon_sessions": 5,
+                "directional_hit": True,
+                "raw_return": 0.03,
+                "benchmark_return": 0.01,
+                "alpha_return": 0.02,
+                "entry_date": f"2026-05-{index + 1:02d}",
+                "exit_date": f"2026-06-{index + 1:02d}",
+                "stock_entry_close": 100.0,
+                "stock_exit_close": 103.0,
+                "benchmark_entry_close": 500.0,
+                "benchmark_exit_close": 505.0,
+                "stock_entry_source_id": f"ohlcv:test:stock-entry:{index}",
+                "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
+                "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
+                "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "score": score,
+            })
+    comparison = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    paired = comparison["paired"]
+    normal_lower = paired["mean_score_delta"] - 1.96 * paired["standard_error"]
+    assert paired["critical_value"] == 2.093
+    assert paired["lower_95_score_delta"] < normal_lower

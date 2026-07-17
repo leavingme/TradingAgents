@@ -17,6 +17,36 @@ _EXPOSURE = {
     "sell": -1.0,
 }
 
+_T_975_BY_DF = (
+    0.0,
+    12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262,
+    2.228, 2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101,
+    2.093, 2.086, 2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052,
+    2.048, 2.045, 2.042,
+)
+
+
+def _student_t_critical_95(sample_count: int) -> float | None:
+    """Two-sided 95% Student-t critical value for a paired mean.
+
+    Exact tabulated values cover the small cohorts used by the promotion gate.
+    A Cornish-Fisher expansion is sufficiently accurate above thirty degrees
+    of freedom and avoids adding a heavy statistics dependency.
+    """
+    if sample_count < 2:
+        return None
+    degrees_of_freedom = sample_count - 1
+    if degrees_of_freedom <= 30:
+        return _T_975_BY_DF[degrees_of_freedom]
+    z = 1.959963984540054
+    df = float(degrees_of_freedom)
+    return (
+        z
+        + (z**3 + z) / (4 * df)
+        + (5 * z**5 + 16 * z**3 + 3 * z) / (96 * df**2)
+        + (3 * z**7 + 19 * z**5 + 17 * z**3 - 15 * z) / (384 * df**3)
+    )
+
 
 @dataclass(frozen=True)
 class OutcomeMeasurement:
@@ -69,14 +99,19 @@ def score_outcome(
 
 def architecture_rollups(evaluations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Aggregate immutable evaluation rows by architecture and horizon."""
-    groups: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    groups: dict[tuple[str, str, int], list[dict[str, Any]]] = defaultdict(list)
     for row in evaluations:
-        groups[(str(row["architecture_version"]), int(row["horizon_sessions"]))].append(row)
+        groups[(
+            str(row["architecture_version"]),
+            str(row.get("architecture_fingerprint", "legacy-unspecified")),
+            int(row["horizon_sessions"]),
+        )].append(row)
     output = []
-    for (version, horizon), rows in sorted(groups.items()):
+    for (version, fingerprint, horizon), rows in sorted(groups.items()):
         output.append(
             {
                 "architecture_version": version,
+                "architecture_fingerprint": fingerprint,
                 "horizon_sessions": horizon,
                 "sample_count": len(rows),
                 "directional_hit_rate": fmean(bool(row["directional_hit"]) for row in rows),
@@ -165,6 +200,7 @@ def compare_architectures(
     paired_hit_deltas: list[float] = []
     ambiguous_pairs = 0
     outcome_mismatches = 0
+    provenance_mismatches = 0
     for variants in grouped.values():
         base_rows = variants.get(baseline, [])
         challenger_rows = variants.get(challenger, [])
@@ -176,8 +212,15 @@ def compare_architectures(
         base_row = base_rows[0]
         challenger_row = challenger_rows[0]
         exact_fields = ("entry_date", "exit_date")
+        provenance_fields = (
+            "stock_entry_source_id",
+            "stock_exit_source_id",
+            "benchmark_entry_source_id",
+            "benchmark_exit_source_id",
+        )
         numeric_outcome_fields = (
             "raw_return",
+            "benchmark_return",
             "alpha_return",
             "stock_entry_close",
             "stock_exit_close",
@@ -197,6 +240,18 @@ def compare_architectures(
         ):
             outcome_mismatches += 1
             continue
+        if (
+            any(
+                not base_row.get(field) or not challenger_row.get(field)
+                for field in provenance_fields
+            )
+            or any(
+                base_row.get(field) != challenger_row.get(field)
+                for field in provenance_fields
+            )
+        ):
+            provenance_mismatches += 1
+            continue
         paired_deltas.append(float(challenger_row["score"]) - float(base_row["score"]))
         paired_hit_deltas.append(
             float(bool(challenger_row["directional_hit"]))
@@ -209,20 +264,23 @@ def compare_architectures(
         "minimum_required": minimum_paired_samples,
         "ambiguous_pairs_excluded": ambiguous_pairs,
         "outcome_mismatches_excluded": outcome_mismatches,
+        "provenance_mismatches_excluded": provenance_mismatches,
     }
     passes_paired_gate = False
     if paired_count:
         mean_delta = fmean(paired_deltas)
         standard_error = stdev(paired_deltas) / sqrt(paired_count) if paired_count > 1 else None
+        critical_value = _student_t_critical_95(paired_count)
         lower_95 = (
-            mean_delta - 1.96 * standard_error
-            if standard_error is not None
+            mean_delta - critical_value * standard_error
+            if standard_error is not None and critical_value is not None
             else None
         )
         paired_summary.update({
             "mean_score_delta": mean_delta,
             "mean_hit_rate_delta": fmean(paired_hit_deltas),
             "standard_error": standard_error,
+            "critical_value": critical_value,
             "lower_95_score_delta": lower_95,
         })
         passes_paired_gate = (

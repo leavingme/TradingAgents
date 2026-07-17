@@ -1,4 +1,5 @@
 import json
+import sqlite3
 
 import pytest
 from pathlib import Path
@@ -44,6 +45,28 @@ def test_runtime_db_path_only_uses_unified_environment_variable(monkeypatch, tmp
     monkeypatch.delenv("TRADINGAGENTS_DB")
     monkeypatch.setattr(history_module.Path, "home", lambda: tmp_path)
     assert history_module._default_db_path() == tmp_path / ".tradingagents" / "runs.db"
+
+
+def test_history_migrates_legacy_evaluations_to_explicit_scoring_policy(tmp_path):
+    db_path = tmp_path / "legacy.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE decision_evaluations (
+                run_id TEXT NOT NULL,
+                horizon_sessions INTEGER NOT NULL,
+                architecture_fingerprint TEXT NOT NULL DEFAULT 'legacy-unspecified',
+                PRIMARY KEY (run_id, horizon_sessions)
+            )
+        """)
+
+    store = RunHistoryStore(db_path)
+    with store._conn() as conn:
+        columns = {
+            row["name"]: row
+            for row in conn.execute("PRAGMA table_info(decision_evaluations)")
+        }
+    assert columns["scoring_version"]["dflt_value"] == "'alpha-exposure-v1'"
+    assert float(columns["hold_band"]["dflt_value"]) == 0.02
 
 
 def test_history_store_crud(tmp_path: Path):
@@ -345,7 +368,7 @@ def test_longitudinal_context_is_structured_audited_and_cutoff_safe(
     context = json.loads(store.get_longitudinal_context(
         "NVDA", information_cutoff="2026-07-10T16:00:01-04:00"
     ))
-    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v2"
+    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v3"
     assert context["same_symbol_outcomes"][0]["run_id"] == "evaluated-nvda"
     assert context["same_symbol_outcomes"][0]["directional_hit"] is True
     assert "reflection" not in context["same_symbol_outcomes"][0]

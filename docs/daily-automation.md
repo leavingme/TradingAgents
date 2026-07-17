@@ -55,11 +55,14 @@ journalctl --user -u tradingagents-daily.service -n 100 --no-pager
 
 结构化结果写入统一 `runs.db` 的 `decision_evaluations`：原始 run、负责结算的 run、
 架构版本、rating、基准、原始收益、基准收益、alpha、方向命中和确定性 score 均可
-追溯。每条结果还必须保存 entry/exit 交易日、标的与基准的四个收盘价，以及来自
+追溯。每条结果同时保存 `scoring_version` 与 Hold band；当前评分尺为
+`alpha-exposure-v1` / `0.02`，这里只是固化既有确定性语义，不代表该 band 已被优化。
+History Store 会按声明的评分策略重算 exposure、方向命中和 score，不一致记录拒绝入库。
+每条结果还必须保存 entry/exit 交易日、标的与基准的四个收盘价，以及来自
 逐交易日 `ohlcv_audit.jsonl` 的四个稳定 source ID；旧版只有日期范围而没有逐日
 provenance 的缓存记录不能用于结算。正式 runtime 会把这些 SQLite 定量结果以固定
 JSON schema 注入 Research Manager 和 Portfolio Manager；不会把 LLM 生成的 Markdown
-反思当成可信证据。v2 上下文保留最近的同标的/跨标的逐条结果及明确的扫描/截断计数，
+反思当成可信证据。v3 上下文保留最近的同标的/跨标的逐条结果、评分身份及明确的扫描/截断计数，
 但架构 rollup 只使用截止时点前扫描到的完整同标的 cohort，不再把跨标的结果或最近
 样本截断混入同一均值。token、调用数和耗时仅用于 operator-facing 架构优化查询，
 不会注入投资决策上下文。历史 `point_in_time` 只允许看到
@@ -82,7 +85,9 @@ source ID 以及 raw/benchmark/alpha outcome；缺失或不一致会从
 不使用偏乐观的正态近似。每个 run 还保存包含 analyst 集合、研究深度、模型和
 纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint；
 rollup 按版本、fingerprint 和 horizon 分组，同一版本混入多个 fingerprint 时直接拒绝
-比较。即使成对 score delta 的 95% 下界通过
+比较；评分版本与 Hold band 也属于 cohort 身份，baseline/challenger 必须各自唯一且
+完全一致。改变评分尺必须形成新 cohort，不能被报告成 agent 提升。即使成对 score
+delta 的 95% 下界通过
 阈值，结果也只返回 `review_required`，不得自动晋升或自动修改 prompt/agent 拓扑。
 
 canonical runtime 会为 CLI、Web、skill 和 timer 自动安装运行级统计，不依赖调用入口

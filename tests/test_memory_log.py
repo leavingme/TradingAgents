@@ -797,6 +797,10 @@ class TestDeferredReflection:
             ("baseline-run", "Buy", True),
             ("challenger-run", "Sell", False),
         ]
+        assert {
+            (row["scoring_version"], row["hold_band"])
+            for row in recorded
+        } == {("alpha-exposure-v1", 0.02)}
 
 
 # ---------------------------------------------------------------------------

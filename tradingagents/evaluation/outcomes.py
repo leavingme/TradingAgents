@@ -17,6 +17,9 @@ _EXPOSURE = {
     "sell": -1.0,
 }
 
+OUTCOME_SCORING_VERSION = "alpha-exposure-v1"
+DEFAULT_HOLD_BAND = 0.02
+
 _RUNTIME_COST_FIELDS = (
     "runtime_seconds",
     "llm_calls",
@@ -94,6 +97,14 @@ def _runtime_cost_value(value: Any) -> float | None:
     return numeric if isfinite(numeric) and numeric >= 0 else None
 
 
+def _scoring_policy(row: dict[str, Any]) -> tuple[str, float]:
+    version = str(row.get("scoring_version") or OUTCOME_SCORING_VERSION)
+    hold_band = float(row.get("hold_band", DEFAULT_HOLD_BAND))
+    if not version or not isfinite(hold_band) or hold_band <= 0:
+        raise ValueError("evaluation has an invalid scoring policy")
+    return version, hold_band
+
+
 @dataclass(frozen=True)
 class OutcomeMeasurement:
     raw_return: float
@@ -116,8 +127,8 @@ def score_outcome(
     rating: str,
     alpha_return: float,
     *,
-    hold_band: float = 0.02,
-) -> dict[str, float | bool]:
+    hold_band: float = DEFAULT_HOLD_BAND,
+) -> dict[str, float | bool | str]:
     """Score one fixed-horizon recommendation without an LLM.
 
     Directional ratings earn signed benchmark-relative return scaled by their
@@ -128,10 +139,15 @@ def score_outcome(
     if normalized not in _EXPOSURE:
         raise ValueError(f"unsupported portfolio rating: {rating!r}")
     alpha = float(alpha_return)
+    band = float(hold_band)
+    if not isfinite(alpha):
+        raise ValueError("alpha_return must be finite")
+    if not isfinite(band) or band <= 0:
+        raise ValueError("hold_band must be finite and positive")
     exposure = _EXPOSURE[normalized]
     if normalized == "hold":
-        hit = abs(alpha) <= hold_band
-        score = hold_band - abs(alpha)
+        hit = abs(alpha) <= band
+        score = band - abs(alpha)
     else:
         signed = exposure * alpha
         hit = signed > 0
@@ -140,6 +156,8 @@ def score_outcome(
         "exposure": exposure,
         "directional_hit": hit,
         "score": score,
+        "scoring_version": OUTCOME_SCORING_VERSION,
+        "hold_band": band,
     }
 
 
@@ -153,18 +171,25 @@ def architecture_rollups(
     Runtime cost metrics belong in operator-facing optimization views. Callers
     constructing investment-agent context can exclude them explicitly.
     """
-    groups: dict[tuple[str, str, int], list[dict[str, Any]]] = defaultdict(list)
+    groups: dict[tuple[str, str, str, float, int], list[dict[str, Any]]] = defaultdict(list)
     for row in evaluations:
+        scoring_version, hold_band = _scoring_policy(row)
         groups[(
             str(row["architecture_version"]),
             str(row.get("architecture_fingerprint", "legacy-unspecified")),
+            scoring_version,
+            hold_band,
             int(row["horizon_sessions"]),
         )].append(row)
     output = []
-    for (version, fingerprint, horizon), rows in sorted(groups.items()):
+    for (version, fingerprint, scoring_version, hold_band, horizon), rows in sorted(
+        groups.items()
+    ):
         rollup = {
             "architecture_version": version,
             "architecture_fingerprint": fingerprint,
+            "scoring_version": scoring_version,
+            "hold_band": hold_band,
             "horizon_sessions": horizon,
             "sample_count": len(rows),
             "directional_hit_rate": fmean(bool(row["directional_hit"]) for row in rows),
@@ -224,6 +249,15 @@ def compare_architectures(
         })
         for version in (baseline, challenger)
     }
+    scoring_policies = {
+        version: sorted({
+            _scoring_policy(row)
+            for row in evaluations
+            if str(row.get("architecture_version")) == version
+            and int(row.get("horizon_sessions", -1)) == horizon_sessions
+        })
+        for version in (baseline, challenger)
+    }
     if any(len(values) != 1 for values in fingerprints.values()):
         return {
             "status": "invalid_comparison",
@@ -232,6 +266,21 @@ def compare_architectures(
                 "split the cohorts before comparing"
             ),
             "architecture_fingerprints": fingerprints,
+            "scoring_policies": scoring_policies,
+            "baseline": base,
+            "challenger": challenge,
+        }
+    if (
+        any(len(values) != 1 for values in scoring_policies.values())
+        or scoring_policies[baseline] != scoring_policies[challenger]
+    ):
+        return {
+            "status": "invalid_comparison",
+            "reason": (
+                "baseline and challenger must each use one identical scoring policy"
+            ),
+            "architecture_fingerprints": fingerprints,
+            "scoring_policies": scoring_policies,
             "baseline": base,
             "challenger": challenge,
         }
@@ -374,6 +423,7 @@ def compare_architectures(
         "passes_paired_gate": passes_paired_gate,
         "score_improvement": improvement,
         "architecture_fingerprints": fingerprints,
+        "scoring_policies": scoring_policies,
         "paired": paired_summary,
         "paired_costs": {
             field: _paired_cost_summary(values, paired_count)

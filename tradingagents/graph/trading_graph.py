@@ -448,6 +448,8 @@ class TradingAgentsGraph:
                         "exposure": scored["exposure"],
                         "directional_hit": scored["directional_hit"],
                         "score": scored["score"],
+                        "scoring_version": scored["scoring_version"],
+                        "hold_band": scored["hold_band"],
                         "architecture_version": prior_run.get(
                             "architecture_version", "legacy"
                         ),

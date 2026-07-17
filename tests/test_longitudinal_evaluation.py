@@ -15,6 +15,13 @@ def test_deterministic_direction_and_hold_scoring():
     assert score_outcome("Underweight", 0.03)["directional_hit"] is False
     assert score_outcome("Hold", 0.01)["directional_hit"] is True
     assert score_outcome("Hold", 0.04)["directional_hit"] is False
+    hold = score_outcome("Hold", 0.01)
+    assert hold["scoring_version"] == "alpha-exposure-v1"
+    assert hold["hold_band"] == 0.02
+    with pytest.raises(ValueError, match="finite"):
+        score_outcome("Buy", float("nan"))
+    with pytest.raises(ValueError, match="positive"):
+        score_outcome("Hold", 0.0, hold_band=0.0)
 
 
 def test_history_persists_idempotent_architecture_evaluation(tmp_path):
@@ -75,6 +82,8 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert rows[0]["tool_calls"] == 24
     assert rows[0]["tokens_in"] == 1200
     assert rows[0]["tokens_out"] == 240
+    assert rows[0]["scoring_version"] == "alpha-exposure-v1"
+    assert rows[0]["hold_band"] == 0.02
     lightweight = store.list_decision_evaluations(
         ticker="nvda",
         include_runtime_metrics=False,
@@ -113,6 +122,14 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
         store.list_decision_evaluations(evaluated_before="2026-07-15")
     with pytest.raises(ValueError, match="mutually exclusive"):
         store.list_decision_evaluations(ticker="NVDA", exclude_ticker="AAPL")
+    with pytest.raises(ValueError, match="score does not match"):
+        store.add_decision_evaluation({**record, "run_id": "bad-score", "score": 99.0})
+    with pytest.raises(ValueError, match="unsupported.*scoring_version"):
+        store.add_decision_evaluation({
+            **record,
+            "run_id": "bad-version",
+            "scoring_version": "unknown-v2",
+        })
 
 
 def test_history_rejects_evaluation_without_exact_ohlcv_provenance(tmp_path):
@@ -233,6 +250,28 @@ def test_architecture_comparison_rejects_mixed_configuration_fingerprints():
         evaluations, baseline="baseline", challenger="challenger"
     )
     assert comparison["status"] == "invalid_comparison"
+
+
+def test_architecture_comparison_rejects_mixed_scoring_policies():
+    evaluations = []
+    for version in ("baseline", "challenger"):
+        for index in range(20):
+            evaluations.append({
+                "architecture_version": version,
+                "architecture_fingerprint": f"{version}-fp",
+                "horizon_sessions": 5,
+                "directional_hit": True,
+                "raw_return": 0.03,
+                "alpha_return": 0.02,
+                "score": 0.01,
+                "scoring_version": "alpha-exposure-v1",
+                "hold_band": 0.03 if version == "challenger" else 0.02,
+            })
+    comparison = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert comparison["status"] == "invalid_comparison"
+    assert "scoring policy" in comparison["reason"]
 
 
 def test_architecture_rollups_do_not_merge_mixed_fingerprints():

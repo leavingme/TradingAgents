@@ -171,6 +171,8 @@ class RunHistoryStore:
                         score                 REAL NOT NULL,
                         architecture_version  TEXT NOT NULL,
                         architecture_fingerprint TEXT NOT NULL DEFAULT 'legacy-unspecified',
+                        scoring_version       TEXT NOT NULL DEFAULT 'alpha-exposure-v1',
+                        hold_band             REAL NOT NULL DEFAULT 0.02,
                         evaluated_at          TEXT NOT NULL,
                         PRIMARY KEY (run_id, horizon_sessions),
                         FOREIGN KEY (run_id) REFERENCES runs(run_id)
@@ -214,6 +216,16 @@ class RunHistoryStore:
                         "ALTER TABLE decision_evaluations ADD COLUMN "
                         "architecture_fingerprint TEXT NOT NULL "
                         "DEFAULT 'legacy-unspecified'"
+                    )
+                if "scoring_version" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "scoring_version TEXT NOT NULL DEFAULT 'alpha-exposure-v1'"
+                    )
+                if "hold_band" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "hold_band REAL NOT NULL DEFAULT 0.02"
                     )
                 for column in (
                     "entry_date TEXT",
@@ -346,6 +358,12 @@ class RunHistoryStore:
 
     def add_decision_evaluation(self, record: dict[str, Any]) -> None:
         """Persist one immutable fixed-horizon outcome for an analyzed run."""
+        from tradingagents.evaluation.outcomes import (
+            DEFAULT_HOLD_BAND,
+            OUTCOME_SCORING_VERSION,
+            score_outcome,
+        )
+
         required_provenance = (
             "entry_date",
             "exit_date",
@@ -387,6 +405,37 @@ class RunHistoryStore:
             record.get("evaluated_at") or _now(),
             "evaluated_at",
         )
+        scoring_version = str(
+            record.get("scoring_version") or OUTCOME_SCORING_VERSION
+        ).strip()
+        hold_band = float(record.get("hold_band", DEFAULT_HOLD_BAND))
+        if not scoring_version or len(scoring_version) > 80:
+            raise ValueError("decision evaluation scoring_version is invalid")
+        if not math.isfinite(hold_band) or hold_band <= 0:
+            raise ValueError("decision evaluation hold_band must be finite and positive")
+        if scoring_version != OUTCOME_SCORING_VERSION:
+            raise ValueError(
+                f"unsupported decision evaluation scoring_version: {scoring_version}"
+            )
+        expected_score = score_outcome(
+            str(record["rating"]),
+            float(record["alpha_return"]),
+            hold_band=hold_band,
+        )
+        for field in ("exposure", "score"):
+            if not math.isclose(
+                float(record[field]),
+                float(expected_score[field]),
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            ):
+                raise ValueError(
+                    f"decision evaluation {field} does not match its scoring policy"
+                )
+        if bool(record["directional_hit"]) != bool(expected_score["directional_hit"]):
+            raise ValueError(
+                "decision evaluation directional_hit does not match its scoring policy"
+            )
         with self._lock:
             with self._conn() as conn:
                 conn.execute(
@@ -401,8 +450,9 @@ class RunHistoryStore:
                         raw_return,
                         benchmark_return, alpha_return, exposure,
                         directional_hit, score, architecture_version,
-                        architecture_fingerprint, evaluated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        architecture_fingerprint, scoring_version, hold_band,
+                        evaluated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record["run_id"], record["horizon_sessions"],
@@ -421,6 +471,8 @@ class RunHistoryStore:
                         int(bool(record["directional_hit"])), record["score"],
                         record["architecture_version"],
                         record.get("architecture_fingerprint", "legacy-unspecified"),
+                        scoring_version,
+                        hold_band,
                         evaluated_at,
                     ),
                 )
@@ -571,12 +623,14 @@ class RunHistoryStore:
             "exposure",
             "directional_hit",
             "score",
+            "scoring_version",
+            "hold_band",
             "architecture_version",
             "architecture_fingerprint",
             "evaluated_at",
         )
         payload = {
-            "schema": "tradingagents/audited-longitudinal-outcomes/v2",
+            "schema": "tradingagents/audited-longitudinal-outcomes/v3",
             "interpretation": (
                 "Historical calibration evidence only. Outcomes do not prove causality, "
                 "may come from a different market regime, and cannot authorize trade levels."

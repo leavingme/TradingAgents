@@ -716,6 +716,8 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
     assert response["rollups"] == [{
         "architecture_version": "baseline",
         "architecture_fingerprint": "legacy-unspecified",
+        "scoring_version": "alpha-exposure-v1",
+        "hold_band": 0.02,
         "horizon_sessions": 5,
         "sample_count": 1,
         "directional_hit_rate": 1.0,

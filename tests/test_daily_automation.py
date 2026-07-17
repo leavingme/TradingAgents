@@ -376,11 +376,33 @@ def test_dry_run_does_not_create_history(tmp_path, monkeypatch):
         _schedule(),
         now=datetime(2026, 7, 17, 17, 0, tzinfo=ZoneInfo("America/New_York")),
         store=store,
-        preferences={"llm_provider": "minimax-cn"},
+        preferences={
+            "llm_provider": "minimax-cn",
+            "research_depth": 3,
+            "output_language": "French",
+            "backend_url": "https://user:credential@example.invalid/v1",
+            "config_overrides": {
+                "data_vendors": {"news_data": "longbridge_mcp, longbridge"}
+            },
+        },
         dry_run=True,
         lock_path=tmp_path / "missing-parent" / "daily.lock",
     )
     assert result[0]["status"] == "would_run"
+    assert result[0]["llm_provider"] == "minimax-cn"
+    assert result[0]["quick_think_llm"] == "MiniMax-M3"
+    assert result[0]["research_depth"] == 3
+    assert result[0]["output_language"] == "French"
+    assert result[0]["data_vendors"]["news_data"] == "longbridge_mcp, longbridge"
+    assert result[0]["custom_backend_configured"] is True
+    assert result[0]["architecture_manifest_schema"] == (
+        "tradingagents/agent-architecture-manifest/v2"
+    )
+    assert len(result[0]["architecture_fingerprint"]) == 64
+    assert result[0]["architecture_manifest"]["decision_config"][
+        "trade_risk_policy"
+    ]["max_position_pct"] == 5.0
+    assert "credential" not in json.dumps(result)
     assert store.list_runs() == []
     assert not (tmp_path / "missing-parent").exists()
 

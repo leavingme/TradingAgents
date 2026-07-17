@@ -52,6 +52,12 @@ venv/bin/python3.12 scripts/daily_analysis.py run --dry-run
 journalctl --user -u tradingagents-daily.service -n 100 --no-pager
 ```
 
+`--dry-run` 不创建 run、不调用 LLM 或外部 vendor，但会构造与真实执行相同的有效
+runtime config，并输出 analysis date、analysts、研究深度、报告语言、模型、vendor
+顺序、推理参数、纵向模式、计划执行位次，以及 canonical architecture manifest 与
+fingerprint。manifest 使用与正式历史相同的安全白名单；backend 只显示是否自定义，
+不会输出 URL、凭据、secret 环境变量名/值或本地绝对路径。
+
 ## 连续多日结果评估
 
 只有完整取得决策日收盘价以及之后第 5 个共同交易日的标的/基准收盘价时，结果才会

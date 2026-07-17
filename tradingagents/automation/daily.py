@@ -21,7 +21,11 @@ from typing import Any, Callable, Iterator
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from tradingagents.architecture import AGENT_ARCHITECTURE_VERSION
+from tradingagents.architecture import (
+    AGENT_ARCHITECTURE_VERSION,
+    architecture_fingerprint,
+    build_architecture_manifest,
+)
 from tradingagents.dataflows.ohlcv_cache import latest_completed_daily_bar_date
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.runtime import AnalysisRequest, run_analysis_once
@@ -485,16 +489,49 @@ def run_due_analyses(
                 **request_kwargs,
             )
             if dry_run:
+                from tradingagents.runtime.config_builder import build_runtime_config
+
+                effective_config = build_runtime_config(request)
+                manifest = build_architecture_manifest(
+                    version=request.architecture_version,
+                    selected_analysts=request.selected_analysts,
+                    research_depth=effective_config.get("max_debate_rounds"),
+                    llm_provider=effective_config.get("llm_provider"),
+                    quick_think_llm=effective_config.get("quick_think_llm"),
+                    deep_think_llm=effective_config.get("deep_think_llm"),
+                    longitudinal_context_mode=request.longitudinal_context_mode,
+                    effective_config=effective_config,
+                )
                 outcomes.append(
                     {
                         "symbol": target.symbol,
                         "analysis_date": analysis_date,
                         "status": "would_run",
                         "run_id": run_id,
-                        "llm_provider": request.llm_provider,
-                        "quick_think_llm": request.quick_think_llm,
-                        "deep_think_llm": request.deep_think_llm,
+                        "llm_provider": effective_config.get("llm_provider"),
+                        "quick_think_llm": effective_config.get("quick_think_llm"),
+                        "deep_think_llm": effective_config.get("deep_think_llm"),
+                        "selected_analysts": list(request.selected_analysts),
+                        "research_depth": effective_config.get("max_debate_rounds"),
+                        "output_language": effective_config.get("output_language"),
+                        "data_vendors": dict(effective_config.get("data_vendors") or {}),
+                        "reasoning_config": {
+                            key: effective_config.get(key)
+                            for key in (
+                                "google_thinking_level",
+                                "openai_reasoning_effort",
+                                "anthropic_effort",
+                            )
+                            if effective_config.get(key) is not None
+                        },
+                        "custom_backend_configured": bool(
+                            effective_config.get("backend_url")
+                        ),
                         "architecture_version": request.architecture_version,
+                        "architecture_fingerprint": architecture_fingerprint(manifest),
+                        "architecture_manifest_schema": manifest["schema"],
+                        "architecture_manifest": manifest,
+                        "analysis_mode": request.analysis_mode,
                         "longitudinal_context_mode": request.longitudinal_context_mode,
                         "planned_execution_order": execution_order,
                         "execution_group_size": execution_group_size,

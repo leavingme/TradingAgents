@@ -13,6 +13,7 @@ from tradingagents.automation.daily import (
     ScheduledTarget,
     load_runtime_preferences,
     run_due_analyses,
+    scheduler_exit_code,
 )
 from tradingagents.runtime.history import RunHistoryStore
 
@@ -320,6 +321,49 @@ def test_due_run_reuses_preferences_and_is_idempotent(tmp_path, monkeypatch):
     assert len(captured) == 1
     assert captured[0].llm_provider == "minimax-cn"
     assert captured[0].quick_think_llm == "MiniMax-M3"
+
+
+@pytest.mark.parametrize(
+    ("decision_status", "scheduler_status", "exit_code"),
+    [
+        ("validated", "completed", 0),
+        ("review_required", "review_required", 0),
+        ("unavailable", "unavailable", 1),
+    ],
+)
+def test_scheduler_preserves_canonical_decision_failure_semantics(
+    tmp_path,
+    monkeypatch,
+    decision_status,
+    scheduler_status,
+    exit_code,
+):
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+
+    result = run_due_analyses(
+        _schedule(),
+        now=datetime(2026, 7, 17, 17, 0, tzinfo=ZoneInfo("America/New_York")),
+        store=RunHistoryStore(tmp_path / "runs.db"),
+        preferences={},
+        execute=lambda request: SimpleNamespace(
+            run_id=request.run_id,
+            decision_status=decision_status,
+            report_path=None,
+        ),
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert result[0]["status"] == scheduler_status
+    assert result[0]["decision_status"] == decision_status
+    assert scheduler_exit_code(result) == exit_code
+
+
+def test_scheduler_exit_code_keeps_exhausted_failure_visible():
+    assert scheduler_exit_code([{"status": "attempts_exhausted"}]) == 1
+    assert scheduler_exit_code([{"status": "retry_wait"}]) == 0
 
 
 def test_dry_run_does_not_create_history(tmp_path, monkeypatch):

@@ -36,6 +36,7 @@ _TERMINAL_STATUSES = {
     "failed",
     "cancelled",
 }
+_SCHEDULER_FAILURE_STATUSES = {"failed", "unavailable", "attempts_exhausted"}
 _SETTING_KEYS = {
     "research_depth",
     "llm_provider",
@@ -517,13 +518,19 @@ def run_due_analyses(
                     }
                 )
                 continue
+            decision_status = str(result.decision_status)
+            scheduler_status = {
+                "validated": "completed",
+                "review_required": "review_required",
+                "unavailable": "unavailable",
+            }.get(decision_status, "unavailable")
             outcomes.append(
                 {
                     "symbol": target.symbol,
                     "analysis_date": analysis_date,
-                    "status": "completed",
+                    "status": scheduler_status,
                     "run_id": result.run_id,
-                    "decision_status": result.decision_status,
+                    "decision_status": decision_status,
                     "architecture_version": target.architecture_version,
                     "planned_execution_order": execution_order,
                     "execution_group_size": execution_group_size,
@@ -536,3 +543,8 @@ def run_due_analyses(
 def terminal_statuses() -> frozenset[str]:
     """Expose scheduler terminal statuses for diagnostics and tests."""
     return frozenset(_TERMINAL_STATUSES)
+
+
+def scheduler_exit_code(outcomes: list[dict[str, Any]]) -> int:
+    """Return non-zero when the daily decision failed or retries are exhausted."""
+    return int(any(item.get("status") in _SCHEDULER_FAILURE_STATUSES for item in outcomes))

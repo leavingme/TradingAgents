@@ -16,6 +16,7 @@ from tradingagents.automation.daily import (  # noqa: E402
     load_daily_schedule,
     load_runtime_preferences,
     run_due_analyses,
+    scheduler_exit_code,
 )
 from tradingagents.evaluation import architecture_rollups, compare_architectures  # noqa: E402
 from tradingagents.runtime.history import history_store  # noqa: E402
@@ -81,7 +82,7 @@ def main() -> int:
         dry_run=args.dry_run,
     )
     print(json.dumps(outcomes, ensure_ascii=False, indent=2))
-    return 1 if any(item.get("status") == "failed" for item in outcomes) else 0
+    return scheduler_exit_code(outcomes)
 
 
 if __name__ == "__main__":

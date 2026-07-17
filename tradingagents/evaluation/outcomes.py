@@ -375,9 +375,24 @@ def compare_architectures(
     base = rollups.get(baseline)
     challenge = rollups.get(challenger)
     if not base or not challenge:
+        baseline_count = int(base["sample_count"]) if base else 0
+        challenger_count = int(challenge["sample_count"]) if challenge else 0
         return {
             "status": "insufficient_data",
             "reason": "both baseline and challenger require evaluated samples",
+            "sample_progress": {
+                "baseline": baseline_count,
+                "challenger": challenger_count,
+                "minimum_required_each": minimum_samples,
+                "sufficient": False,
+            },
+            "missing_architectures": [
+                version
+                for version, row in ((baseline, base), (challenger, challenge))
+                if row is None
+            ],
+            "baseline": base,
+            "challenger": challenge,
         }
     fingerprints = {
         version: sorted({

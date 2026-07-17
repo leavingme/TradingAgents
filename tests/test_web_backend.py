@@ -803,6 +803,13 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         challenger="candidate",
     ))
     assert comparison["comparison"]["status"] == "insufficient_data"
+    assert comparison["comparison"]["sample_progress"] == {
+        "baseline": 1,
+        "challenger": 0,
+        "minimum_required_each": 20,
+        "sufficient": False,
+    }
+    assert comparison["comparison"]["missing_architectures"] == ["candidate"]
 
     with pytest.raises(main.HTTPException) as exc_info:
         asyncio.run(main.get_decision_evaluations(

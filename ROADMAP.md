@@ -98,7 +98,7 @@
   - 首次自然运行前的失败恢复审计发现 scheduler 过去只从 SQLite run 数量执行每日 attempt 上限；若异常发生在 canonical runtime 注册 run 之前，日志虽失败但不会消耗 attempt，可能形成 15 分钟一次的无界重试。现在此路径写入 `pre-runtime-failure` 失败占位并纳入相同 retry budget，且不会覆盖 canonical runtime 已经持久化的失败证据。
   - 配对架构实验的预算约束现由 schema 强制：同标的双 arm 只有在共享 schedule/analysts、恰好隔离 `portfolio_only` 与 `research_and_portfolio` treatment，并显式设置 `paired_shadow_authorized=true` 时才能启用。仅把默认禁用模板改为 `enabled=true` 会 fail closed，避免误操作使无人值守成本近似翻倍或用不可比较的上游配置浪费样本。
   - 纵向评估 CLI 与 `/api/evaluations` 现暴露 SQLite 权威的 pending count/list，包括 decision timestamp、请求/实际数据日期与架构身份，能区分正常等待 5-session 成熟和评估链路无记录。审计同时发现 history/vendor verification 在 home 不可写时会静默使用工作区 `.tradingagents/runs.db`，把 19 条旧测试型记录误显示为正式 pending；该回退已删除，默认固定 `~/.tradingagents/runs.db`，只有 `TRADINGAGENTS_DB` 可覆盖且不可访问时 fail closed。沙箱外 CLI 与运行中 Web API 均确认正式库为 0 evaluation、0 pending；标准门禁 235 项与 vendor verification 9 项通过。
-  - 架构比较器过去在每臂达到 20 个结果前提前返回，付费实验可能累计 40 次运行后才暴露 vendor evidence 或 pre-treatment state 全部漂移。现在首个双臂 evaluation 就计算并返回 `sample_progress`、有效 pair 数和所有 exclusion counters；样本不足仍保持 `insufficient_data` / `passes_paired_gate=false`，让 operator 能尽早停止不可归因的实验而不降低晋级门槛。
+  - 架构比较器过去在每臂达到 20 个结果前提前返回，付费实验可能累计 40 次运行后才暴露 vendor evidence 或 pre-treatment state 全部漂移。现在零/单臂阶段先返回 `sample_progress` / `missing_architectures`，首个双臂 evaluation 再计算有效 pair 数和所有 exclusion counters；样本不足仍保持 `insufficient_data` / `passes_paired_gate=false`，让 operator 能尽早发现半对失败或停止不可归因实验，而不降低晋级门槛。
   - 2026-07-17 22:30 CST 的真实 systemd timer 新进程已加载 canonical DB fail-closed 版本，正常返回 NVDA `not_due`、exit 0，未读取工作区回退历史、未创建 run、未调用 LLM/vendor；这补足了 CLI/Web 之外的无人值守入口运行态证据。
 
   - 本轮新增纵向上下文 v3、数据库时点过滤、轻量 agent 查询与结构化 agent 回归证据；相关门禁扩大至 127 项并全部通过。

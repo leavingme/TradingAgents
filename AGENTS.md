@@ -142,7 +142,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 | `OPENAI_BASE_URL` | LLM endpoint | `~/.zshrc` export |
 | `MINIMAX_CN_API_KEY` | minimax（中国区） | `~/.zshrc` export |
 | `MINIMAX_API_KEY` | minimax（Global） | `~/.zshrc` export |
-| `.longbridge_mcp_token.json` | Longbridge API token（数据 vendor） | `tradingagents/.longbridge_mcp_token.json`（gitignored） |
+| `.longbridge_mcp_token.json` | Longbridge API token（数据 vendor） | 仓库根目录 `.longbridge_mcp_token.json`（gitignored，mode 0600） |
 | `AUTH_TOKEN` / `CT0` | Bird 只读 X/Twitter cookie 认证（社交舆情 vendor） | server-side env / browser cookie source；禁止写入配置或日志 |
 | `TRADINGAGENTS_DB` | CLI、Web、runtime history 与 vendor 审计共用的 SQLite 路径；唯一受支持的数据库路径覆盖变量 | server-side env（未设置时使用 `~/.tradingagents/runs.db`） |
 | `TRADINGAGENTS_REPORT_SECTION_THROTTLE_MS` | report section 按 run + section 合并更新的服务端节流窗口；默认 `500` ms，设为 `0` 仅用于诊断 | server-side env（通常无需设置） |
@@ -361,9 +361,10 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 
 ## 需要定期检查的事项
 
-- **Longbridge token 过期时间**：token 位于
-  `tradingagents/.longbridge_mcp_token.json`，签发后约 30 天过期。运行长
-  smoke 前先检查 expiry 字段。截至 2026-07-05：过期时间为 2026-07-18。
+- **Longbridge token 过期时间**：token 位于仓库根目录
+  `.longbridge_mcp_token.json`，签发后约 14–30 天过期（以文件内 `expiry` 为准）。
+  运行长 smoke 或自然调度前只读取并检查 expiry 字段，不输出 token 字段。截至
+  2026-07-17：过期时间为 2026-07-18 23:56 CST，晚于首个自然调度窗口。
 - **Longbridge-first OHLCV**：原始 OHLCV 默认优先使用 Longbridge MCP/CLI，
   Westock 作为覆盖率或 Longbridge 不可用时的 fallback。技术指标和基本面仍按
   各自配置链路。当分析日为当前交易日时，收盘缓冲期结束前不得把当日日 K

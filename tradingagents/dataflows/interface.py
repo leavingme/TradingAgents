@@ -713,10 +713,13 @@ def route_to_vendor(method: str, *args, **kwargs):
                         data_dict["get_income_statement"] = render_financial_data(is_data, derived)
                         log_financial_audit(ticker, vendor, "get_income_statement", "verified", is_data)
                     if bs_data:
-                        data_dict["get_balance_sheet"] = render_financial_data(bs_data, derived)
+                        # Cross-statement derived metrics are identical for IS,
+                        # BS, and CF. Render them once with the income statement
+                        # instead of tripling the LLM tool payload.
+                        data_dict["get_balance_sheet"] = render_financial_data(bs_data, [])
                         log_financial_audit(ticker, vendor, "get_balance_sheet", "verified", bs_data)
                     if cf_data:
-                        data_dict["get_cashflow"] = render_financial_data(cf_data, derived)
+                        data_dict["get_cashflow"] = render_financial_data(cf_data, [])
                         log_financial_audit(ticker, vendor, "get_cashflow", "verified", cf_data)
                     if fd_data:
                         data_dict["get_fundamentals"] = render_financial_data(fd_data, [])

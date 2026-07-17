@@ -203,6 +203,13 @@ def test_run_scoped_financial_reconciliation_is_singleflight_across_tool_threads
 
     assert all(isinstance(result, str) and result for result in results)
     assert calls == {method: 1 for method in payloads}
+    rendered = {
+        method: json.loads(result) for method, result in zip(payloads, results, strict=True)
+    }
+    assert rendered["get_income_statement"]["derived_metrics"]
+    assert rendered["get_balance_sheet"]["derived_metrics"] == []
+    assert rendered["get_cashflow"]["derived_metrics"] == []
+    assert rendered["get_fundamentals"]["derived_metrics"] == []
     cache_hits = [
         (args, kwargs) for args, kwargs in audit_records
         if len(args) > 3 and args[3] == "cache_hit"

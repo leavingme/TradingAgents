@@ -88,7 +88,7 @@
   - `decision_evaluations` 以原始 run 为主键保存架构版本、固定 horizon、rating、benchmark、raw/benchmark/alpha return、方向命中和确定性 score；不得只依赖 Markdown 反思。
   - 提供按架构版本和 horizon 的 sample count、hit rate、平均 return/alpha/score 聚合，并保留 CLI/API 查询。
   - 架构 challenger 至少满足样本门槛；顺序实盘 cohort 受 regime 混杂，即使 point estimate 更好也只能 `review_required`，无配对 shadow 证据不得自动晋升或改写 prompt/agent 拓扑。
-  - 当前证据：结构化表、确定性评分、rollup、CLI 与 `/api/evaluations` 已实现；每条结果强制保存 entry/exit 日期、标的/基准四个收盘价和四个逐交易日 OHLCV stable source ID，旧 range-only provenance 不能冒充可审计结果。canonical runtime 已从 SQLite 构造 cutoff-safe 固定 schema JSON，统一注入 Research Manager 与 Portfolio Manager，不再依赖 LLM Markdown 反思。每个 run 保存有效 agent/model/topology manifest 与 SHA-256 fingerprint；比较器拒绝同版本混杂配置，只接受相同 ticker/date/horizon、entry/exit、四个收盘价及 raw/alpha 一致的成对 shadow，计算 score delta、hit-rate delta、标准误和 95% 下界，任何结果仍需人工复核。默认禁用的 PM-only baseline / RM+PM challenger 模板已提供，未在无预算授权下开启。长期 Web 服务此前已验证接口返回 200，空样本明确呈现为 0 而非伪造指标。关闭仍需累积至少一个真实 5-session 结果，并在用户批准成本后积累配对 shadow 样本。
+  - 当前证据：结构化表、确定性评分、rollup、CLI 与 `/api/evaluations` 已实现；每条结果强制保存 entry/exit 日期、标的/基准四个收盘价和四个逐交易日 OHLCV stable source ID，旧 range-only provenance 不能冒充可审计结果。canonical runtime 已从 SQLite 构造 cutoff-safe 固定 schema JSON，统一注入 Research Manager 与 Portfolio Manager，不再依赖 LLM Markdown 反思。每个 run 保存有效 agent/model/topology manifest 与 SHA-256 fingerprint；比较器拒绝同版本混杂配置，只接受相同 ticker/date/horizon、entry/exit、四个收盘价及 raw/alpha 一致的成对 shadow，计算 score delta、hit-rate delta、标准误和 95% 下界，任何结果仍需人工复核。默认禁用的 PM-only baseline / RM+PM challenger 模板已提供，未在无预算授权下开启。真实成本审计已将财务底层 attempts 20→8；跨表 derived metrics 不再在 IS/BS/CF 三份工具结果重复，财务 LLM renderer 改为无信息损失的紧凑 JSON，等待下一次自然调度 run 测量 token 变化。长期 Web 服务此前已验证接口返回 200，空样本明确呈现为 0 而非伪造指标。关闭仍需累积至少一个真实 5-session 结果，并在用户批准成本后积累配对 shadow 样本。
 
 ### 第三阶段：核心研究能力（8–10）
 

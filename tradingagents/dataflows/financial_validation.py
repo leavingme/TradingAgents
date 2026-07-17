@@ -241,7 +241,7 @@ def render_financial_data(
             "unverified_fact_count": len(data.unverified_facts),
         },
         ensure_ascii=False,
-        indent=2,
+        separators=(",", ":"),
     )
 
 

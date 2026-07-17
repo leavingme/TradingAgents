@@ -12,6 +12,7 @@ from tradingagents.dataflows.errors import NoUsableFinancialDataError
 from tradingagents.dataflows.financial_validation import (
     derive_financial_metrics,
     normalize_financial_result,
+    render_financial_data,
     validate_financial_result,
 )
 from tradingagents.dataflows.longbridge_financial_adapter import (
@@ -212,6 +213,19 @@ def test_invalid_financial_vendor_falls_back_and_returns_canonical_json():
     parsed = json.loads(result)
     assert parsed["status"] == "verified"
     assert parsed["metrics"][0]["currency"] == "HKD"
+
+
+@pytest.mark.unit
+def test_financial_llm_renderer_uses_compact_lossless_json():
+    data = normalize_financial_result(
+        "  Revenue(HKD): 1000  [Q1 2026]",
+        "vendor",
+    )
+    rendered = render_financial_data(data, [])
+    assert "\n" not in rendered
+    parsed = json.loads(rendered)
+    assert parsed["status"] == "verified"
+    assert parsed["metrics"][0]["value"] == 1000.0
 
 
 @pytest.mark.unit

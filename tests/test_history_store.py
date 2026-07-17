@@ -66,6 +66,7 @@ def test_history_migrates_legacy_evaluations_to_explicit_scoring_policy(tmp_path
             for row in conn.execute("PRAGMA table_info(decision_evaluations)")
         }
     assert columns["scoring_version"]["dflt_value"] == "'alpha-exposure-v1'"
+    assert columns["measurement_version"]["dflt_value"] == "'decision-close-v1'"
     assert float(columns["hold_band"]["dflt_value"]) == 0.02
 
 
@@ -342,16 +343,16 @@ def test_longitudinal_context_is_structured_audited_and_cutoff_safe(
         "analysis_date": "2026-07-01",
         "rating": "Buy",
         "benchmark": "SPY",
-        "entry_date": "2026-07-01",
-        "exit_date": "2026-07-08",
+        "entry_date": "2026-07-02",
+        "exit_date": "2026-07-09",
         "stock_entry_close": 100.0,
         "stock_exit_close": 105.0,
         "benchmark_entry_close": 500.0,
         "benchmark_exit_close": 510.0,
-        "stock_entry_source_id": "ohlcv:test:stock-entry:2026-07-01",
-        "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-08",
-        "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-01",
-        "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-08",
+        "stock_entry_source_id": "ohlcv:test:stock-entry:2026-07-02",
+        "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-09",
+        "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-02",
+        "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-09",
         "raw_return": 0.05,
         "benchmark_return": 0.02,
         "alpha_return": 0.03,
@@ -368,9 +369,10 @@ def test_longitudinal_context_is_structured_audited_and_cutoff_safe(
     context = json.loads(store.get_longitudinal_context(
         "NVDA", information_cutoff="2026-07-10T16:00:01-04:00"
     ))
-    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v3"
+    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v4"
     assert context["same_symbol_outcomes"][0]["run_id"] == "evaluated-nvda"
     assert context["same_symbol_outcomes"][0]["directional_hit"] is True
+    assert context["same_symbol_outcomes"][0]["measurement_version"] == "next-common-close-v1"
     assert "reflection" not in context["same_symbol_outcomes"][0]
     rollup = context["same_symbol_architecture_rollups"][0]
     assert rollup["sample_count"] == 1

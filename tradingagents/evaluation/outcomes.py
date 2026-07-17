@@ -19,6 +19,8 @@ _EXPOSURE = {
 }
 
 OUTCOME_SCORING_VERSION = "alpha-exposure-v1"
+OUTCOME_MEASUREMENT_VERSION = "next-common-close-v1"
+LEGACY_OUTCOME_MEASUREMENT_VERSION = "decision-close-v1"
 DEFAULT_HOLD_BAND = 0.02
 
 _RUNTIME_COST_FIELDS = (
@@ -195,6 +197,15 @@ def _scoring_policy(row: dict[str, Any]) -> tuple[str, float]:
     return version, hold_band
 
 
+def _measurement_policy(row: dict[str, Any]) -> str:
+    version = str(
+        row.get("measurement_version") or LEGACY_OUTCOME_MEASUREMENT_VERSION
+    ).strip()
+    if not version:
+        raise ValueError("evaluation has an invalid measurement policy")
+    return version
+
+
 @dataclass(frozen=True)
 class OutcomeMeasurement:
     raw_return: float
@@ -211,6 +222,7 @@ class OutcomeMeasurement:
     stock_exit_source_id: str
     benchmark_entry_source_id: str
     benchmark_exit_source_id: str
+    measurement_version: str = OUTCOME_MEASUREMENT_VERSION
 
 
 def score_outcome(
@@ -261,23 +273,32 @@ def architecture_rollups(
     Runtime cost metrics belong in operator-facing optimization views. Callers
     constructing investment-agent context can exclude them explicitly.
     """
-    groups: dict[tuple[str, str, str, float, int], list[dict[str, Any]]] = defaultdict(list)
+    groups: dict[
+        tuple[str, str, str, str, float, int], list[dict[str, Any]]
+    ] = defaultdict(list)
     for row in evaluations:
         scoring_version, hold_band = _scoring_policy(row)
         groups[(
             str(row["architecture_version"]),
             str(row.get("architecture_fingerprint", "legacy-unspecified")),
+            _measurement_policy(row),
             scoring_version,
             hold_band,
             int(row["horizon_sessions"]),
         )].append(row)
     output = []
-    for (version, fingerprint, scoring_version, hold_band, horizon), rows in sorted(
-        groups.items()
-    ):
+    for (
+        version,
+        fingerprint,
+        measurement_version,
+        scoring_version,
+        hold_band,
+        horizon,
+    ), rows in sorted(groups.items()):
         rollup = {
             "architecture_version": version,
             "architecture_fingerprint": fingerprint,
+            "measurement_version": measurement_version,
             "scoring_version": scoring_version,
             "hold_band": hold_band,
             "horizon_sessions": horizon,
@@ -355,6 +376,15 @@ def compare_architectures(
         })
         for version in (baseline, challenger)
     }
+    measurement_policies = {
+        version: sorted({
+            _measurement_policy(row)
+            for row in evaluations
+            if str(row.get("architecture_version")) == version
+            and int(row.get("horizon_sessions", -1)) == horizon_sessions
+        })
+        for version in (baseline, challenger)
+    }
     if any(len(values) != 1 for values in fingerprints.values()):
         return {
             "status": "invalid_comparison",
@@ -363,6 +393,22 @@ def compare_architectures(
                 "split the cohorts before comparing"
             ),
             "architecture_fingerprints": fingerprints,
+            "measurement_policies": measurement_policies,
+            "scoring_policies": scoring_policies,
+            "baseline": base,
+            "challenger": challenge,
+        }
+    if (
+        any(len(values) != 1 for values in measurement_policies.values())
+        or measurement_policies[baseline] != measurement_policies[challenger]
+    ):
+        return {
+            "status": "invalid_comparison",
+            "reason": (
+                "baseline and challenger must each use one identical measurement policy"
+            ),
+            "architecture_fingerprints": fingerprints,
+            "measurement_policies": measurement_policies,
             "scoring_policies": scoring_policies,
             "baseline": base,
             "challenger": challenge,
@@ -377,6 +423,7 @@ def compare_architectures(
                 "baseline and challenger must each use one identical scoring policy"
             ),
             "architecture_fingerprints": fingerprints,
+            "measurement_policies": measurement_policies,
             "scoring_policies": scoring_policies,
             "baseline": base,
             "challenger": challenge,
@@ -599,6 +646,7 @@ def compare_architectures(
         "passes_paired_gate": passes_paired_gate,
         "score_improvement": improvement,
         "architecture_fingerprints": fingerprints,
+        "measurement_policies": measurement_policies,
         "scoring_policies": scoring_policies,
         "paired": paired_summary,
         "execution_order": {

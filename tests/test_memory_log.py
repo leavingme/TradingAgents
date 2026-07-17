@@ -526,12 +526,12 @@ class TestDeferredReflection:
     # TradingAgentsGraph._fetch_returns
 
     def test_fetch_returns_valid_ticker(self):
-        stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
-        spy_prices   = [400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
+        stock_prices = [99.0, 100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
+        spy_prices   = [399.0, 400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         with patch("tradingagents.dataflows.stockstats_utils.load_ohlcv") as fetch:
             fetch.side_effect = lambda sym, *a: pd.DataFrame({
-                "Date": pd.date_range("2026-01-05", periods=6, freq="B"),
+                "Date": pd.date_range("2026-01-05", periods=7, freq="B"),
                 "Close": spy_prices if sym == "SPY" else stock_prices,
             })
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-01-05")
@@ -540,13 +540,13 @@ class TestDeferredReflection:
         assert days == 5
 
     def test_fetch_returns_details_require_and_preserve_exact_provenance(self, monkeypatch):
-        stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
-        spy_prices = [400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
+        stock_prices = [999.0, 100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
+        spy_prices = [1.0, 400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         monkeypatch.setattr(
             "tradingagents.dataflows.stockstats_utils.load_ohlcv",
             lambda symbol, end: pd.DataFrame({
-                "Date": pd.date_range("2026-01-05", periods=6, freq="B"),
+                "Date": pd.date_range("2026-01-05", periods=7, freq="B"),
                 "Close": spy_prices if symbol == "SPY" else stock_prices,
             }),
         )
@@ -565,10 +565,13 @@ class TestDeferredReflection:
             return_details=True,
         )
         assert isinstance(measurement, OutcomeMeasurement)
-        assert measurement.entry_date == "2026-01-05"
-        assert measurement.exit_date == "2026-01-12"
-        assert measurement.stock_entry_source_id == "ohlcv:test:NVDA:2026-01-05"
-        assert measurement.benchmark_exit_source_id == "ohlcv:test:SPY:2026-01-12"
+        assert measurement.entry_date == "2026-01-06"
+        assert measurement.exit_date == "2026-01-13"
+        assert measurement.stock_entry_close == 100.0
+        assert measurement.benchmark_entry_close == 400.0
+        assert measurement.measurement_version == "next-common-close-v1"
+        assert measurement.stock_entry_source_id == "ohlcv:test:NVDA:2026-01-06"
+        assert measurement.benchmark_exit_source_id == "ohlcv:test:SPY:2026-01-13"
 
     def test_fetch_returns_too_recent(self):
         """Only 1 data point available → returns (None, None, None), no crash."""
@@ -588,7 +591,7 @@ class TestDeferredReflection:
 
     def test_fetch_returns_spy_shorter_than_stock(self):
         """An incomplete benchmark horizon must remain pending, not become a fake 2d result."""
-        stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
+        stock_prices = [99.0, 100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 403.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         with patch("tradingagents.dataflows.stockstats_utils.load_ohlcv") as fetch:

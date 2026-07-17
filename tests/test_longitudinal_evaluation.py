@@ -59,16 +59,16 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
         "analysis_date": "2026-07-01",
         "rating": "Buy",
         "benchmark": "SPY",
-        "entry_date": "2026-07-01",
-        "exit_date": "2026-07-08",
+        "entry_date": "2026-07-02",
+        "exit_date": "2026-07-09",
         "stock_entry_close": 100.0,
         "stock_exit_close": 105.0,
         "benchmark_entry_close": 500.0,
         "benchmark_exit_close": 510.0,
-        "stock_entry_source_id": "ohlcv:test:stock-entry:2026-07-01",
-        "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-08",
-        "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-01",
-        "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-08",
+        "stock_entry_source_id": "ohlcv:test:stock-entry:2026-07-02",
+        "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-09",
+        "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-02",
+        "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-09",
         "raw_return": 0.05,
         "benchmark_return": 0.02,
         "alpha_return": 0.03,
@@ -92,6 +92,7 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert rows[0]["tokens_in"] == 1200
     assert rows[0]["tokens_out"] == 240
     assert rows[0]["scoring_version"] == "alpha-exposure-v1"
+    assert rows[0]["measurement_version"] == "next-common-close-v1"
     assert rows[0]["hold_band"] == 0.02
     lightweight = store.list_decision_evaluations(
         ticker="nvda",
@@ -108,6 +109,12 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
         **record,
         "run_id": "run-future",
         "analysis_date": "2026-07-02",
+        "entry_date": "2026-07-03",
+        "exit_date": "2026-07-10",
+        "stock_entry_source_id": "ohlcv:test:stock-entry:2026-07-03",
+        "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-10",
+        "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-03",
+        "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-10",
         "evaluated_at": "2026-07-20T16:00:00-04:00",
     })
     newest = store.list_decision_evaluations(
@@ -138,6 +145,12 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
             **record,
             "run_id": "bad-version",
             "scoring_version": "unknown-v2",
+        })
+    with pytest.raises(ValueError, match="entry_date must follow analysis_date"):
+        store.add_decision_evaluation({
+            **record,
+            "run_id": "lookahead-entry",
+            "entry_date": record["analysis_date"],
         })
 
 
@@ -296,6 +309,31 @@ def test_architecture_comparison_rejects_mixed_scoring_policies():
     )
     assert comparison["status"] == "invalid_comparison"
     assert "scoring policy" in comparison["reason"]
+
+
+def test_architecture_comparison_rejects_mixed_measurement_policies():
+    evaluations = []
+    for version in ("baseline", "challenger"):
+        for index in range(20):
+            evaluations.append({
+                "architecture_version": version,
+                "architecture_fingerprint": f"{version}-fp",
+                "measurement_version": (
+                    "decision-close-v1"
+                    if version == "baseline"
+                    else "next-common-close-v1"
+                ),
+                "horizon_sessions": 5,
+                "directional_hit": True,
+                "raw_return": 0.03,
+                "alpha_return": 0.02,
+                "score": 0.01,
+            })
+    comparison = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert comparison["status"] == "invalid_comparison"
+    assert "measurement policy" in comparison["reason"]
 
 
 def test_architecture_rollups_do_not_merge_mixed_fingerprints():

@@ -240,7 +240,7 @@ class TradingAgentsGraph:
         benchmark: str = "SPY", as_of_date: str | None = None,
         return_details: bool = False,
     ):
-        """Fetch raw and alpha return for ticker over holding_days from trade_date.
+        """Fetch an information-safe raw/alpha return after ``trade_date``.
 
         ``benchmark`` is the index used as the alpha baseline (resolved by the
         caller via ``_resolve_benchmark``). Returns ``(raw_return, alpha_return,
@@ -283,10 +283,12 @@ class TradingAgentsGraph:
             common = stock_closes.merge(bench_closes, on="Date", how="inner").sort_values("Date")
             start_date = pd.Timestamp(trade_date)
             end_date = pd.Timestamp(end_str)
-            common = common[(common["Date"] >= start_date) & (common["Date"] <= end_date)]
-            # A 5-session horizon requires the decision-date close plus five
-            # subsequent common closes. Never relabel a 1-4 day outcome as 5d.
-            if len(common) < holding_days + 1 or common.iloc[0]["Date"] != start_date:
+            common = common[(common["Date"] > start_date) & (common["Date"] <= end_date)]
+            # The recommendation may be formed after the analysis-date close,
+            # so that close is never an executable entry. A 5-session horizon
+            # requires the first later common close plus five subsequent common
+            # closes. Never relabel a shorter outcome as 5d.
+            if len(common) < holding_days + 1:
                 return None if return_details else (None, None, None)
             entry = common.iloc[0]
             exit_row = common.iloc[holding_days]
@@ -380,6 +382,7 @@ class TradingAgentsGraph:
                     "stock_exit_source_id": measurement.stock_exit_source_id,
                     "benchmark_entry_source_id": measurement.benchmark_entry_source_id,
                     "benchmark_exit_source_id": measurement.benchmark_exit_source_id,
+                    "measurement_version": measurement.measurement_version,
                 }
             else:
                 # Compatibility for test doubles and older programmatic
@@ -456,6 +459,7 @@ class TradingAgentsGraph:
                         "architecture_fingerprint": prior_run.get(
                             "architecture_fingerprint", "legacy-unspecified"
                         ),
+                        "measurement_version": update["measurement_version"],
                         "entry_date": update["entry_date"],
                         "exit_date": update["exit_date"],
                         "stock_entry_close": update["stock_entry_close"],

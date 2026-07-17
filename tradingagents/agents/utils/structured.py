@@ -113,11 +113,12 @@ def invoke_structured_or_safe(
             correction = (
                 "Previous structured decision was rejected by deterministic validation: "
                 f"{type(exc).__name__}: {exc}. Return a corrected structured decision. "
-                "Keep qualitative evidence in prose, but remove every executable price, trigger, "
-                "ATR multiple, reward/risk value, option strike, hedge size, and position-size "
-                "number from prose. Preserve or correct the selected entry, stop, target, initial "
-                "position, and target position only in their dedicated structured fields. Do not "
-                "copy execution numbers from upstream context."
+                "The reasoning and every other prose field MUST contain no ASCII digits, Chinese "
+                "numeric characters, currency symbols, percent signs, or ATR token at all. Keep "
+                "qualitative evidence in prose. Preserve or correct the selected entry, stop, target, "
+                "initial position, and target position only in their dedicated structured fields "
+                "(the numeric fields). Do "
+                "not copy any number from upstream context into prose."
             )
             if isinstance(prompt, str):
                 current_prompt = prompt + "\n\n" + correction

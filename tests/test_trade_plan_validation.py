@@ -368,6 +368,22 @@ def test_negative_sell_heading_list_number_is_not_execution():
     assert not contains_unverified_non_long_execution(report)
 
 
+def test_why_not_reduce_heading_is_not_execution_false_positive():
+    report = (
+        "### 为什么不是减仓/Underweight "
+        "保守派关于71.5%净利率不可持续的论证属于长期风险。"
+    )
+    assert not contains_unverified_non_long_execution(report)
+
+
+def test_why_not_reduce_heading_does_not_hide_real_reduction_instruction():
+    report = (
+        "### 为什么不是减仓/Underweight "
+        "长期基本面仍稳健；跌破$200后减仓20%。"
+    )
+    assert contains_unverified_non_long_execution(report)
+
+
 @pytest.mark.parametrize(
     "heading",
     ["支撑 Hold（不卖出）的硬证据", "支撑 Hold（不加仓）的硬证据"],

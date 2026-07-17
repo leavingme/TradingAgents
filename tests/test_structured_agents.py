@@ -27,6 +27,7 @@ from tradingagents.agents.schemas import (
     render_trader_proposal,
 )
 from tradingagents.agents.trader.trader import create_trader
+from tradingagents.agents.utils.structured import invoke_structured_or_safe
 
 VERIFIED = {
     "market_date": "2026-07-10", "close": 190.0, "atr": 6.0,
@@ -214,6 +215,47 @@ def test_invoke_structured_falls_back_when_result_is_none():
 
 
 @pytest.mark.unit
+def test_safe_structured_retry_makes_digit_free_prose_requirement_explicit():
+    invalid = TraderProposal(
+        action=TraderAction.BUY,
+        reasoning="Buy near 190 with a 178 stop.",
+        entry_price=190,
+        stop_loss=178,
+        price_target=215,
+        target_position_pct=6,
+        initial_position_pct=3,
+    )
+    valid = TraderProposal(
+        action=TraderAction.BUY,
+        reasoning="Demand remains constructive while disciplined sizing contains downside risk.",
+        entry_price=190,
+        stop_loss=178,
+        price_target=215,
+        target_position_pct=6,
+        initial_position_pct=3,
+    )
+    structured = MagicMock()
+    structured.invoke.side_effect = [invalid, valid]
+
+    rendered = invoke_structured_or_safe(
+        structured,
+        [{"role": "system", "content": "system"}, {"role": "user", "content": "plan"}],
+        lambda proposal: render_trader_proposal(
+            proposal, verified_market=VERIFIED, risk_policy=POLICY
+        ),
+        lambda exc: f"failed: {exc}",
+        "Trader",
+    )
+
+    assert "**Action**: Buy" in rendered
+    assert structured.invoke.call_count == 2
+    retry_prompt = structured.invoke.call_args_list[1].args[0]
+    correction = retry_prompt[-1]["content"]
+    assert "MUST contain no ASCII digits" in correction
+    assert "dedicated structured fields" in correction
+
+
+@pytest.mark.unit
 class TestTraderAgent:
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}
@@ -246,6 +288,20 @@ class TestTraderAgent:
         assert any("Proposed Investment Plan" in m["content"] for m in prompt)
         assert any("Do not copy any of its execution numbers" in m["content"] for m in prompt)
         assert "Copy no executable price" in prompt[0]["content"]
+
+    def test_prompt_includes_trusted_market_and_server_risk_constraints(self):
+        captured = {}
+        llm = _structured_trader_llm(captured)
+        create_trader(llm)(_make_trader_state())
+        user_prompt = captured["prompt"][1]["content"]
+        assert "Trusted Execution Constraints" in user_prompt
+        assert "verified_market_date: 2026-07-10" in user_prompt
+        assert "verified_close: 190.0" in user_prompt
+        assert "verified_atr: 6.0" in user_prompt
+        assert "max_position_pct: 6.0" in user_prompt
+        assert "max_entry_deviation_pct: 20.0" in user_prompt
+        assert "deterministic validator remains authoritative" in user_prompt
+        assert "Never repeat them or any derived number in reasoning" in user_prompt
 
     def test_structured_unavailable_returns_non_executable_review_required(self):
         plain_response = (

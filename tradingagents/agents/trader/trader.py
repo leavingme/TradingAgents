@@ -30,6 +30,22 @@ def create_trader(llm):
         investment_plan = state["investment_plan"]
         verified_market = state["verified_market_snapshot"]
         risk_policy = state["trade_risk_policy"]
+        trusted_execution_constraints = (
+            "Trusted Execution Constraints (server supplied; the deterministic validator "
+            "remains authoritative):\n"
+            f"- verified_market_date: {verified_market['market_date']}\n"
+            f"- verified_close: {verified_market['close']}\n"
+            f"- verified_atr: {verified_market['atr']}\n"
+            f"- allow_new_long_positions: {risk_policy['allow_new_long_positions']}\n"
+            f"- max_portfolio_risk_pct: {risk_policy['max_portfolio_risk_pct']}\n"
+            f"- max_position_pct: {risk_policy['max_position_pct']}\n"
+            f"- max_notional_exposure_pct: {risk_policy['max_notional_exposure_pct']}\n"
+            f"- available_buying_power_pct: {risk_policy['available_buying_power_pct']}\n"
+            f"- max_entry_deviation_pct: {risk_policy['max_entry_deviation_pct']}\n"
+            "Use these values only to choose dedicated structured numeric fields. Never "
+            "repeat them or any derived number in reasoning. The validator will independently "
+            "recompute every limit and reject any inconsistent proposal."
+        )
 
         messages = [
             {
@@ -42,7 +58,9 @@ def create_trader(llm):
                     "derived metrics. Copy no executable price, trigger, ATR, reward/risk, option, "
                     "hedge, or position-size number into reasoning, even when the research plan "
                     "contains one; transfer only the selected entry, stop, target, and position "
-                    "values into their dedicated structured fields. For Hold or Sell, omit all "
+                    "values into their dedicated structured fields. The reasoning field must contain "
+                    "no digits, currency symbols, percent signs, Chinese numeric characters, or ATR "
+                    "token; express the thesis directionally. For Hold or Sell, omit all "
                     "executable numeric fields and keep the reasoning qualitative."
                     + get_language_instruction()
                 ),
@@ -57,7 +75,7 @@ def create_trader(llm):
                     f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n\n"
                     f"Treat the plan as non-authoritative research context. Do not copy any of its "
                     f"execution numbers into prose. Only dedicated structured fields can authorize "
-                    f"a price or position value."
+                    f"a price or position value.\n\n{trusted_execution_constraints}"
                 ),
             },
         ]

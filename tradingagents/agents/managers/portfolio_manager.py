@@ -107,8 +107,14 @@ structured fields: entry_price, stop_loss, price_target,
 target_position_pct, and initial_position_pct.
 Do not calculate or state reward/risk, ATR multiples, or portfolio-loss math in
 prose. Do not repeat executable entry, stop, target, ATR, or position numbers in
-prose; deterministic code will render the structured fields. If reliable
-numeric inputs are unavailable, choose Hold rather than inventing them.
+prose. The executive_summary and investment_thesis fields must contain no digits,
+currency symbols, percent signs, Chinese numeric characters, or ATR token; express
+all evidence directionally. If preserving a validated Buy/Overweight proposal,
+copy its entry, stop, target, initial position, and target position only into the
+matching dedicated structured fields from the Trader proposal; do not invent
+replacement execution values. Deterministic code will independently revalidate
+and render them. If reliable numeric inputs are unavailable, choose Hold rather
+than inventing them.
 For Hold, Underweight, or Sell, omit all executable numeric fields; those
 directions do not yet have an approved direction-specific calculator."""
 

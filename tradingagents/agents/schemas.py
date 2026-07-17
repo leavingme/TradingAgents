@@ -178,6 +178,13 @@ def _execution_scan_text(value: str) -> str:
         value,
     )
     value = re.sub(
+        r"(?i)(?:为何|为什么)\s*不是\s*"
+        r"(?:减仓|减持|卖出|清仓|sell|underweight)"
+        r"(?:\s*/\s*(?:减仓|减持|卖出|清仓|sell|underweight))?",
+        "反对非多头评级",
+        value,
+    )
+    value = re.sub(
         r"(?i)为何\s*不做\s*方向性\s*(?:加仓|减仓)",
         "维持当前方向的理由",
         value,
@@ -375,7 +382,10 @@ class TraderProposal(BaseModel):
             "the research plan. Two to four sentences. Keep this field "
             "qualitative: do not repeat executable entry, stop, target, trigger, "
             "ATR, reward/risk, or position-size numbers here. For Buy, put the "
-            "chosen executable values only in their dedicated numeric fields."
+            "chosen executable values only in their dedicated numeric fields. "
+            "To make this separation deterministic, use no digits, currency "
+            "symbols, percent signs, Chinese numeric characters, or ATR token "
+            "anywhere in reasoning; describe evidence directionally instead."
         ),
     )
     entry_price: float | None = Field(
@@ -510,15 +520,21 @@ class PortfolioDecision(BaseModel):
     )
     executive_summary: str = Field(
         description=(
-            "A concise action plan covering entry strategy, position sizing, "
-            "key risk levels, and time horizon. Two to four sentences."
+            "A concise qualitative action plan. Two to four sentences. Do not "
+            "state entry, stop, target, trigger, position sizing, risk levels, "
+            "or other executable numbers here. Use no digits, currency symbols, "
+            "percent signs, Chinese numeric characters, or ATR token; dedicated "
+            "structured fields carry every executable value."
         ),
     )
     investment_thesis: str = Field(
         description=(
             "Detailed reasoning anchored in specific evidence from the analysts' "
             "debate. If prior lessons are referenced in the prompt context, "
-            "incorporate them; otherwise rely solely on the current analysis."
+            "incorporate them; otherwise rely solely on the current analysis. "
+            "Describe the evidence directionally without digits, currency symbols, "
+            "percent signs, Chinese numeric characters, or ATR token. Never place "
+            "an executable value in prose."
         ),
     )
     price_target: float | None = Field(

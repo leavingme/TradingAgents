@@ -829,6 +829,17 @@ class TestPortfolioManagerInjection:
         assert "Audited prior fixed-horizon outcomes" in captured["prompt"]
         assert "Great call." in captured["prompt"]
 
+    def test_pm_prompt_requires_digit_free_prose_and_reuses_validated_fields(self):
+        captured = {}
+        pm_node = create_portfolio_manager(_structured_pm_llm(captured))
+        pm_node(_make_pm_state())
+        prompt = captured["prompt"]
+        assert "must contain no digits" in prompt
+        assert "copy its entry, stop, target, initial position, and target position" in prompt
+        assert "do not invent" in prompt
+        assert "replacement execution values" in prompt
+        assert "independently revalidate" in prompt
+
     def test_pm_no_past_context_no_section(self):
         """PM prompt omits the lessons section entirely when past_context is empty."""
         captured = {}

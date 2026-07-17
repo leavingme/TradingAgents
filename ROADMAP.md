@@ -82,7 +82,7 @@
   - 同 symbol + market-data date 幂等；活动/成功/人工复核结果不重跑，基础设施失败有延迟、次数上限和跨进程锁，防止并发与成本失控。
   - 自动运行复用服务端 Web 的 LLM、研究深度、输出语言和 vendor 顺序，避免 skill worker 使用不兼容默认模型。
   - 固定 5-session 结果只在决策日与之后第 5 个共同交易日均存在时结算；1–4 日保持 pending。`point_in_time` 禁止产生事后反思或结果写入。
-  - 当前证据：repo-native scheduler、systemd unit、NVDA 正式配置和运维文档已实现；用户级 timer 已 `enable --now`，每 15 分钟检查，正式 oneshot 在未到时段时以 `not_due`/exit 0 完成。canonical 默认已统一为 `minimax-cn` + `MiniMax-M3`，修复 skill worker 请求错误模型的问题。调度、history、runtime、Web、CLI、结构化 agent、社交 vendor、纵向评估和 OHLCV provenance 相关 277 项通过，前端模块/语法检查通过；Providers 桌面与精确 390×844 视口均无横向 overflow。关闭仍需首次实际收盘后运行证据。
+  - 当前证据：repo-native scheduler、systemd unit、NVDA 正式配置和运维文档已实现；用户级 timer 已 `enable --now`，每 15 分钟检查，正式 oneshot 在未到时段时以 `not_due`/exit 0 完成。canonical 默认已统一为 `minimax-cn` + `MiniMax-M3`，修复 skill worker 请求错误模型的问题。新增五轮同输入 NVDA 工程审计，依次发现并修复 Trader prose 纠错不确定、非多头否定标题假阳性、可信行情/服务端风险约束未进入 Trader 生成上下文、Portfolio schema 与 prose 门禁冲突；最终 run `0c3c7612b154454eaaad37595fd0da98` 以 `decision_status=validated`、`data_status=degraded` 完成，Trader/Portfolio 均首轮通过，自动 review 无 P0。调度、history、runtime、Web、CLI、结构化 agent、社交 vendor、纵向评估和 OHLCV provenance 相关 277 项通过；本轮安全边界相关 153 项通过，前端模块/语法检查通过；Providers 桌面与精确 390×844 视口均无横向 overflow。关闭仍需首次实际收盘后运行证据。
 
 - [ ] **7. 连续多日评估与 agent 架构实验门禁**
   - `decision_evaluations` 以原始 run 为主键保存架构版本、固定 horizon、rating、benchmark、raw/benchmark/alpha return、方向命中和确定性 score；不得只依赖 Markdown 反思。
@@ -175,7 +175,7 @@
 
 - [x] 可信 ATR、Close、market date 和 vendor `call_id` 由 verified snapshot 注入；LLM 不能提供权威风控输入。
 - [x] Buy/Overweight 交易计划结构化，收益风险比、ATR 距离和组合损失由代码重算；重复失败进入 `REVIEW_REQUIRED`。
-  - 完成证据：Research Manager 的非权威计划在 Trader 边界前确定性清除入场、止损、目标、期权和仓位数字；Trader schema 移除未经验证的自由文本 `position_sizing`，可执行数字只能进入服务器 validator 覆盖的专用字段。结构化决策与 runtime/Web 针对性回归共 133 项通过；MiniMax-M3 live 运行 `NVDA-e2c408b9cf6f` 以 `decision_status=validated` 完成。
+  - 完成证据：Research Manager 的非权威计划在 Trader 边界前确定性清除入场、止损、目标、期权和仓位数字；Trader schema 移除未经验证的自由文本 `position_sizing`，可执行数字只能进入服务器 validator 覆盖的专用字段。Trader 现在从 server-side state 读取可信 close/ATR 与风险上限作为生成约束，但最终仍由同一 validator 独立复算；Trader/Portfolio 的 schema、首轮 prompt 和 retry 统一使用可机械判断的无数字 prose 协议，PM 维持多头时只能复制已验证 Trader structured fields。否定动作标题规范化只消除 detector 假阳性，真实条件减仓反例仍命中。结构化决策与 runtime/Web 针对性回归共 133 项通过；本轮组合回归 153 项通过；MiniMax-M3 live 运行 `0c3c7612b154454eaaad37595fd0da98` 以 `decision_status=validated` 完成且自动工程 review 无 P0。
 - [x] `validated|review_required|unavailable` 是一等状态；无有效决策不伪装成 Hold、不生成信号、不写绩效记忆。
 - [x] Web backend URL allowlist、路径/配置白名单、非 loopback bearer 认证、启动频率与并发限制已经完成。
 - [x] 模型 tool 参数 Schema 错误只允许一次受限纠正；vendor、认证、无数据和 validator 错误继续 fail closed。

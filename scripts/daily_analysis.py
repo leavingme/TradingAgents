@@ -89,6 +89,8 @@ def main() -> int:
             "max_attempts_per_date": schedule.max_attempts_per_date,
             "retry_after_minutes": schedule.retry_after_minutes,
             "stale_active_after_minutes": schedule.stale_active_after_minutes,
+            "market_data_retry_after_minutes": schedule.market_data_retry_after_minutes,
+            "market_data_max_wait_minutes": schedule.market_data_max_wait_minutes,
             "targets": [
                 {
                     "symbol": item.symbol,

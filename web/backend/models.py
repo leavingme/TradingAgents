@@ -95,7 +95,8 @@ class RunCreateRequest(BaseModel):
 
 
 RunStatus = Literal[
-    "pending", "running", "completed", "review_required", "unavailable", "failed", "cancelled"
+    "pending", "running", "completed", "review_required", "unavailable", "failed",
+    "cancelled", "market_data_pending", "market_data_unavailable"
 ]
 
 
@@ -112,7 +113,9 @@ class RunRecordResponse(BaseModel):
     finished_at: str | None = None
     report_path: str | None = None
     error: str | None = None
-    decision_status: Literal["validated", "review_required", "unavailable"] = "unavailable"
+    decision_status: Literal[
+        "validated", "review_required", "unavailable", "market_data_pending"
+    ] = "unavailable"
     data_status: Literal["not_observed", "available", "degraded", "unavailable"] = "not_observed"
     vendor_summary: dict[str, Any] = Field(default_factory=dict)
     event_count: int = 0

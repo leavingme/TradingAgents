@@ -80,6 +80,7 @@ class AnalysisRequest:
     longitudinal_context_mode: Literal[
         "portfolio_only", "research_and_portfolio"
     ] = "research_and_portfolio"
+    require_exact_market_data_date: bool = False
 
     def __post_init__(self) -> None:
         from .audit_context import validate_temporal_context
@@ -96,6 +97,8 @@ class AnalysisResult:
     run_id: str
     final_state: dict[str, Any]
     decision: Any
-    decision_status: Literal["validated", "review_required", "unavailable"]
+    decision_status: Literal[
+        "validated", "review_required", "unavailable", "market_data_pending"
+    ]
     report_path: Path | None
     events: tuple[AnalysisEvent, ...]

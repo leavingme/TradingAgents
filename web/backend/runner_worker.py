@@ -72,6 +72,12 @@ def _run(run_id: str, request: RunCreateRequest, task_store: TaskStore) -> None:
                 final_status = "failed"
                 break
             if (
+                event.type == "market_data_status"
+                and isinstance(event.content, dict)
+                and event.content.get("status") == "pending_provider_settlement"
+            ):
+                final_status = "market_data_pending"
+            if (
                 event.type == "run_completed"
                 and isinstance(event.content, dict)
                 and event.content.get("decision_status") in {"review_required", "unavailable"}

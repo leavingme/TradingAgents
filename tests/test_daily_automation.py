@@ -559,6 +559,141 @@ def test_failed_run_retries_only_after_delay_and_stops_at_bound(tmp_path, monkey
     assert exhausted[0]["status"] == "attempts_exhausted"
 
 
+def test_market_data_pending_retries_without_consuming_analysis_attempt(
+    tmp_path, monkeypatch
+):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+    schedule = DailySchedule(
+        enabled=True,
+        targets=_schedule().targets,
+        max_attempts_per_date=1,
+        market_data_retry_after_minutes=15,
+        market_data_max_wait_minutes=60,
+    )
+    calls = []
+
+    def execute(request):
+        calls.append(request)
+        status = "market_data_pending" if len(calls) == 1 else "completed"
+        store.create_run(
+            request.run_id,
+            request.ticker,
+            request.analysis_date,
+            request.asset_type,
+            request.selected_analysts,
+            request.llm_provider,
+            request.research_depth,
+            status=status,
+            created_at=(
+                "2026-07-17T20:45:00+00:00"
+                if len(calls) == 1
+                else "2026-07-17T21:01:00+00:00"
+            ),
+            architecture_version=request.architecture_version,
+        )
+        store.mark_finished(
+            request.run_id,
+            status,
+            finished_at=(
+                "2026-07-17T20:46:00+00:00"
+                if len(calls) == 1
+                else "2026-07-17T21:02:00+00:00"
+            ),
+        )
+        return SimpleNamespace(
+            run_id=request.run_id,
+            decision_status=(
+                "market_data_pending" if len(calls) == 1 else "validated"
+            ),
+            report_path=None,
+        )
+
+    first = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 16, 45, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+    waiting = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 16, 50, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+    retry = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 17, 1, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert first[0]["status"] == "market_data_pending"
+    assert calls[0].require_exact_market_data_date is True
+    assert waiting[0]["status"] == "market_data_wait"
+    assert retry[0]["status"] == "completed"
+    assert len(calls) == 2
+
+
+def test_market_data_pending_fails_closed_after_bounded_wait(tmp_path, monkeypatch):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+    schedule = DailySchedule(
+        enabled=True,
+        targets=_schedule().targets,
+        market_data_retry_after_minutes=15,
+        market_data_max_wait_minutes=60,
+    )
+    store.create_run(
+        "pending-bar",
+        "NVDA",
+        "2026-07-17",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        status="market_data_pending",
+        created_at="2026-07-17T20:45:00+00:00",
+        architecture_version=schedule.targets[0].architecture_version,
+    )
+    store.mark_finished(
+        "pending-bar",
+        "market_data_pending",
+        finished_at="2026-07-17T20:46:00+00:00",
+    )
+
+    outcome = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 17, 46, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=lambda request: (_ for _ in ()).throw(
+            AssertionError("bounded wait must fail before another execution")
+        ),
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert outcome[0]["status"] == "market_data_unavailable"
+    assert scheduler_exit_code(outcome) == 1
+    recorded = store.get_run("pending-bar")
+    assert recorded["status"] == "market_data_unavailable"
+    assert recorded["events"][-1]["content"]["status"] == (
+        "unavailable_after_bounded_wait"
+    )
+
+
 def test_pre_runtime_failure_is_persisted_and_counts_toward_retry_bound(
     tmp_path, monkeypatch
 ):

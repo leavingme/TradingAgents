@@ -238,6 +238,60 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert manifest["longitudinal_context_mode"] == "research_and_portfolio"
 
 
+def test_exact_market_date_defers_before_graph_execution(monkeypatch, tmp_path):
+    from tradingagents.runtime import analysis_runner
+    from tradingagents.runtime.history import history_store
+    from tradingagents.dataflows import market_data_validator
+
+    class NeverStreamCompiledGraph(FakeCompiledGraph):
+        def stream(self, init_state, **kwargs):
+            raise AssertionError("graph must not execute while the daily bar is stale")
+            yield  # pragma: no cover
+
+    class NeverStreamTradingAgentsGraph(FakeTradingAgentsGraph):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.graph = NeverStreamCompiledGraph()
+
+    monkeypatch.setattr(
+        analysis_runner, "TradingAgentsGraph", NeverStreamTradingAgentsGraph
+    )
+    monkeypatch.setattr(
+        market_data_validator,
+        "verified_snapshot_dict",
+        lambda symbol, date: {
+            "symbol": symbol,
+            "market_date": "2026-07-16",
+            "close": 100.0,
+            "atr": 5.0,
+            "vendor_call_id": "settlement-test",
+            "calculation_start": "2023-07-17",
+            "row_count": 750,
+        },
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-17",
+        selected_analysts=("market",),
+        report_dir=tmp_path / "reports",
+        run_id="run-market-data-pending",
+        require_exact_market_data_date=True,
+    )
+
+    result = run_analysis_once(request)
+
+    assert result.decision_status == "market_data_pending"
+    assert result.decision is None
+    assert not any(event.type == "run_completed" for event in result.events)
+    pending = result.events[-1]
+    assert pending.type == "market_data_status"
+    assert pending.content["status"] == "pending_provider_settlement"
+    assert pending.content["market_data_date"] == "2026-07-16"
+    stored = history_store.get_run(request.run_id)
+    assert stored["status"] == "market_data_pending"
+    assert stored["decision_status"] == "market_data_pending"
+
+
 def test_canonical_runtime_injects_sqlite_longitudinal_context(monkeypatch, tmp_path):
     from tradingagents.runtime import analysis_runner
     from tradingagents.runtime.history import history_store

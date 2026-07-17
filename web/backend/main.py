@@ -280,7 +280,8 @@ async def stream_run_events(run_id: str):
                 yield _sse(event.type, payload)
 
             if current.status in (
-                "completed", "review_required", "unavailable", "failed", "cancelled"
+                "completed", "review_required", "unavailable", "failed", "cancelled",
+                "market_data_pending", "market_data_unavailable",
             ):
                 break
 

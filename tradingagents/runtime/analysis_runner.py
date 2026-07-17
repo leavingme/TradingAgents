@@ -139,6 +139,13 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
                 status = "cancelled"
             elif (
                 last_event
+                and last_event.type == "market_data_status"
+                and isinstance(last_event.content, dict)
+                and last_event.content.get("status") == "pending_provider_settlement"
+            ):
+                status = "market_data_pending"
+            elif (
+                last_event
                 and last_event.type == "run_completed"
                 and isinstance(last_event.content, dict)
                 and last_event.content.get("decision_status") in {"review_required", "unavailable"}
@@ -306,6 +313,29 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
                 "market_data_date": market_data_date,
             },
         )
+        if (
+            request.require_exact_market_data_date
+            and market_data_date < str(request.analysis_date)
+        ):
+            stats_event, last_stats = _stats_event(
+                request.run_id, callbacks, last_stats, force=True
+            )
+            if stats_event is not None:
+                yield stats_event
+            yield AnalysisEvent(
+                type="market_data_status",
+                run_id=request.run_id,
+                content={
+                    "status": "pending_provider_settlement",
+                    "requested_analysis_date": request.analysis_date,
+                    "market_data_date": market_data_date,
+                    "message": (
+                        "verified daily bar is older than the required cutoff; "
+                        "analysis deferred before graph execution"
+                    ),
+                },
+            )
+            return
         init_agent_state["trade_risk_policy"] = dict(config["trade_risk_policy"])
         init_agent_state["longitudinal_context_mode"] = request.longitudinal_context_mode
         args = graph.propagator.get_graph_args(callbacks=callbacks)
@@ -429,7 +459,21 @@ def run_analysis_once(request: AnalysisRequest) -> AnalysisResult:
 
     completed = next((event for event in reversed(events) if event.type == "run_completed"), None)
     content = completed.content if completed and isinstance(completed.content, dict) else {}
-    decision_status = content.get("decision_status", "unavailable")
+    pending_market_data = next(
+        (
+            event
+            for event in reversed(events)
+            if event.type == "market_data_status"
+            and isinstance(event.content, dict)
+            and event.content.get("status") == "pending_provider_settlement"
+        ),
+        None,
+    )
+    decision_status = (
+        "market_data_pending"
+        if completed is None and pending_market_data is not None
+        else content.get("decision_status", "unavailable")
+    )
     decision = content.get("decision") if decision_status == "validated" else None
     return AnalysisResult(
         run_id=request.run_id,

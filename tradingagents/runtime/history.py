@@ -1036,6 +1036,14 @@ class RunHistoryStore:
                         "completed" if decision_status == "validated" else decision_status
                     )
                     report_path = event.content.get("report_path")
+                elif event.type == "market_data_status" and isinstance(event.content, dict):
+                    market_status = event.content.get("status")
+                    if market_status == "pending_provider_settlement":
+                        decision_status = "market_data_pending"
+                        status = "market_data_pending"
+                    elif market_status == "unavailable_after_bounded_wait":
+                        decision_status = "unavailable"
+                        status = "market_data_unavailable"
                 elif event.type == "error":
                     status = "failed"
                     if isinstance(event.content, dict):
@@ -1157,7 +1165,8 @@ class RunHistoryStore:
                 if not row:
                     return False
                 if row["status"] in (
-                    "completed", "review_required", "unavailable", "failed", "cancelled"
+                    "completed", "review_required", "unavailable", "failed", "cancelled",
+                    "market_data_pending", "market_data_unavailable",
                 ):
                     return True
                 conn.execute(

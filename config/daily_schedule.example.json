@@ -4,6 +4,8 @@
   "max_attempts_per_date": 2,
   "retry_after_minutes": 60,
   "stale_active_after_minutes": 360,
+  "market_data_retry_after_minutes": 15,
+  "market_data_max_wait_minutes": 240,
   "targets": [
     {
       "symbol": "NVDA",

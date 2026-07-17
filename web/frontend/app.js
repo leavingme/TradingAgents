@@ -192,6 +192,8 @@ const translations = {
     dataReason: 'Reason',
     statusReviewRequired: 'review required (no valid decision)',
     statusUnavailable: 'decision unavailable',
+    statusMarketDataPending: 'waiting for final market data',
+    statusMarketDataUnavailable: 'final market data unavailable',
     statusFailed: 'failed',
     statusCancelled: 'cancelled',
     eventRunStarted: 'run started',
@@ -421,6 +423,8 @@ const translations = {
     dataReason: '原因',
     statusReviewRequired: '需要复核（无有效决策）',
     statusUnavailable: '决策不可用',
+    statusMarketDataPending: '等待最终行情数据',
+    statusMarketDataUnavailable: '最终行情数据不可用',
     statusFailed: '失败',
     statusCancelled: '已取消',
     eventRunStarted: '运行开始',
@@ -971,6 +975,8 @@ function formatStatus(status) {
     data_unavailable: 'statusDataUnavailable',
     review_required: 'statusReviewRequired',
     unavailable: 'statusUnavailable',
+    market_data_pending: 'statusMarketDataPending',
+    market_data_unavailable: 'statusMarketDataUnavailable',
     failed: 'statusFailed',
     cancelled: 'statusCancelled',
     ready: 'statusReady',
@@ -1318,6 +1324,7 @@ function statusClass(status) {
   if (status === 'completed') return 'done';
   if (status === 'running')   return 'running';
   if (status === 'data_degraded' || status === 'data_partial' || status === 'data_fallback') return 'warning';
-  if (status === 'failed' || status === 'cancelled' || status === 'review_required' || status === 'unavailable' || status === 'data_unavailable') return 'error';
+  if (status === 'market_data_pending') return 'warning';
+  if (status === 'failed' || status === 'cancelled' || status === 'review_required' || status === 'unavailable' || status === 'data_unavailable' || status === 'market_data_unavailable') return 'error';
   return 'ready';
 }

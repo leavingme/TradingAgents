@@ -121,7 +121,14 @@ class TaskStore:
             finished_at=run_dict["finished_at"],
             report_path=run_dict["report_path"],
             error=run_dict["error"],
-            decision_status=run_dict.get("decision_status", "unavailable"),
+            decision_status=(
+                run_dict.get("decision_status")
+                or (
+                    "market_data_pending"
+                    if run_dict.get("status") == "market_data_pending"
+                    else "unavailable"
+                )
+            ),
             market_data_date=run_dict.get("market_data_date"),
             data_status=run_dict.get("data_status", "not_observed"),
             vendor_summary=run_dict.get("vendor_summary", {}),
@@ -198,6 +205,12 @@ class TaskStore:
             # Update in-memory state derived from event type
             if event.type == "market_data_status" and isinstance(event.content, dict):
                 record.market_data_date = event.content.get("market_data_date")
+                if event.content.get("status") == "pending_provider_settlement":
+                    record.status = "market_data_pending"
+                    record.decision_status = "market_data_pending"
+                elif event.content.get("status") == "unavailable_after_bounded_wait":
+                    record.status = "market_data_unavailable"
+                    record.decision_status = "unavailable"
             if event.type == "run_completed" and isinstance(event.content, dict):
                 record.market_data_date = event.content.get(
                     "market_data_date", record.market_data_date

@@ -449,13 +449,9 @@ def compare_architectures(
             "baseline": base,
             "challenger": challenge,
         }
-    if min(base["sample_count"], challenge["sample_count"]) < minimum_samples:
-        return {
-            "status": "insufficient_data",
-            "reason": f"each architecture requires at least {minimum_samples} samples",
-            "baseline": base,
-            "challenger": challenge,
-        }
+    sequential_sample_sufficient = (
+        min(base["sample_count"], challenge["sample_count"]) >= minimum_samples
+    )
     improvement = challenge["mean_score"] - base["mean_score"]
 
     grouped: dict[tuple[str, str, int], dict[str, list[dict[str, Any]]]] = defaultdict(
@@ -673,7 +669,8 @@ def compare_architectures(
             **uncertainty,
         })
         passes_paired_gate = (
-            paired_count >= minimum_paired_samples
+            sequential_sample_sufficient
+            and paired_count >= minimum_paired_samples
             and lower_95 is not None
             and lower_95 >= minimum_score_improvement
         )
@@ -695,13 +692,34 @@ def compare_architectures(
     else:
         cost_comparison_status = "order_confounded"
 
-    return {
-        "status": "review_required",
-        "reason": (
+    if not sequential_sample_sufficient:
+        status = "insufficient_data"
+        reason = (
+            f"each architecture requires at least {minimum_samples} samples; "
+            "early paired diagnostics are reported for cost control"
+        )
+    elif passes_paired_gate:
+        status = "review_required"
+        reason = (
             "human review is always required; paired shadow evidence is sufficient "
-            "for consideration" if passes_paired_gate else
-            "paired shadow evidence is insufficient; sequential cohorts are regime-confounded"
-        ),
+            "for consideration"
+        )
+    else:
+        status = "review_required"
+        reason = (
+            "paired shadow evidence is insufficient; sequential cohorts are "
+            "regime-confounded"
+        )
+
+    return {
+        "status": status,
+        "reason": reason,
+        "sample_progress": {
+            "baseline": base["sample_count"],
+            "challenger": challenge["sample_count"],
+            "minimum_required_each": minimum_samples,
+            "sufficient": sequential_sample_sufficient,
+        },
         "passes_point_estimate": improvement >= minimum_score_improvement,
         "passes_paired_gate": passes_paired_gate,
         "score_improvement": improvement,

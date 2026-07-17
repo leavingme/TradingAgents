@@ -297,6 +297,66 @@ def test_architecture_comparison_never_auto_promotes_sequential_cohorts():
     assert comparison["status"] == "review_required"
 
 
+def test_architecture_comparison_reports_pair_drift_before_sample_minimum():
+    evaluations = []
+    for version, evidence in (
+        ("baseline", "evidence-baseline"),
+        ("challenger", "evidence-challenger"),
+    ):
+        evaluations.append({
+            "run_id": version,
+            "ticker": "NVDA",
+            "analysis_date": "2026-07-01",
+            "market_data_date": "2026-07-01",
+            "architecture_version": version,
+            "architecture_fingerprint": f"{version}-fingerprint",
+            "horizon_sessions": 5,
+            "directional_hit": True,
+            "raw_return": 0.03,
+            "benchmark_return": 0.01,
+            "alpha_return": 0.02,
+            "score": 0.02,
+            "entry_date": "2026-07-02",
+            "exit_date": "2026-07-09",
+            "stock_entry_close": 100.0,
+            "stock_exit_close": 103.0,
+            "benchmark_entry_close": 500.0,
+            "benchmark_exit_close": 505.0,
+            "stock_entry_source_id": "stock-entry",
+            "stock_exit_source_id": "stock-exit",
+            "benchmark_entry_source_id": "benchmark-entry",
+            "benchmark_exit_source_id": "benchmark-exit",
+            "run_started_at": (
+                "2026-07-01T20:00:00+00:00"
+                if version == "baseline"
+                else "2026-07-01T20:01:00+00:00"
+            ),
+            "analysis_data_status": "available",
+            "analysis_evidence_complete": True,
+            "analysis_evidence_fingerprint": evidence,
+            "architecture_input_schema": (
+                "tradingagents/research-manager-pre-context-input/v1"
+            ),
+            "architecture_input_complete": True,
+            "architecture_input_fingerprint": "shared-upstream-state",
+        })
+
+    comparison = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+
+    assert comparison["status"] == "insufficient_data"
+    assert comparison["sample_progress"] == {
+        "baseline": 1,
+        "challenger": 1,
+        "minimum_required_each": 20,
+        "sufficient": False,
+    }
+    assert comparison["paired"]["sample_count"] == 0
+    assert comparison["paired"]["evidence_mismatches_excluded"] == 1
+    assert comparison["passes_paired_gate"] is False
+
+
 def test_architecture_comparison_uses_same_day_shadow_pairs():
     evaluations = []
     for index in range(20):

@@ -153,6 +153,10 @@ agent、symbol、规范化参数、fallback 状态、结果 hash 和数据观察
 重叠 pair 数和不确定性等效样本量，避免把 20 个彼此重叠的 5-session 结果误当成
 20 个独立样本。Student-t 临界值也使用向下取整的等效样本量，不继续沿用偏大的
 原始 pair 数作为自由度。
+比较器从首个双臂 evaluation 起就返回 `sample_progress` 和完整的 paired exclusion
+诊断，即使每个架构尚未达到 20 个结果。这样可以尽早发现 vendor evidence、
+pre-treatment agent state、时间窗口或 outcome provenance 漂移，停止无效实验；
+未达到样本门槛时状态仍为 `insufficient_data`，且 `passes_paired_gate=false`。
 每个 run 还保存包含 analyst 集合、研究深度、模型和
 纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint。manifest v3 还包含
 路径无关的决策实现摘要，以及非密钥的有效 vendor、风险策略、

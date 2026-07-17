@@ -365,6 +365,7 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - 同标的 paired shadow 会近似翻倍 LLM 成本，启用 schedule 必须显式设置 `paired_shadow_authorized=true`。当前只允许恰好两个共享时区、运行时点、资产类型、工作日和 analysts 的 arm，并分别使用 `portfolio_only` / `research_and_portfolio`，以隔离已支持的 Research Manager context treatment；只改 `enabled=true` 或改变上游输入必须 fail closed。
 - agent architecture fingerprint 只应覆盖真正影响决策的实现：agents、graph、dataflows、LLM clients，以及影响请求、配置、时间审计和纵向上下文的 canonical runtime 模块。scheduler、CLI、报表和 evaluation 展示等纯运维代码不得切碎长期 cohort；若新增会改变决策输入、prompt、validator、模型 wire format 或风险语义的模块，必须同步加入 manifest digest scope。
 - runtime history 与 vendor verification 不得因 home 目录不可写而回退到工作区数据库。默认路径只能是 `~/.tradingagents/runs.db`，替代路径只能由显式 `TRADINGAGENTS_DB` 提供；canonical 路径不可访问必须 fail closed，避免测试或沙箱数据形成第二套“正式”纵向历史。
+- paired architecture comparison 必须从首个双臂 evaluation 起暴露有效 pair 与 exclusion 诊断，不能等满最低样本数才发现输入漂移；但早期诊断不得降低 `minimum_samples` / `minimum_paired_samples`，不足时必须保持 `insufficient_data` 且禁止通过 paired gate。
 
 ## 需要定期检查的事项
 

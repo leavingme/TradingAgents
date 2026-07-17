@@ -672,6 +672,17 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         1,
         architecture_version="baseline",
     )
+    history_store.mark_started(
+        "evaluated-run", started_at="2026-07-01T20:00:00+00:00"
+    )
+    history_store.add_event("evaluated-run", AnalysisEvent(
+        type="stats",
+        run_id="evaluated-run",
+        content={"llm_calls": 9, "tool_calls": 18, "tokens_in": 900, "tokens_out": 180},
+    ))
+    history_store.mark_finished(
+        "evaluated-run", "completed", finished_at="2026-07-01T20:02:00+00:00"
+    )
     history_store.add_decision_evaluation({
         "run_id": "evaluated-run",
         "horizon_sessions": 5,
@@ -700,6 +711,8 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
 
     response = asyncio.run(main.get_decision_evaluations(ticker="nvda", limit=50))
     assert len(response["evaluations"]) == 1
+    assert response["evaluations"][0]["runtime_seconds"] == 120.0
+    assert response["evaluations"][0]["tokens_in"] == 900
     assert response["rollups"] == [{
         "architecture_version": "baseline",
         "architecture_fingerprint": "legacy-unspecified",
@@ -709,4 +722,28 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         "mean_raw_return": 0.04,
         "mean_alpha_return": 0.03,
         "mean_score": 0.03,
+        "runtime_seconds_sample_count": 1,
+        "mean_runtime_seconds": 120.0,
+        "llm_calls_sample_count": 1,
+        "mean_llm_calls": 9.0,
+        "tool_calls_sample_count": 1,
+        "mean_tool_calls": 18.0,
+        "tokens_in_sample_count": 1,
+        "mean_tokens_in": 900.0,
+        "tokens_out_sample_count": 1,
+        "mean_tokens_out": 180.0,
     }]
+
+    comparison = asyncio.run(main.get_decision_evaluations(
+        ticker="nvda",
+        baseline="baseline",
+        challenger="candidate",
+    ))
+    assert comparison["comparison"]["status"] == "insufficient_data"
+
+    with pytest.raises(main.HTTPException) as exc_info:
+        asyncio.run(main.get_decision_evaluations(
+            ticker="nvda",
+            baseline="baseline",
+        ))
+    assert exc_info.value.status_code == 422

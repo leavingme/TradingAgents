@@ -14,6 +14,30 @@ from tradingagents.sqlite_utils import configure_wal, connect_sqlite
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
+def _nonnegative_number(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    numeric = float(value)
+    if not math.isfinite(numeric) or numeric < 0:
+        return None
+    return int(value) if isinstance(value, int) else numeric
+
+
+def _elapsed_seconds(started_at: Any, finished_at: Any) -> float | None:
+    if not isinstance(started_at, str) or not isinstance(finished_at, str):
+        return None
+    try:
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        finished = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if started.tzinfo is None or finished.tzinfo is None:
+        return None
+    elapsed = (finished.astimezone(timezone.utc) - started.astimezone(timezone.utc)).total_seconds()
+    return elapsed if math.isfinite(elapsed) and elapsed >= 0 else None
+
+
 def _default_db_path() -> Path:
     configured = os.environ.get("TRADINGAGENTS_DB")
     if configured:
@@ -391,16 +415,59 @@ class RunHistoryStore:
         ticker: str | None = None,
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
-        query = "SELECT * FROM decision_evaluations"
+        query = (
+            "SELECT decision_evaluations.*, "
+            "runs.started_at AS run_started_at, runs.finished_at AS run_finished_at "
+            "FROM decision_evaluations "
+            "LEFT JOIN runs ON runs.run_id=decision_evaluations.run_id"
+        )
         params: list[Any] = []
         if ticker is not None:
-            query += " WHERE UPPER(ticker)=?"
+            query += " WHERE UPPER(decision_evaluations.ticker)=?"
             params.append(ticker.upper())
-        query += " ORDER BY evaluated_at DESC LIMIT ?"
+        query += " ORDER BY decision_evaluations.evaluated_at DESC LIMIT ?"
         params.append(limit)
         with self._lock:
             with self._conn() as conn:
-                return [dict(row) for row in conn.execute(query, params).fetchall()]
+                rows = [dict(row) for row in conn.execute(query, params).fetchall()]
+                if not rows:
+                    return rows
+                run_ids = list(dict.fromkeys(str(row["run_id"]) for row in rows))
+                stats_rows: list[sqlite3.Row] = []
+                for offset in range(0, len(run_ids), 500):
+                    batch = run_ids[offset : offset + 500]
+                    placeholders = ",".join("?" for _ in batch)
+                    stats_rows.extend(
+                        conn.execute(
+                            f"""
+                            SELECT events.run_id, events.content
+                            FROM events
+                            JOIN (
+                                SELECT run_id, MAX(id) AS latest_id
+                                FROM events
+                                WHERE event_type='stats' AND run_id IN ({placeholders})
+                                GROUP BY run_id
+                            ) latest ON latest.latest_id=events.id
+                            """,
+                            batch,
+                        ).fetchall()
+                    )
+        final_stats: dict[str, dict[str, Any]] = {}
+        for stats_row in stats_rows:
+            try:
+                payload = json.loads(stats_row["content"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(payload, dict):
+                final_stats[str(stats_row["run_id"])] = payload
+        for row in rows:
+            row["runtime_seconds"] = _elapsed_seconds(
+                row.pop("run_started_at", None), row.pop("run_finished_at", None)
+            )
+            stats = final_stats.get(str(row["run_id"]), {})
+            for field in ("llm_calls", "tool_calls", "tokens_in", "tokens_out"):
+                row[field] = _nonnegative_number(stats.get(field))
+        return rows
 
     def get_longitudinal_context(
         self,

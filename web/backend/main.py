@@ -304,20 +304,37 @@ async def get_run_vendor_calls(run_id: str):
 
 
 @app.get("/api/evaluations")
-async def get_decision_evaluations(ticker: str | None = None, limit: int = 1000):
+async def get_decision_evaluations(
+    ticker: str | None = None,
+    limit: int = 1000,
+    baseline: str | None = None,
+    challenger: str | None = None,
+):
     """Return immutable fixed-horizon outcomes and architecture rollups."""
-    from tradingagents.evaluation import architecture_rollups
+    from tradingagents.evaluation import architecture_rollups, compare_architectures
     from tradingagents.runtime import history_store
 
+    if bool(baseline) != bool(challenger):
+        raise HTTPException(
+            status_code=422,
+            detail="baseline and challenger must be provided together",
+        )
     bounded_limit = max(1, min(limit, 5000))
     evaluations = history_store.list_decision_evaluations(
         ticker=ticker,
         limit=bounded_limit,
     )
-    return {
+    payload = {
         "evaluations": evaluations,
         "rollups": architecture_rollups(evaluations),
     }
+    if baseline and challenger:
+        payload["comparison"] = compare_architectures(
+            evaluations,
+            baseline=baseline,
+            challenger=challenger,
+        )
+    return payload
 
 
 @app.get("/api/runs/{run_id}/report", response_class=PlainTextResponse)

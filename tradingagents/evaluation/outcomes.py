@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from math import sqrt
+from math import isfinite, sqrt
 from statistics import fmean, stdev
 from typing import Any
 
@@ -16,6 +16,14 @@ _EXPOSURE = {
     "underweight": -0.5,
     "sell": -1.0,
 }
+
+_RUNTIME_COST_FIELDS = (
+    "runtime_seconds",
+    "llm_calls",
+    "tool_calls",
+    "tokens_in",
+    "tokens_out",
+)
 
 _T_975_BY_DF = (
     0.0,
@@ -46,6 +54,44 @@ def _student_t_critical_95(sample_count: int) -> float | None:
         + (5 * z**5 + 16 * z**3 + 3 * z) / (96 * df**2)
         + (3 * z**7 + 19 * z**5 + 17 * z**3 - 15 * z) / (384 * df**3)
     )
+
+
+def _paired_cost_summary(values: list[float], total_pairs: int) -> dict[str, Any]:
+    sample_count = len(values)
+    summary: dict[str, Any] = {
+        "sample_count": sample_count,
+        "missing_pairs_excluded": total_pairs - sample_count,
+        "delta_convention": "challenger_minus_baseline",
+    }
+    if not values:
+        return summary
+    mean_delta = fmean(values)
+    standard_error = stdev(values) / sqrt(sample_count) if sample_count > 1 else None
+    critical_value = _student_t_critical_95(sample_count)
+    margin = (
+        critical_value * standard_error
+        if critical_value is not None and standard_error is not None
+        else None
+    )
+    summary.update({
+        "mean_delta": mean_delta,
+        "mean_reduction": -mean_delta,
+        "standard_error": standard_error,
+        "critical_value": critical_value,
+        "lower_95_delta": mean_delta - margin if margin is not None else None,
+        "upper_95_delta": mean_delta + margin if margin is not None else None,
+    })
+    return summary
+
+
+def _runtime_cost_value(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if isfinite(numeric) and numeric >= 0 else None
 
 
 @dataclass(frozen=True)
@@ -108,18 +154,26 @@ def architecture_rollups(evaluations: list[dict[str, Any]]) -> list[dict[str, An
         )].append(row)
     output = []
     for (version, fingerprint, horizon), rows in sorted(groups.items()):
-        output.append(
-            {
-                "architecture_version": version,
-                "architecture_fingerprint": fingerprint,
-                "horizon_sessions": horizon,
-                "sample_count": len(rows),
-                "directional_hit_rate": fmean(bool(row["directional_hit"]) for row in rows),
-                "mean_raw_return": fmean(float(row["raw_return"]) for row in rows),
-                "mean_alpha_return": fmean(float(row["alpha_return"]) for row in rows),
-                "mean_score": fmean(float(row["score"]) for row in rows),
-            }
-        )
+        rollup = {
+            "architecture_version": version,
+            "architecture_fingerprint": fingerprint,
+            "horizon_sessions": horizon,
+            "sample_count": len(rows),
+            "directional_hit_rate": fmean(bool(row["directional_hit"]) for row in rows),
+            "mean_raw_return": fmean(float(row["raw_return"]) for row in rows),
+            "mean_alpha_return": fmean(float(row["alpha_return"]) for row in rows),
+            "mean_score": fmean(float(row["score"]) for row in rows),
+        }
+        for field in _RUNTIME_COST_FIELDS:
+            values = [
+                value
+                for row in rows
+                if (value := _runtime_cost_value(row.get(field))) is not None
+            ]
+            rollup[f"{field}_sample_count"] = len(values)
+            if values:
+                rollup[f"mean_{field}"] = fmean(values)
+        output.append(rollup)
     return output
 
 
@@ -201,6 +255,9 @@ def compare_architectures(
     ambiguous_pairs = 0
     outcome_mismatches = 0
     provenance_mismatches = 0
+    paired_cost_deltas: dict[str, list[float]] = {
+        field: [] for field in _RUNTIME_COST_FIELDS
+    }
     for variants in grouped.values():
         base_rows = variants.get(baseline, [])
         challenger_rows = variants.get(challenger, [])
@@ -257,6 +314,14 @@ def compare_architectures(
             float(bool(challenger_row["directional_hit"]))
             - float(bool(base_row["directional_hit"]))
         )
+        for field in _RUNTIME_COST_FIELDS:
+            base_value = _runtime_cost_value(base_row.get(field))
+            challenger_value = _runtime_cost_value(challenger_row.get(field))
+            if base_value is None or challenger_value is None:
+                continue
+            delta = challenger_value - base_value
+            if isfinite(delta):
+                paired_cost_deltas[field].append(delta)
 
     paired_count = len(paired_deltas)
     paired_summary: dict[str, Any] = {
@@ -301,6 +366,10 @@ def compare_architectures(
         "score_improvement": improvement,
         "architecture_fingerprints": fingerprints,
         "paired": paired_summary,
+        "paired_costs": {
+            field: _paired_cost_summary(values, paired_count)
+            for field, values in paired_cost_deltas.items()
+        },
         "baseline": base,
         "challenger": challenge,
     }

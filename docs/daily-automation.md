@@ -64,7 +64,8 @@ Manager 和 Portfolio Manager；不会把 LLM 生成的 Markdown 反思当成可
 
 ```bash
 venv/bin/python3.12 scripts/daily_analysis.py evaluate --ticker NVDA
-curl -s http://127.0.0.1:8765/api/evaluations?ticker=NVDA
+curl -s 'http://127.0.0.1:8765/api/evaluations?ticker=NVDA'
+curl -s 'http://127.0.0.1:8765/api/evaluations?ticker=NVDA&baseline=baseline&challenger=challenger'
 ```
 
 架构 challenger 的比较要求 baseline/challenger 各至少 20 个已结算样本。由于连续
@@ -77,6 +78,14 @@ source ID 以及 raw/benchmark/alpha outcome；缺失或不一致会从
 rollup 按版本、fingerprint 和 horizon 分组，同一版本混入多个 fingerprint 时直接拒绝
 比较。即使成对 score delta 的 95% 下界通过
 阈值，结果也只返回 `review_required`，不得自动晋升或自动修改 prompt/agent 拓扑。
+
+canonical runtime 会为 CLI、Web、skill 和 timer 自动安装运行级统计，不依赖调用入口
+自行挂 callback；成功和失败路径都会在终态事件前强制保存最终快照。已结算结果查询
+会从同一 SQLite 事件链关联最终 `stats` 快照和 run
+起止时间，rollup 显示 runtime、LLM/tool calls、input/output tokens 的均值与各自样本
+覆盖数。成对架构比较还返回这些成本指标的 `challenger_minus_baseline` 差值、平均降幅
+和 Student-t 95% 区间；成本证据缺失会单独计数，不会被当成零成本，也不会改变收益
+门禁。架构优化必须同时审阅收益证据和成本证据。
 
 默认禁用的实验模板位于 `config/architecture_experiment.example.json`。它比较
 PM-only baseline 与 Research Manager + PM challenger。启用会把 LLM 成本近似翻倍，

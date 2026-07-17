@@ -23,6 +23,7 @@ from tradingagents.architecture import architecture_fingerprint, build_architect
 from .config_builder import build_runtime_config
 from .events import AnalysisEvent, AnalysisRequest, AnalysisResult, utc_timestamp
 from .report_throttle import ReportSectionThrottler
+from .stats_handler import StatsCallbackHandler
 
 ANALYST_ORDER = ("market", "social", "news", "fundamentals")
 ANALYST_AGENT_NAMES = {
@@ -207,6 +208,11 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
         ),
     )
     callbacks = list(request.callbacks)
+    # Runtime observability is a canonical invariant, not a frontend concern.
+    # CLI/Web callers may supply their own stats handler so they can render live
+    # counters; unattended timer and skill runs still need an audited snapshot.
+    if not any(callable(getattr(callback, "get_stats", None)) for callback in callbacks):
+        callbacks.append(StatsCallbackHandler())
     last_stats: dict[str, Any] | None = None
 
     yield AnalysisEvent(
@@ -368,6 +374,9 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
             },
         )
     except Exception as exc:
+        stats_event, last_stats = _stats_event(request.run_id, callbacks, last_stats, force=True)
+        if stats_event is not None:
+            yield stats_event
         yield AnalysisEvent(
             type="error",
             run_id=request.run_id,

@@ -5,6 +5,7 @@ from tradingagents.evaluation import (
     compare_architectures,
     score_outcome,
 )
+from tradingagents.runtime.events import AnalysisEvent
 from tradingagents.runtime.history import RunHistoryStore
 
 
@@ -21,6 +22,20 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     store.create_run(
         "run-1", "NVDA", "2026-07-01", "stock", ["market"], "minimax-cn", 1,
         architecture_version="baseline",
+    )
+    store.mark_started("run-1", started_at="2026-07-01T20:00:00+00:00")
+    store.add_event("run-1", AnalysisEvent(
+        type="stats",
+        run_id="run-1",
+        content={"llm_calls": 10, "tool_calls": 20, "tokens_in": 1000, "tokens_out": 200},
+    ))
+    store.add_event("run-1", AnalysisEvent(
+        type="stats",
+        run_id="run-1",
+        content={"llm_calls": 12, "tool_calls": 24, "tokens_in": 1200, "tokens_out": 240},
+    ))
+    store.mark_finished(
+        "run-1", "completed", finished_at="2026-07-01T20:02:30+00:00"
     )
     record = {
         "run_id": "run-1",
@@ -54,6 +69,11 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert len(rows) == 1
     assert rows[0]["evaluated_by_run_id"] == "run-2"
     assert rows[0]["directional_hit"] == 1
+    assert rows[0]["runtime_seconds"] == 150.0
+    assert rows[0]["llm_calls"] == 12
+    assert rows[0]["tool_calls"] == 24
+    assert rows[0]["tokens_in"] == 1200
+    assert rows[0]["tokens_out"] == 240
 
 
 def test_history_rejects_evaluation_without_exact_ohlcv_provenance(tmp_path):
@@ -129,6 +149,11 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
                 "stock_exit_source_id": f"ohlcv:test:stock-exit:{index}",
                 "benchmark_entry_source_id": f"ohlcv:test:bench-entry:{index}",
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
+                "runtime_seconds": 100.0 if version == "baseline" else 80.0,
+                "llm_calls": 10 if version == "baseline" else 8,
+                "tool_calls": 20 if version == "baseline" else 18,
+                "tokens_in": 1000 if version == "baseline" else 800,
+                "tokens_out": 200 if version == "baseline" else 180,
                 "score": score,
             })
     comparison = compare_architectures(
@@ -139,6 +164,12 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert comparison["paired"]["sample_count"] == 20
     assert comparison["paired"]["lower_95_score_delta"] == 0.01
     assert comparison["paired"]["critical_value"] == 2.093
+    assert comparison["baseline"]["mean_tokens_in"] == 1000.0
+    assert comparison["challenger"]["mean_tokens_in"] == 800.0
+    assert comparison["paired_costs"]["tokens_in"]["sample_count"] == 20
+    assert comparison["paired_costs"]["tokens_in"]["mean_delta"] == -200.0
+    assert comparison["paired_costs"]["tokens_in"]["mean_reduction"] == 200.0
+    assert comparison["paired_costs"]["runtime_seconds"]["mean_reduction"] == 20.0
 
 
 def test_architecture_comparison_rejects_mixed_configuration_fingerprints():
@@ -217,6 +248,8 @@ def test_architecture_pairing_requires_identical_ohlcv_provenance():
     )
     assert comparison["paired"]["sample_count"] == 19
     assert comparison["paired"]["provenance_mismatches_excluded"] == 1
+    assert comparison["paired_costs"]["tokens_in"]["sample_count"] == 0
+    assert comparison["paired_costs"]["tokens_in"]["missing_pairs_excluded"] == 19
     assert comparison["passes_paired_gate"] is False
 
 

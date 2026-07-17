@@ -471,6 +471,49 @@ def test_failed_run_retries_only_after_delay_and_stops_at_bound(tmp_path, monkey
     assert exhausted[0]["status"] == "attempts_exhausted"
 
 
+def test_pre_runtime_failure_is_persisted_and_counts_toward_retry_bound(
+    tmp_path, monkeypatch
+):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+    schedule = DailySchedule(
+        enabled=True,
+        targets=_schedule().targets,
+        max_attempts_per_date=1,
+        retry_after_minutes=60,
+    )
+
+    def fail_before_runtime_registration(request):
+        raise RuntimeError("pre-runtime failure")
+
+    first = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 17, 0, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=fail_before_runtime_registration,
+        lock_path=tmp_path / "daily.lock",
+    )
+    assert first[0]["status"] == "failed"
+    recorded = store.get_run(first[0]["run_id"])
+    assert recorded["status"] == "failed"
+    assert recorded["architecture_fingerprint"] == "pre-runtime-failure"
+
+    second = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 18, 30, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=fail_before_runtime_registration,
+        lock_path=tmp_path / "daily.lock",
+    )
+    assert second[0]["status"] == "attempts_exhausted"
+    assert len(store.list_runs()) == 1
+
+
 def test_stale_active_run_allows_one_bounded_recovery(tmp_path, monkeypatch):
     store = RunHistoryStore(tmp_path / "runs.db")
     monkeypatch.setattr(

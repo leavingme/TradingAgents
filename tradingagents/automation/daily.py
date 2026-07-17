@@ -3,8 +3,10 @@
 The systemd timer is intentionally a frequent wake-up mechanism, not the
 source of market-time truth.  Each invocation evaluates every target in its
 exchange-local timezone and the canonical runtime chooses the most recent
-completed daily bar.  Existing runs for the same symbol and market date make
-the operation idempotent across timer retries and host restarts.
+completed daily bar.  Existing runs for the same symbol, requested cutoff
+date, and architecture version make the operation idempotent across timer
+retries and host restarts; the verified market-data date remains a separately
+audited runtime field.
 """
 
 from __future__ import annotations
@@ -390,7 +392,7 @@ def run_due_analyses(
     dry_run: bool = False,
     lock_path: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Run each due symbol at most once per market-data date."""
+    """Run each due target at most once per requested cutoff date."""
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None or current.utcoffset() is None:
         raise ValueError("scheduler now must be timezone-aware")
@@ -541,6 +543,25 @@ def run_due_analyses(
             try:
                 result = execute(request)
             except Exception as exc:
+                # The canonical runtime normally registers the run before doing
+                # any expensive work.  Keep the scheduler's retry budget
+                # authoritative even when an exception happens before that
+                # registration point (for example, while constructing the
+                # preliminary architecture manifest).
+                if store.get_run(run_id) is None:
+                    store.create_run(
+                        run_id=run_id,
+                        ticker=request.ticker,
+                        analysis_date=str(request.analysis_date),
+                        asset_type=request.asset_type,
+                        selected_analysts=request.selected_analysts,
+                        llm_provider=request.llm_provider,
+                        research_depth=request.research_depth,
+                        status="failed",
+                        architecture_version=request.architecture_version,
+                        architecture_fingerprint="pre-runtime-failure",
+                    )
+                    store.mark_finished(run_id, "failed")
                 outcomes.append(
                     {
                         "symbol": target.symbol,

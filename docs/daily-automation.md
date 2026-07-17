@@ -16,18 +16,22 @@
 
 每个 target 还包含服务端 `architecture_version` 和
 `longitudinal_context_mode=portfolio_only|research_and_portfolio`。调度幂等键是
-symbol + market-data date + architecture version，因此同一标的可以做成对 shadow
-实验，同时每个版本仍独立遵守重试和成本上限。
+symbol + 请求截止日 + architecture version；实际验证的 `market_data_date` 由
+runtime 另行审计。因此同一标的可以做成对 shadow 实验，同时每个版本仍独立遵守
+重试和成本上限。
 
 调度器从 `~/.tradingagents/web_config.json` 读取服务端已保存的研究深度、LLM、
 输出语言和 vendor 顺序，因此无人值守运行与 Web 运行使用相同设置。配置和日志中
 不得写 API key、cookie、token 或 webhook。
 
-同一 symbol + `market_data_date` 已有 `pending`、`running`、`completed` 或
+同一 symbol + 请求截止日 + architecture version 已有 `pending`、`running`、`completed` 或
 `review_required` run 时不会重复启动。`failed`、`cancelled`、`unavailable` 默认
 等待 60 分钟后重试一次；每天最多两次，防止故障时无限消耗 token。进程级文件锁
 避免 timer 重叠执行。外部/manual run 连续 360 分钟仍停留在 active 状态时视为
 陈旧占位，允许在每日总次数上限内发起恢复运行，但保留原 run 不做历史篡改。
+若异常早于 canonical runtime 注册 run，scheduler 也会写入明确标记为
+`pre-runtime-failure` 的失败占位，使该失败仍计入同一有界重试预算；不会因为缺少
+SQLite attempt 而每 15 分钟无限重试。
 运维状态与 canonical decision status 保持一致：`validated → completed/exit 0`，
 `review_required → review_required/exit 0`，`unavailable → unavailable/exit 1`；最终
 `attempts_exhausted` 也保持非零退出，避免 systemd 把“没有形成可用决策”误报为成功。

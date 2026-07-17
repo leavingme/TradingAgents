@@ -103,6 +103,7 @@
   - 架构比较器过去在每臂达到 20 个结果前提前返回，付费实验可能累计 40 次运行后才暴露 vendor evidence 或 pre-treatment state 全部漂移。现在零/单臂阶段先返回 `sample_progress` / `missing_architectures`，首个双臂 evaluation 再计算有效 pair 数和所有 exclusion counters；样本不足仍保持 `insufficient_data` / `passes_paired_gate=false`，让 operator 能尽早发现半对失败或停止不可归因实验，而不降低晋级门槛。
   - 2026-07-17 22:30 CST 的真实 systemd timer 新进程已加载 canonical DB fail-closed 版本，正常返回 NVDA `not_due`、exit 0，未读取工作区回退历史、未创建 run、未调用 LLM/vendor；这补足了 CLI/Web 之外的无人值守入口运行态证据。
   - 2026-07-17 23:00 CST 的下一次自然 systemd timer 已加载 exact-market-date 提交 `e2c3e8f`，继续以 NVDA `not_due`、exit 0 在约 2.5 秒内结束；随后正式 SQLite 仍为 0 evaluation、0 pending，证明新 readiness 状态机进入真实无人值守入口且未在非运行时段制造 run 或成本。
+  - 2026-07-17 23:15 CST 的自然 timer 已加载 readiness-before-LLM 提交 `22c0b98` 及测试提交 `484e092`，NVDA 继续 `not_due`、exit 0，约 2.5 秒结束；首跑前最终门禁版本已进入真实 systemd 新进程。
   - manifest v3 虽排除了纯 evaluation 展示代码，却没有显式绑定会进入后续 agent 历史上下文的评分/计量政策；改变 Hold band 或 horizon 可能在同一 fingerprint 下改变校准语义。v4 现绑定 `post-decision-day-close-v1`、`alpha-exposure-v1`、Hold band `0.02` 与默认 5-session horizon，并将 horizon 默认值统一为 evaluation、settlement、pending CLI/API 与比较器共享的单一常量。
   - 运行中 `/api/evaluations` 的零样本比较已验证：正式 NVDA baseline/challenger 返回 `sample_progress=0:0`、门槛 20、`sufficient=false`，并明确列出两条 `missing_architectures`；实验尚未授权或启动时不会伪造 pair 诊断。
   - 2026-07-17 22:45 CST 的 systemd timer 独立新进程已实际加载 manifest v4 与统一 evaluation horizon 依赖，正常返回 NVDA `not_due`、exit 0；CLI help、生产 schedule status、Web evaluation API 与 timer 四个正式入口均未出现循环导入或数据库路径分叉。

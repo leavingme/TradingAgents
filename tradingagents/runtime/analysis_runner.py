@@ -18,6 +18,7 @@ from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.graph.checkpointer import get_checkpointer, thread_id
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import write_report_tree
+from tradingagents.architecture import architecture_fingerprint, build_architecture_manifest
 
 from .config_builder import build_runtime_config
 from .events import AnalysisEvent, AnalysisRequest, AnalysisResult, utc_timestamp
@@ -55,6 +56,15 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
     )
 
     # 1. Register the run in SQLite history
+    architecture_manifest = build_architecture_manifest(
+        version=request.architecture_version,
+        selected_analysts=request.selected_analysts,
+        research_depth=request.research_depth,
+        llm_provider=request.llm_provider,
+        quick_think_llm=request.quick_think_llm,
+        deep_think_llm=request.deep_think_llm,
+        longitudinal_context_mode=request.longitudinal_context_mode,
+    )
     history_store.create_run(
         run_id=request.run_id,
         ticker=request.ticker,
@@ -63,6 +73,11 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
         selected_analysts=request.selected_analysts,
         llm_provider=request.llm_provider,
         research_depth=request.research_depth,
+        architecture_version=request.architecture_version,
+        architecture_fingerprint=architecture_fingerprint(architecture_manifest),
+        architecture_manifest_json=__import__("json").dumps(
+            architecture_manifest, ensure_ascii=False, sort_keys=True
+        ),
     )
     # Mark the run as started in the database
     history_store.mark_started(request.run_id)
@@ -170,8 +185,27 @@ def _with_vendor_summary(event: AnalysisEvent, store: Any) -> AnalysisEvent:
 
 def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
     """Internal implementation of TradingAgents analysis streaming."""
+    from .history import history_store
+
     config = build_runtime_config(request)
     selected_analysts = _ordered_analysts(request.selected_analysts)
+    effective_manifest = build_architecture_manifest(
+        version=request.architecture_version,
+        selected_analysts=selected_analysts,
+        research_depth=config.get("max_debate_rounds"),
+        llm_provider=config.get("llm_provider"),
+        quick_think_llm=config.get("quick_think_llm"),
+        deep_think_llm=config.get("deep_think_llm"),
+        longitudinal_context_mode=request.longitudinal_context_mode,
+    )
+    history_store.update_run_architecture(
+        request.run_id,
+        architecture_version=request.architecture_version,
+        architecture_fingerprint=architecture_fingerprint(effective_manifest),
+        architecture_manifest_json=__import__("json").dumps(
+            effective_manifest, ensure_ascii=False, sort_keys=True
+        ),
+    )
     callbacks = list(request.callbacks)
     last_stats: dict[str, Any] | None = None
 
@@ -208,7 +242,11 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
             callbacks=callbacks,
         )
         graph.ticker = request.ticker
-        graph._resolve_pending_entries(request.ticker)
+        if request.analysis_mode == "live":
+            graph._resolve_pending_entries(
+                request.ticker,
+                as_of_date=str(request.analysis_date),
+            )
 
         if config.get("checkpoint_enabled"):
             checkpointer_ctx = get_checkpointer(config["data_cache_dir"], request.ticker)
@@ -216,10 +254,23 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
             graph.graph = graph.workflow.compile(checkpointer=saver)
 
         instrument_context = graph.resolve_instrument_context(request.ticker, request.asset_type)
+        longitudinal_context = ""
+        if request.longitudinal_context_mode in {
+            "portfolio_only", "research_and_portfolio"
+        }:
+            longitudinal_context = history_store.get_longitudinal_context(
+                request.ticker,
+                information_cutoff=(
+                    request.information_cutoff
+                    if request.analysis_mode == "point_in_time"
+                    else None
+                ),
+            )
         init_agent_state = graph.propagator.create_initial_state(
             request.ticker,
             request.analysis_date,
             asset_type=request.asset_type,
+            past_context=longitudinal_context,
             instrument_context=instrument_context,
         )
         from tradingagents.dataflows.market_data_validator import verified_snapshot_dict
@@ -228,6 +279,7 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
             request.ticker, request.analysis_date
         )
         init_agent_state["trade_risk_policy"] = dict(config["trade_risk_policy"])
+        init_agent_state["longitudinal_context_mode"] = request.longitudinal_context_mode
         args = graph.propagator.get_graph_args(callbacks=callbacks)
         if config.get("checkpoint_enabled"):
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = thread_id(

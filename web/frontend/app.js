@@ -1,7 +1,7 @@
-import { createProviderManager } from './components/provider-manager.js?v=20260711-indicator-validation';
+import { createProviderManager } from './components/provider-manager.js?v=20260715-stocktwits-browser';
 import { createAgentTimeline, formatAgentName } from './components/agent-timeline.js?v=20260711-agent-status-init';
 import { createReportViewer } from './components/report-viewer.js';
-import { createRunHistory } from './components/run-history.js';
+import { createRunHistory } from './components/run-history.js?v=20260716-data-quality-details';
 import { createEventLog } from './components/event-log.js';
 import { api } from './api-client.js';
 import { createEventStream } from './event-stream.js';
@@ -39,6 +39,11 @@ const analystPromptList = document.querySelector('#analystPromptList');
 const providersView = document.querySelector('#providersView');
 const statusEl      = document.querySelector('#runStatus');
 const statusDot     = document.querySelector('#statusDot');
+const dataQualityNotice = document.querySelector('#dataQualityNotice');
+const dataQualityDetails = document.querySelector('#dataQualityDetails');
+const dataQualityTitle = document.querySelector('#dataQualityTitle');
+const dataQualityDescription = document.querySelector('#dataQualityDescription');
+const dataQualityList = document.querySelector('#dataQualityList');
 const runIdEl       = document.querySelector('#runId');
 const eventCountEl  = document.querySelector('#eventCount');
 const llmCountEl    = document.querySelector('#llmCount');
@@ -74,6 +79,7 @@ const anthropicEffort = document.querySelector('#anthropicEffort');
 let currentRunId = null;
 let eventCount   = 0;
 let currentStatus = 'ready';
+let currentVendorSummary = null;
 let currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
 let configDefaults = null;
 let envStatus = null;
@@ -165,8 +171,25 @@ const translations = {
     statusPending: 'pending',
     statusRunning: 'running',
     statusCompleted: 'completed',
-    statusDataDegraded: 'completed · data degraded',
+    statusDataDegraded: 'completed · data needs attention',
+    statusDataPartial: 'completed · partial evidence missing',
+    statusDataFallback: 'completed · fallback data used',
     statusDataUnavailable: 'completed · data unavailable',
+    dataPartialTitle: 'Partial evidence missing',
+    dataFallbackTitle: 'Fallback data was used',
+    dataUnavailableTitle: 'Requested evidence unavailable',
+    dataPartialDescription: 'The decision completed, but some requested evidence was not available. Other successful evidence remains usable.',
+    dataFallbackDescription: 'The requested evidence was retrieved from a fallback provider after an earlier attempt failed.',
+    dataUnavailableDescription: 'One or more requested evidence paths had no usable result. Review the affected topics below.',
+    dataCategoryPrediction: 'Prediction markets',
+    dataCategoryNews: 'News',
+    dataCategoryMacro: 'Macro data',
+    dataCategorySocial: 'Social sentiment',
+    dataCategoryFundamental: 'Fundamentals',
+    dataCategoryMarket: 'Market data',
+    dataCategoryTechnical: 'Technical indicators',
+    dataAttemptPath: 'Provider path',
+    dataReason: 'Reason',
     statusReviewRequired: 'review required (no valid decision)',
     statusUnavailable: 'decision unavailable',
     statusFailed: 'failed',
@@ -377,8 +400,25 @@ const translations = {
     statusPending: '等待中',
     statusRunning: '运行中',
     statusCompleted: '已完成',
-    statusDataDegraded: '已完成 · 数据已降级',
+    statusDataDegraded: '已完成 · 数据需注意',
+    statusDataPartial: '已完成 · 部分证据缺失',
+    statusDataFallback: '已完成 · 已使用备用数据源',
     statusDataUnavailable: '已完成 · 数据不可用',
+    dataPartialTitle: '部分证据缺失',
+    dataFallbackTitle: '已使用备用数据源',
+    dataUnavailableTitle: '请求的证据不可用',
+    dataPartialDescription: '分析与决策已完成，但部分请求未取得有效证据；其他成功取得的证据仍然可用。',
+    dataFallbackDescription: '首选数据源未成功，系统已通过备用数据源取得所需证据。',
+    dataUnavailableDescription: '一个或多个请求没有可用结果，请检查下方受影响的主题。',
+    dataCategoryPrediction: '预测市场',
+    dataCategoryNews: '新闻',
+    dataCategoryMacro: '宏观数据',
+    dataCategorySocial: '社交情绪',
+    dataCategoryFundamental: '基本面',
+    dataCategoryMarket: '市场行情',
+    dataCategoryTechnical: '技术指标',
+    dataAttemptPath: '数据源路径',
+    dataReason: '原因',
     statusReviewRequired: '需要复核（无有效决策）',
     statusUnavailable: '决策不可用',
     statusFailed: '失败',
@@ -817,12 +857,92 @@ async function loadAnalystPrompts() {
 function refreshLocalizedUi() {
   if (!currentRunId) runIdEl.textContent = t('noRun');
   statusEl.textContent = formatStatus(currentStatus);
+  renderDataQualityNotice(currentVendorSummary);
   updateEventCount();
   updateStats(currentStats);
   renderApiKeyStatus();
   renderAnalystPrompts();
   providerManager.refresh();
   reportView.refresh();
+}
+
+function completionStatus(dataStatus, vendorSummary = {}) {
+  if (dataStatus === 'unavailable') return 'data_unavailable';
+  if (dataStatus !== 'degraded') return 'completed';
+  const trajectories = Array.isArray(vendorSummary.trajectories)
+    ? vendorSummary.trajectories
+    : [];
+  if (trajectories.some(item => item?.status === 'unavailable')) return 'data_partial';
+  if (trajectories.some(item => item?.status === 'degraded')) return 'data_fallback';
+  return 'data_degraded';
+}
+
+function dataCategoryLabel(category) {
+  const key = {
+    prediction_markets: 'dataCategoryPrediction',
+    news_data: 'dataCategoryNews',
+    macro_data: 'dataCategoryMacro',
+    social_data: 'dataCategorySocial',
+    fundamental_data: 'dataCategoryFundamental',
+    core_stock_apis: 'dataCategoryMarket',
+    technical_indicators: 'dataCategoryTechnical',
+  }[category];
+  return key ? t(key) : (category || 'data');
+}
+
+function renderDataQualityNotice(summary) {
+  currentVendorSummary = summary || null;
+  const dataStatus = summary?.data_status;
+  if (!summary || !['degraded', 'unavailable'].includes(dataStatus)) {
+    dataQualityNotice.hidden = true;
+    dataQualityList.replaceChildren();
+    return;
+  }
+
+  const displayStatus = completionStatus(dataStatus, summary);
+  const titleKey = displayStatus === 'data_partial'
+    ? 'dataPartialTitle'
+    : displayStatus === 'data_fallback'
+      ? 'dataFallbackTitle'
+      : displayStatus === 'data_unavailable'
+        ? 'dataUnavailableTitle'
+        : 'statusDataDegraded';
+  const descriptionKey = displayStatus === 'data_partial'
+    ? 'dataPartialDescription'
+    : displayStatus === 'data_fallback'
+      ? 'dataFallbackDescription'
+      : 'dataUnavailableDescription';
+  dataQualityTitle.textContent = t(titleKey);
+  dataQualityDescription.textContent = t(descriptionKey);
+
+  const trajectories = Array.isArray(summary.trajectories) ? summary.trajectories : [];
+  dataQualityList.replaceChildren(...trajectories.map(item => {
+    const row = document.createElement('li');
+    const title = document.createElement('span');
+    title.className = 'data-quality-item-title';
+    title.textContent = `${dataCategoryLabel(item.category)} · ${item.symbol || item.method || item.call_id}`;
+
+    const attempts = Array.isArray(item.attempts) ? item.attempts : [];
+    const path = document.createElement('span');
+    path.className = 'data-quality-item-meta';
+    const pathText = attempts.length
+      ? attempts.map(attempt => `${attempt.vendor || 'unknown'} (${attempt.status || 'unknown'})`).join(' → ')
+      : (item.selected_vendor || item.status || 'unknown');
+    const agent = item.agent ? `${formatAgentName(item.agent)} · ` : '';
+    path.textContent = `${agent}${t('dataAttemptPath')}: ${pathText}`;
+
+    const failedAttempt = [...attempts].reverse().find(attempt => attempt.error_detail || attempt.error_type);
+    row.append(title, path);
+    if (failedAttempt) {
+      const reason = document.createElement('span');
+      reason.className = 'data-quality-item-reason';
+      reason.textContent = `${t('dataReason')}: ${failedAttempt.error_detail || failedAttempt.error_type}`;
+      row.append(reason);
+    }
+    return row;
+  }));
+  dataQualityNotice.hidden = false;
+  dataQualityDetails.open = true;
 }
 
 function renderDynamicLabels() {
@@ -846,6 +966,8 @@ function formatStatus(status) {
     running: 'statusRunning',
     completed: 'statusCompleted',
     data_degraded: 'statusDataDegraded',
+    data_partial: 'statusDataPartial',
+    data_fallback: 'statusDataFallback',
     data_unavailable: 'statusDataUnavailable',
     review_required: 'statusReviewRequired',
     unavailable: 'statusUnavailable',
@@ -1011,6 +1133,7 @@ function resetRun() {
   agentTimeline.clear();
   runtimeLog.clear();
   reportView.reset();
+  renderDataQualityNotice(null);
   runIdEl.textContent       = t('noRun');
   updateEventCount();
   updateStats(currentStats);
@@ -1039,12 +1162,12 @@ function handleRuntimeEvent(type, event) {
     const decisionStatus = event.content?.decision_status ?? 'unavailable';
     const reviewRequired = decisionStatus !== 'validated';
     const dataStatus = event.content?.data_status ?? 'not_observed';
-    const completedStatus = dataStatus === 'degraded'
-      ? 'data_degraded'
-      : dataStatus === 'unavailable' ? 'data_unavailable' : 'completed';
+    const vendorSummary = event.content?.vendor_summary ?? { data_status: dataStatus };
+    const completedStatus = completionStatus(dataStatus, vendorSummary);
     const completedState = dataStatus === 'degraded'
       ? 'warning'
       : dataStatus === 'unavailable' ? 'error' : 'done';
+    renderDataQualityNotice(vendorSummary);
     setStatus(
       reviewRequired ? decisionStatus : completedStatus,
       reviewRequired ? 'error' : completedState,
@@ -1096,6 +1219,7 @@ function resetToInitialState() {
   setBusy(false);
   runtimeLog.clear();
   reportView.reset({ showPlaceholder: false });
+  renderDataQualityNotice(null);
   agentTimeline.clear();
   llmCountEl.textContent = '--';
   toolCountEl.textContent = '--';
@@ -1121,12 +1245,11 @@ async function selectHistoryRun(runId, options = {}) {
 
   currentRunId   = run.run_id;
   runIdEl.textContent      = shortId(run.run_id);
-  const restoredStatus = run.status === 'completed' && run.data_status === 'degraded'
-    ? 'data_degraded'
-    : run.status === 'completed' && run.data_status === 'unavailable'
-      ? 'data_unavailable'
-      : run.status;
+  const restoredStatus = run.status === 'completed'
+    ? completionStatus(run.data_status, run.vendor_summary)
+    : run.status;
   setStatus(restoredStatus, statusClass(restoredStatus));
+  renderDataQualityNotice(run.vendor_summary);
   eventCount     = 0;
   currentStats = { llm_calls: 0, tool_calls: 0, tokens_in: 0, tokens_out: 0 };
   updateEventCount();
@@ -1194,7 +1317,7 @@ function setStatus(text, state) {
 function statusClass(status) {
   if (status === 'completed') return 'done';
   if (status === 'running')   return 'running';
-  if (status === 'data_degraded') return 'warning';
+  if (status === 'data_degraded' || status === 'data_partial' || status === 'data_fallback') return 'warning';
   if (status === 'failed' || status === 'cancelled' || status === 'review_required' || status === 'unavailable' || status === 'data_unavailable') return 'error';
   return 'ready';
 }

@@ -189,6 +189,7 @@ def test_incomplete_buy_is_retried_then_safely_downgraded():
     assert structured.invoke.call_count == 2
     second_prompt = structured.invoke.call_args_list[1].args[0]
     assert "missing structured fields" in second_prompt
+    assert "only in their dedicated structured fields" in second_prompt
 
 
 @pytest.mark.unit
@@ -215,6 +216,24 @@ def test_non_long_executable_numbers_are_removed_from_prose():
     assert "40%" not in rendered
     assert "$210" not in rendered
     assert "Wait for confirmation" in rendered
+
+
+@pytest.mark.unit
+def test_sanitized_numbered_list_does_not_leave_orphan_markers():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.HOLD,
+        executive_summary="Wait for confirmation.",
+        investment_thesis=(
+            "1. Reduce position to 2% below $200. "
+            "2. Fundamentals remain durable. "
+            "3. Add a 1% hedge at strike $190."
+        ),
+    )
+    rendered = render_pm_decision(decision)
+    assert "Reduce position" not in rendered
+    assert "hedge" not in rendered
+    assert "1. 2." not in rendered
+    assert "2. Fundamentals remain durable" in rendered
 
 
 @pytest.mark.unit

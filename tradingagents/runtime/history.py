@@ -1,6 +1,7 @@
 """Core runtime store to persist execution history and events to SQLite."""
 
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -107,6 +108,38 @@ class RunHistoryStore:
                         UNIQUE (run_id, call_id, attempt)
                     )
                 """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS decision_evaluations (
+                        run_id                TEXT NOT NULL,
+                        horizon_sessions      INTEGER NOT NULL,
+                        evaluated_by_run_id   TEXT,
+                        ticker                TEXT NOT NULL,
+                        analysis_date         TEXT NOT NULL,
+                        rating                TEXT NOT NULL,
+                        benchmark             TEXT NOT NULL,
+                        entry_date            TEXT,
+                        exit_date             TEXT,
+                        stock_entry_close      REAL,
+                        stock_exit_close       REAL,
+                        benchmark_entry_close  REAL,
+                        benchmark_exit_close   REAL,
+                        stock_entry_source_id  TEXT,
+                        stock_exit_source_id   TEXT,
+                        benchmark_entry_source_id TEXT,
+                        benchmark_exit_source_id  TEXT,
+                        raw_return            REAL NOT NULL,
+                        benchmark_return      REAL NOT NULL,
+                        alpha_return          REAL NOT NULL,
+                        exposure              REAL NOT NULL,
+                        directional_hit       INTEGER NOT NULL,
+                        score                 REAL NOT NULL,
+                        architecture_version  TEXT NOT NULL,
+                        architecture_fingerprint TEXT NOT NULL DEFAULT 'legacy-unspecified',
+                        evaluated_at          TEXT NOT NULL,
+                        PRIMARY KEY (run_id, horizon_sessions),
+                        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                    )
+                """)
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_run_vendor_calls_run "
                     "ON run_vendor_calls(run_id, id)"
@@ -122,6 +155,47 @@ class RunHistoryStore:
                         "ALTER TABLE runs ADD COLUMN decision_status "
                         "TEXT NOT NULL DEFAULT 'unavailable'"
                     )
+                if "architecture_version" not in run_columns:
+                    conn.execute(
+                        "ALTER TABLE runs ADD COLUMN architecture_version "
+                        "TEXT NOT NULL DEFAULT 'legacy'"
+                    )
+                if "architecture_fingerprint" not in run_columns:
+                    conn.execute(
+                        "ALTER TABLE runs ADD COLUMN architecture_fingerprint "
+                        "TEXT NOT NULL DEFAULT 'legacy-unspecified'"
+                    )
+                if "architecture_manifest_json" not in run_columns:
+                    conn.execute(
+                        "ALTER TABLE runs ADD COLUMN architecture_manifest_json TEXT"
+                    )
+                evaluation_columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(decision_evaluations)")
+                }
+                if "architecture_fingerprint" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "architecture_fingerprint TEXT NOT NULL "
+                        "DEFAULT 'legacy-unspecified'"
+                    )
+                for column in (
+                    "entry_date TEXT",
+                    "exit_date TEXT",
+                    "stock_entry_close REAL",
+                    "stock_exit_close REAL",
+                    "benchmark_entry_close REAL",
+                    "benchmark_exit_close REAL",
+                    "stock_entry_source_id TEXT",
+                    "stock_exit_source_id TEXT",
+                    "benchmark_entry_source_id TEXT",
+                    "benchmark_exit_source_id TEXT",
+                ):
+                    name = column.split()[0]
+                    if name not in evaluation_columns:
+                        conn.execute(
+                            f"ALTER TABLE decision_evaluations ADD COLUMN {column}"
+                        )
                 for column in (
                     "symbol TEXT",
                     "agent TEXT",
@@ -144,6 +218,9 @@ class RunHistoryStore:
         research_depth: int | None,
         status: str = "pending",
         created_at: str | None = None,
+        architecture_version: str = "legacy",
+        architecture_fingerprint: str = "legacy-unspecified",
+        architecture_manifest_json: str | None = None,
     ) -> None:
         with self._lock:
             if not created_at:
@@ -154,8 +231,9 @@ class RunHistoryStore:
                     INSERT OR IGNORE INTO runs
                         (run_id, ticker, analysis_date, asset_type,
                          selected_analysts, llm_provider, research_depth,
-                         status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         status, created_at, architecture_version,
+                         architecture_fingerprint, architecture_manifest_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -167,8 +245,254 @@ class RunHistoryStore:
                         research_depth,
                         status,
                         created_at,
+                        architecture_version,
+                        architecture_fingerprint,
+                        architecture_manifest_json,
                     ),
                 )
+                conn.execute(
+                    """
+                    UPDATE runs
+                    SET architecture_version=?, architecture_fingerprint=?,
+                        architecture_manifest_json=COALESCE(?, architecture_manifest_json)
+                    WHERE run_id=?
+                    """,
+                    (
+                        architecture_version,
+                        architecture_fingerprint,
+                        architecture_manifest_json,
+                        run_id,
+                    ),
+                )
+
+    def find_runs(
+        self,
+        *,
+        ticker: str,
+        analysis_date: str,
+        decision_status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM runs WHERE UPPER(ticker)=? AND analysis_date=?"
+        params: list[Any] = [ticker.upper(), str(analysis_date)]
+        if decision_status is not None:
+            query += " AND decision_status=?"
+            params.append(decision_status)
+        query += " ORDER BY created_at DESC"
+        with self._lock:
+            with self._conn() as conn:
+                return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+    def update_run_architecture(
+        self,
+        run_id: str,
+        *,
+        architecture_version: str,
+        architecture_fingerprint: str,
+        architecture_manifest_json: str,
+    ) -> None:
+        """Replace preliminary identity with the effective runtime manifest."""
+        with self._lock:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE runs
+                    SET architecture_version=?, architecture_fingerprint=?,
+                        architecture_manifest_json=?
+                    WHERE run_id=?
+                    """,
+                    (
+                        architecture_version,
+                        architecture_fingerprint,
+                        architecture_manifest_json,
+                        run_id,
+                    ),
+                )
+
+    def add_decision_evaluation(self, record: dict[str, Any]) -> None:
+        """Persist one immutable fixed-horizon outcome for an analyzed run."""
+        required_provenance = (
+            "entry_date",
+            "exit_date",
+            "stock_entry_source_id",
+            "stock_exit_source_id",
+            "benchmark_entry_source_id",
+            "benchmark_exit_source_id",
+        )
+        missing = [field for field in required_provenance if not record.get(field)]
+        if missing:
+            raise ValueError(
+                "decision evaluation lacks audited provenance: " + ", ".join(missing)
+            )
+        entry_date = datetime.fromisoformat(str(record["entry_date"])).date()
+        exit_date = datetime.fromisoformat(str(record["exit_date"])).date()
+        if exit_date <= entry_date:
+            raise ValueError("decision evaluation exit_date must follow entry_date")
+        for field in required_provenance[2:]:
+            if not str(record[field]).startswith("ohlcv:"):
+                raise ValueError(f"decision evaluation {field} is not an OHLCV source ID")
+        numeric_fields = (
+            "stock_entry_close",
+            "stock_exit_close",
+            "benchmark_entry_close",
+            "benchmark_exit_close",
+            "raw_return",
+            "benchmark_return",
+            "alpha_return",
+            "exposure",
+            "score",
+        )
+        for field in numeric_fields:
+            value = float(record[field])
+            if not math.isfinite(value):
+                raise ValueError(f"decision evaluation {field} must be finite")
+            if field.endswith("_close") and value <= 0:
+                raise ValueError(f"decision evaluation {field} must be positive")
+        with self._lock:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO decision_evaluations (
+                        run_id, horizon_sessions, evaluated_by_run_id, ticker,
+                        analysis_date, rating, benchmark,
+                        entry_date, exit_date, stock_entry_close, stock_exit_close,
+                        benchmark_entry_close, benchmark_exit_close,
+                        stock_entry_source_id, stock_exit_source_id,
+                        benchmark_entry_source_id, benchmark_exit_source_id,
+                        raw_return,
+                        benchmark_return, alpha_return, exposure,
+                        directional_hit, score, architecture_version,
+                        architecture_fingerprint, evaluated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record["run_id"], record["horizon_sessions"],
+                        record.get("evaluated_by_run_id"), record["ticker"],
+                        record["analysis_date"], record["rating"], record["benchmark"],
+                        record.get("entry_date"), record.get("exit_date"),
+                        record.get("stock_entry_close"), record.get("stock_exit_close"),
+                        record.get("benchmark_entry_close"),
+                        record.get("benchmark_exit_close"),
+                        record.get("stock_entry_source_id"),
+                        record.get("stock_exit_source_id"),
+                        record.get("benchmark_entry_source_id"),
+                        record.get("benchmark_exit_source_id"),
+                        record["raw_return"], record["benchmark_return"],
+                        record["alpha_return"], record["exposure"],
+                        int(bool(record["directional_hit"])), record["score"],
+                        record["architecture_version"],
+                        record.get("architecture_fingerprint", "legacy-unspecified"),
+                        record.get("evaluated_at") or _now(),
+                    ),
+                )
+
+    def list_decision_evaluations(
+        self,
+        *,
+        ticker: str | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM decision_evaluations"
+        params: list[Any] = []
+        if ticker is not None:
+            query += " WHERE UPPER(ticker)=?"
+            params.append(ticker.upper())
+        query += " ORDER BY evaluated_at DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            with self._conn() as conn:
+                return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+    def get_longitudinal_context(
+        self,
+        ticker: str,
+        *,
+        information_cutoff: str | None = None,
+        same_symbol_limit: int = 10,
+        cross_symbol_limit: int = 5,
+    ) -> str:
+        """Render compact audited outcomes for downstream decision agents.
+
+        Only deterministic fields from ``decision_evaluations`` are exposed;
+        LLM-written Markdown reflections are deliberately excluded. Historical
+        point-in-time callers may provide a cutoff so outcomes evaluated later
+        cannot leak into the reconstructed run.
+        """
+        from tradingagents.evaluation import architecture_rollups
+
+        cutoff = None
+        if information_cutoff:
+            cutoff = datetime.fromisoformat(information_cutoff.replace("Z", "+00:00"))
+            if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+                raise ValueError("information_cutoff must include a timezone")
+            cutoff = cutoff.astimezone(timezone.utc)
+
+        rows = self.list_decision_evaluations(limit=5000)
+        visible: list[dict[str, Any]] = []
+        for row in rows:
+            evaluated_at = datetime.fromisoformat(
+                str(row["evaluated_at"]).replace("Z", "+00:00")
+            )
+            if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
+                evaluated_at = evaluated_at.replace(tzinfo=timezone.utc)
+            if cutoff is not None and evaluated_at.astimezone(timezone.utc) > cutoff:
+                continue
+            visible.append(row)
+
+        normalized_ticker = ticker.upper()
+        same = [row for row in visible if str(row["ticker"]).upper() == normalized_ticker][
+            :same_symbol_limit
+        ]
+        cross = [row for row in visible if str(row["ticker"]).upper() != normalized_ticker][
+            :cross_symbol_limit
+        ]
+        selected = [*same, *cross]
+        if not selected:
+            return ""
+
+        fields = (
+            "run_id",
+            "ticker",
+            "analysis_date",
+            "rating",
+            "horizon_sessions",
+            "benchmark",
+            "entry_date",
+            "exit_date",
+            "stock_entry_close",
+            "stock_exit_close",
+            "benchmark_entry_close",
+            "benchmark_exit_close",
+            "stock_entry_source_id",
+            "stock_exit_source_id",
+            "benchmark_entry_source_id",
+            "benchmark_exit_source_id",
+            "raw_return",
+            "benchmark_return",
+            "alpha_return",
+            "exposure",
+            "directional_hit",
+            "score",
+            "architecture_version",
+            "architecture_fingerprint",
+            "evaluated_at",
+        )
+        payload = {
+            "schema": "tradingagents/audited-longitudinal-outcomes/v1",
+            "interpretation": (
+                "Historical calibration evidence only. Outcomes do not prove causality, "
+                "may come from a different market regime, and cannot authorize trade levels."
+            ),
+            "same_symbol_outcomes": [
+                {key: (bool(row[key]) if key == "directional_hit" else row[key]) for key in fields}
+                for row in same
+            ],
+            "cross_symbol_outcomes": [
+                {key: (bool(row[key]) if key == "directional_hit" else row[key]) for key in fields}
+                for row in cross
+            ],
+            "architecture_rollups": architecture_rollups(selected),
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
     def mark_started(self, run_id: str, started_at: str | None = None) -> None:
         with self._lock:
@@ -421,6 +745,17 @@ def summarize_vendor_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
         else:
             status = "available"
         first = attempts[0]
+        attempt_details = [
+            {
+                "attempt": int(item.get("attempt") or 0),
+                "vendor": item.get("vendor"),
+                "status": item.get("status"),
+                "selected": bool(item.get("selected")),
+                "error_type": item.get("error_type"),
+                "error_detail": item.get("error_detail"),
+            }
+            for item in attempts
+        ]
         trajectories.append({
             "call_id": call_id,
             "category": first.get("category"),
@@ -430,6 +765,7 @@ def summarize_vendor_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
             "status": status,
             "selected_vendor": selected.get("vendor") if selected else None,
             "attempt_count": len(attempts),
+            "attempts": attempt_details,
         })
 
     statuses = {item["status"] for item in trajectories}
@@ -442,6 +778,10 @@ def summarize_vendor_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
     else:
         data_status = "degraded"
 
+    domain_statuses: dict[str, set[str]] = {}
+    for item in trajectories:
+        domain_statuses.setdefault(str(item["category"]), set()).add(item["status"])
+
     return {
         "data_status": data_status,
         "call_count": len(trajectories),
@@ -450,10 +790,18 @@ def summarize_vendor_calls(calls: list[dict[str, Any]]) -> dict[str, Any]:
             str(item["category"]) for item in trajectories
             if item["status"] == "degraded"
         }),
-        "unavailable_domains": sorted({
-            str(item["category"]) for item in trajectories
-            if item["status"] == "unavailable"
-        }),
+        # A domain is unavailable only when every requested trajectory in that
+        # domain failed. Mixed successful/failed calls are partial evidence,
+        # not an unavailable provider domain.
+        "partially_available_domains": sorted(
+            category for category, category_statuses in domain_statuses.items()
+            if "unavailable" in category_statuses
+            and category_statuses != {"unavailable"}
+        ),
+        "unavailable_domains": sorted(
+            category for category, category_statuses in domain_statuses.items()
+            if category_statuses == {"unavailable"}
+        ),
         # Healthy first-attempt calls stay available in the append-only ledger
         # and vendor_attempt events. Keep the run summary focused on paths that
         # require operator attention so list/history responses remain compact.

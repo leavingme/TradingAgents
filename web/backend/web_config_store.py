@@ -29,13 +29,14 @@ ALLOWED_VENDORS = {
     "technical_indicators": ["longbridge_mcp", "longbridge", "westock", "alpha_vantage"],
     "fundamental_data": ["longbridge_mcp", "longbridge", "westock", "alpha_vantage"],
     "news_data": ["longbridge_mcp", "longbridge", "westock", "duckduckgo", "alpha_vantage"],
-    "social_data": ["bird", "reddit"],
+    "social_data": ["bird", "stocktwits_browser", "reddit"],
     "macro_data": ["fred"],
     "prediction_markets": ["polymarket"],
 }
 
 LEGACY_NEWS_DEFAULT = ("westock", "duckduckgo", "alpha_vantage")
 LEGACY_TECHNICAL_DEFAULT = ("longbridge_mcp", "longbridge", "westock")
+LEGACY_SOCIAL_DEFAULT = ("bird", "reddit")
 
 
 def _default_path() -> Path:
@@ -85,6 +86,12 @@ def _normalize_vendor_rows(
             migrate_legacy_defaults
             and category == "technical_indicators"
             and legacy_enabled_ids == LEGACY_TECHNICAL_DEFAULT
+        ):
+            rows = defaults[category]
+        if (
+            migrate_legacy_defaults
+            and category == "social_data"
+            and legacy_enabled_ids == LEGACY_SOCIAL_DEFAULT
         ):
             rows = defaults[category]
         if not isinstance(rows, list):

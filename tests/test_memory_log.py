@@ -11,6 +11,7 @@ from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.graph.propagation import Propagator
 from tradingagents.graph.reflection import Reflector
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.evaluation import OutcomeMeasurement
 
 _SEP = TradingMemoryLog._SEPARATOR
 
@@ -64,6 +65,25 @@ def _price_csv(prices):
     for idx, price in enumerate(prices, start=1):
         rows.append(f"2026-01-{idx:02d},{price}")
     return "\n".join(rows)
+
+
+def _outcome_measurement():
+    return OutcomeMeasurement(
+        raw_return=0.05,
+        benchmark_return=0.03,
+        alpha_return=0.02,
+        horizon_sessions=5,
+        entry_date="2026-01-05",
+        exit_date="2026-01-12",
+        stock_entry_close=100.0,
+        stock_exit_close=105.0,
+        benchmark_entry_close=400.0,
+        benchmark_exit_close=412.0,
+        stock_entry_source_id="ohlcv:test:stock-entry:2026-01-05",
+        stock_exit_source_id="ohlcv:test:stock-exit:2026-01-12",
+        benchmark_entry_source_id="ohlcv:test:bench-entry:2026-01-05",
+        benchmark_exit_source_id="ohlcv:test:bench-exit:2026-01-12",
+    )
 
 
 def _make_pm_state(past_context=""):
@@ -509,39 +529,75 @@ class TestDeferredReflection:
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        with patch("tradingagents.dataflows.westock.get_westock_data_online") as fetch:
-            fetch.side_effect = lambda sym, *a: _price_csv(spy_prices if sym == "SPY" else stock_prices)
+        with patch("tradingagents.dataflows.stockstats_utils.load_ohlcv") as fetch:
+            fetch.side_effect = lambda sym, *a: pd.DataFrame({
+                "Date": pd.date_range("2026-01-05", periods=6, freq="B"),
+                "Close": spy_prices if sym == "SPY" else stock_prices,
+            })
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-01-05")
         assert raw is not None and alpha is not None and days is not None
         assert isinstance(raw, float) and isinstance(alpha, float) and isinstance(days, int)
         assert days == 5
 
+    def test_fetch_returns_details_require_and_preserve_exact_provenance(self, monkeypatch):
+        stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
+        spy_prices = [400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        monkeypatch.setattr(
+            "tradingagents.dataflows.stockstats_utils.load_ohlcv",
+            lambda symbol, end: pd.DataFrame({
+                "Date": pd.date_range("2026-01-05", periods=6, freq="B"),
+                "Close": spy_prices if symbol == "SPY" else stock_prices,
+            }),
+        )
+        monkeypatch.setattr(
+            "tradingagents.dataflows.config.get_config",
+            lambda: {"data_cache_dir": "/tmp/audited-cache"},
+        )
+        monkeypatch.setattr(
+            "tradingagents.dataflows.ohlcv_model.resolve_ohlcv_source_id",
+            lambda cache_dir, cache_key, date: f"ohlcv:test:{cache_key}:{date}",
+        )
+        measurement = TradingAgentsGraph._fetch_returns(
+            mock_graph,
+            "NVDA",
+            "2026-01-05",
+            return_details=True,
+        )
+        assert isinstance(measurement, OutcomeMeasurement)
+        assert measurement.entry_date == "2026-01-05"
+        assert measurement.exit_date == "2026-01-12"
+        assert measurement.stock_entry_source_id == "ohlcv:test:NVDA:2026-01-05"
+        assert measurement.benchmark_exit_source_id == "ohlcv:test:SPY:2026-01-12"
+
     def test_fetch_returns_too_recent(self):
         """Only 1 data point available → returns (None, None, None), no crash."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        with patch("tradingagents.dataflows.westock.get_westock_data_online") as fetch:
-            fetch.return_value = _price_csv([100.0])
+        with patch("tradingagents.dataflows.stockstats_utils.load_ohlcv") as fetch:
+            fetch.return_value = pd.DataFrame({"Date": ["2026-04-19"], "Close": [100.0]})
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-04-19")
         assert raw is None and alpha is None and days is None
 
     def test_fetch_returns_delisted(self):
         """Empty DataFrame → returns (None, None, None), no crash."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        with patch("tradingagents.dataflows.westock.get_westock_data_online") as fetch:
-            fetch.return_value = "Date,Close\n"
+        with patch("tradingagents.dataflows.stockstats_utils.load_ohlcv") as fetch:
+            fetch.return_value = pd.DataFrame(columns=["Date", "Close"])
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "XXXXXFAKE", "2026-01-10")
         assert raw is None and alpha is None and days is None
 
     def test_fetch_returns_spy_shorter_than_stock(self):
-        """SPY having fewer rows than the stock must not raise IndexError."""
+        """An incomplete benchmark horizon must remain pending, not become a fake 2d result."""
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 403.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        with patch("tradingagents.dataflows.westock.get_westock_data_online") as fetch:
-            fetch.side_effect = lambda sym, *a: _price_csv(spy_prices if sym == "SPY" else stock_prices)
+        with patch("tradingagents.dataflows.stockstats_utils.load_ohlcv") as fetch:
+            fetch.side_effect = lambda sym, *a: pd.DataFrame({
+                "Date": pd.date_range("2026-01-05", periods=len(spy_prices if sym == "SPY" else stock_prices), freq="B"),
+                "Close": spy_prices if sym == "SPY" else stock_prices,
+            })
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-01-05")
-        assert raw is not None and alpha is not None and days is not None
-        assert days == 2
+        assert raw is None and alpha is None and days is None
 
     # TradingAgentsGraph._resolve_benchmark — picks index for alpha calc
 
@@ -648,7 +704,7 @@ class TestDeferredReflection:
         log.store_decision("AAPL", "2026-01-10", DECISION_BUY)
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.memory_log = log
-        mock_graph._fetch_returns = MagicMock(return_value=(0.05, 0.02, 5))
+        mock_graph._fetch_returns = MagicMock(return_value=_outcome_measurement())
         TradingAgentsGraph._resolve_pending_entries(mock_graph, "NVDA")
         mock_graph._fetch_returns.assert_not_called()
         assert len(log.get_pending_entries()) == 1
@@ -662,7 +718,7 @@ class TestDeferredReflection:
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.memory_log = log
         mock_graph.reflector = mock_reflector
-        mock_graph._fetch_returns = MagicMock(return_value=(0.05, 0.02, 5))
+        mock_graph._fetch_returns = MagicMock(return_value=_outcome_measurement())
         TradingAgentsGraph._resolve_pending_entries(mock_graph, "NVDA")
         assert log.get_pending_entries() == []
         entries = log.load_entries()
@@ -671,6 +727,76 @@ class TestDeferredReflection:
         assert entries[0]["reflection"] == "Momentum confirmed."
         assert "+5.0%" in entries[0]["raw"]
         assert "+2.0%" in entries[0]["alpha"]
+
+    def test_resolve_keeps_markdown_pending_if_canonical_evaluation_write_fails(
+        self, tmp_path, monkeypatch
+    ):
+        from tradingagents.runtime.history import history_store
+
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.memory_log = log
+        mock_graph.reflector = MagicMock()
+        mock_graph.reflector.reflect_on_final_decision.return_value = "Lesson."
+        mock_graph._fetch_returns.return_value = _outcome_measurement()
+        monkeypatch.setattr(history_store, "find_runs", lambda **kwargs: [{
+            "run_id": "prior-run",
+            "architecture_version": "baseline",
+        }])
+        monkeypatch.setattr(history_store, "get_run", lambda run_id: {
+            "events": [{
+                "type": "run_completed",
+                "content": {"decision": DECISION_BUY, "decision_status": "validated"},
+            }],
+        })
+        monkeypatch.setattr(
+            history_store,
+            "add_decision_evaluation",
+            lambda record: (_ for _ in ()).throw(RuntimeError("sqlite unavailable")),
+        )
+        with pytest.raises(RuntimeError, match="sqlite unavailable"):
+            TradingAgentsGraph._resolve_pending_entries(
+                mock_graph, "NVDA", as_of_date="2026-01-12"
+            )
+        assert len(log.get_pending_entries()) == 1
+
+    def test_resolve_scores_each_architecture_run_from_its_own_decision(
+        self, tmp_path, monkeypatch
+    ):
+        from tradingagents.runtime.history import history_store
+
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.memory_log = log
+        mock_graph.reflector = MagicMock()
+        mock_graph.reflector.reflect_on_final_decision.return_value = "Lesson."
+        mock_graph._fetch_returns.return_value = _outcome_measurement()
+        monkeypatch.setattr(history_store, "find_runs", lambda **kwargs: [
+            {"run_id": "baseline-run", "architecture_version": "baseline"},
+            {"run_id": "challenger-run", "architecture_version": "challenger"},
+        ])
+        decisions = {
+            "baseline-run": DECISION_BUY,
+            "challenger-run": DECISION_SELL,
+        }
+        monkeypatch.setattr(history_store, "get_run", lambda run_id: {
+            "events": [{
+                "type": "run_completed",
+                "content": {"decision": decisions[run_id], "decision_status": "validated"},
+            }],
+        })
+        recorded = []
+        monkeypatch.setattr(history_store, "add_decision_evaluation", recorded.append)
+
+        TradingAgentsGraph._resolve_pending_entries(
+            mock_graph, "NVDA", as_of_date="2026-01-12"
+        )
+        assert [(row["run_id"], row["rating"], row["directional_hit"]) for row in recorded] == [
+            ("baseline-run", "Buy", True),
+            ("challenger-run", "Sell", False),
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -700,7 +826,7 @@ class TestPortfolioManagerInjection:
         pm_node = create_portfolio_manager(llm)
         state = _make_pm_state(past_context="[2026-01-05 | NVDA | Buy | +5.0% | +2.0% | 5d]\nGreat call.")
         pm_node(state)
-        assert "Lessons from prior decisions and outcomes" in captured["prompt"]
+        assert "Audited prior fixed-horizon outcomes" in captured["prompt"]
         assert "Great call." in captured["prompt"]
 
     def test_pm_no_past_context_no_section(self):

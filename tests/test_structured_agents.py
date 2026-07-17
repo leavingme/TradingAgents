@@ -66,14 +66,12 @@ class TestRenderTraderProposal:
             price_target=215.0,
             target_position_pct=6.0,
             initial_position_pct=3.0,
-            position_sizing="6% of portfolio",
         )
         md = render_trader_proposal(p, verified_market=VERIFIED, risk_policy=POLICY)
         assert "**Action**: Buy" in md
         assert "**Entry Price**: 189.5" in md
         assert "**Stop Loss**: 178.0" in md
         assert "**Target Position**: 6.00%" in md
-        assert "**Position Sizing**: 6% of portfolio" not in md
         assert "**Reward/Risk (calculated)**: 2.22" in md
         assert "FINAL TRANSACTION PROPOSAL: **BUY**" in md
 
@@ -128,6 +126,31 @@ class TestRenderResearchPlan:
         assert "**Recommendation**: Overweight" in md
         assert "**Rationale**: Bull case carried" in md
         assert "**Strategic Actions**: Build position" in md
+
+    def test_execution_numbers_are_removed_before_trader_handoff(self):
+        p = ResearchPlan(
+            recommendation=PortfolioRating.OVERWEIGHT,
+            rationale="AI demand remains durable; current position is 5% of the portfolio.",
+            strategic_actions=(
+                "现价 $211-212 建仓至 1/3，跌破 $200 减仓。"
+                "Wait for confirmation from the next earnings report."
+            ),
+        )
+        md = render_research_plan(p)
+        assert "$211" not in md
+        assert "$200" not in md
+        assert "1/3" not in md
+        assert "position is 5%" not in md
+        assert "AI demand remains durable" in md
+        assert "Wait for confirmation" in md
+
+    def test_trader_rejects_legacy_free_text_position_sizing_field(self):
+        with pytest.raises(ValidationError, match="position_sizing"):
+            TraderProposal(
+                action=TraderAction.BUY,
+                reasoning="Demand remains durable.",
+                position_sizing="5% of portfolio",
+            )
 
     def test_all_5_tier_ratings_render(self):
         for rating in PortfolioRating:
@@ -202,7 +225,6 @@ class TestTraderAgent:
             price_target=215.0,
             target_position_pct=6.0,
             initial_position_pct=3.0,
-            position_sizing="6% of portfolio",
         )
         llm = _structured_trader_llm(captured, proposal)
         trader = create_trader(llm)
@@ -222,6 +244,8 @@ class TestTraderAgent:
         # The investment plan is in the user message of the captured prompt.
         prompt = captured["prompt"]
         assert any("Proposed Investment Plan" in m["content"] for m in prompt)
+        assert any("Do not copy any of its execution numbers" in m["content"] for m in prompt)
+        assert "Copy no executable price" in prompt[0]["content"]
 
     def test_structured_unavailable_returns_non_executable_review_required(self):
         plain_response = (
@@ -255,6 +279,8 @@ def _make_rm_state():
             "judge_decision": "",
             "count": 1,
         },
+        "past_context": "",
+        "longitudinal_context_mode": "research_and_portfolio",
     }
 
 
@@ -300,6 +326,20 @@ class TestResearchManagerAgent:
         prompt = captured["prompt"]
         for tier in ("Buy", "Overweight", "Hold", "Underweight", "Sell"):
             assert f"**{tier}**" in prompt, f"missing {tier} in prompt"
+
+    def test_prompt_receives_audited_longitudinal_context_with_safety_limits(self):
+        captured = {}
+        llm = _structured_rm_llm(captured)
+        rm = create_research_manager(llm)
+        state = _make_rm_state()
+        state["past_context"] = (
+            '{"schema":"tradingagents/audited-longitudinal-outcomes/v1"}'
+        )
+        rm(state)
+        prompt = captured["prompt"]
+        assert "Audited Prior Fixed-Horizon Outcomes" in prompt
+        assert "do not prove causality" in prompt
+        assert "cannot authorize any entry, stop, target, or position value" in prompt
 
     def test_falls_back_to_freetext_when_structured_unavailable(self):
         plain_response = "**Recommendation**: Sell\n\n**Rationale**: ...\n\n**Strategic Actions**: ..."
@@ -383,6 +423,11 @@ def mock_sentiment_sources(monkeypatch):
     )
     monkeypatch.setattr(
         module, "get_social_posts", types.SimpleNamespace(func=lambda *args: "validated social")
+    )
+    monkeypatch.setattr(
+        module,
+        "get_stocktwits_messages",
+        types.SimpleNamespace(func=lambda *args: "validated stocktwits"),
     )
     monkeypatch.setattr(module, "fetch_reddit_posts", lambda *args, **kwargs: "posts")
 

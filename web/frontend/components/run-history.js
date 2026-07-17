@@ -19,8 +19,15 @@ export function createRunHistory({ api, element, locale, formatStatus, formatEve
     const meta = document.createElement('div');
     meta.className = 'history-meta';
     const status = document.createElement('span');
+    const trajectories = Array.isArray(run.vendor_summary?.trajectories)
+      ? run.vendor_summary.trajectories
+      : [];
     const displayStatus = run.status === 'completed' && run.data_status === 'degraded'
-      ? 'data_degraded'
+      ? trajectories.some(entry => entry?.status === 'unavailable')
+        ? 'data_partial'
+        : trajectories.some(entry => entry?.status === 'degraded')
+          ? 'data_fallback'
+          : 'data_degraded'
       : run.status === 'completed' && run.data_status === 'unavailable'
         ? 'data_unavailable'
         : run.status;

@@ -46,7 +46,8 @@ _PROSE_TRADE_MATH = re.compile(
     re.IGNORECASE,
 )
 _PROSE_EXECUTABLE_NUMBER = re.compile(
-    r"(?:entry|stop(?:[- ]loss)?|price target|position siz(?:e|ing)|"
+    r"(?:entry|stop(?:[- ]loss)?|price target|position(?:\s+siz(?:e|ing))?|"
+    r"cap(?:ped)?(?:\s+(?:at|to))?|"
     r"reduce|trim|exit|(?<!not )(?<!不支持)(?<!不是)sell|buyback|hedge|strike|exposure|"
     r"trigger(?:ed|s)?\s+(?:at|above|below|price|level)|break(?:s)? (?:above|below)|"
     r"入场|止损|目标价|目标位|仓位|持仓|战术仓|建仓|加仓|减仓|减持|清仓|回补|"
@@ -218,16 +219,26 @@ def _reject_calculated_trade_math(value: str) -> str:
 
 
 def _sanitize_non_executable_prose(value: str) -> str:
-    """Remove executable-number sentences from Hold/Sell prose.
+    """Remove executable-number sentences from non-authoritative prose.
 
-    Non-long ratings are allowed to remain valid qualitative decisions, but
-    copied entry/stop/target/position math must not survive into the report.
-    Long decisions stay strict and fail instead of being silently rewritten.
+    Research plans and non-long ratings may retain qualitative conclusions,
+    but copied entry/stop/target/position math must not survive into the next
+    decision boundary. Long decisions stay strict and fail instead of being
+    silently rewritten because their structured fields are executable.
     """
+    # Keep ordered-list markers attached to their item while splitting prose.
+    # Otherwise removing an unsafe item leaves orphaned ``1. 2. 3.`` markers
+    # in the rendered report.
+    list_dot = "__TRADINGAGENTS_LIST_DOT__"
+    value = re.sub(
+        r"(?<!\S)(\d{1,2})\.(?=\s)",
+        rf"\1{list_dot}",
+        value,
+    )
     # An ASCII dot is a sentence boundary only before whitespace/end. This
     # preserves decimal values (214.11) inside the unsafe chunk so the whole
     # guidance is removed instead of leaking fragments such as "11 + ...".
-    chunks = re.split(r"(?<=[!?。！？])|(?<=\.)(?=\s|$)|\n+", value)
+    chunks = re.split(r"(?<=[!?。！？;；])|(?<=\.)(?=\s|$)|\n+", value)
     safe = [
         chunk.strip()
         for chunk in chunks
@@ -237,7 +248,7 @@ def _sanitize_non_executable_prose(value: str) -> str:
         and not _PROSE_EXECUTABLE_CHINESE_NUMBER.search(_execution_scan_text(chunk))
     ]
     if safe:
-        return " ".join(safe)
+        return " ".join(safe).replace(list_dot, ".")
     return "Executable numeric guidance was removed; no transaction is authorized."
 
 
@@ -313,20 +324,29 @@ class ResearchPlan(BaseModel):
     )
     strategic_actions: str = Field(
         description=(
-            "Concrete steps for the trader to implement the recommendation, "
-            "including position sizing guidance consistent with the rating."
+            "Qualitative strategy directions for the trader. Do not include "
+            "executable entry, stop, target, trigger, option strike, hedge, or "
+            "position-size numbers; those belong only in the Trader's validated "
+            "structured fields."
         ),
     )
 
 
 def render_research_plan(plan: ResearchPlan) -> str:
-    """Render a ResearchPlan to markdown for storage and the trader's prompt context."""
+    """Render a non-authoritative plan for storage and the trader prompt.
+
+    The Research Manager has no server risk policy or direction-specific trade
+    validator. Strip any copied execution levels before this prose crosses the
+    executable Trader boundary; ordinary financial evidence remains intact.
+    """
+    rationale = _sanitize_non_executable_prose(plan.rationale)
+    strategic_actions = _sanitize_non_executable_prose(plan.strategic_actions)
     return "\n".join([
         f"**Recommendation**: {plan.recommendation.value}",
         "",
-        f"**Rationale**: {plan.rationale}",
+        f"**Rationale**: {rationale}",
         "",
-        f"**Strategic Actions**: {plan.strategic_actions}",
+        f"**Strategic Actions**: {strategic_actions}",
     ])
 
 
@@ -352,7 +372,10 @@ class TraderProposal(BaseModel):
     reasoning: str = Field(
         description=(
             "The case for this action, anchored in the analysts' reports and "
-            "the research plan. Two to four sentences."
+            "the research plan. Two to four sentences. Keep this field "
+            "qualitative: do not repeat executable entry, stop, target, trigger, "
+            "ATR, reward/risk, or position-size numbers here. For Buy, put the "
+            "chosen executable values only in their dedicated numeric fields."
         ),
     )
     entry_price: float | None = Field(
@@ -375,11 +398,6 @@ class TraderProposal(BaseModel):
         default=None,
         description="Required initial position as percent of portfolio for Buy proposals.",
     )
-    position_sizing: str | None = Field(
-        default=None,
-        description="Optional sizing guidance, e.g. '5% of portfolio'.",
-    )
-
     @field_validator(
         "entry_price", "stop_loss", "price_target",
         "target_position_pct", "initial_position_pct",
@@ -461,8 +479,6 @@ def render_trader_proposal(
             "",
             f"**Initial Portfolio Risk (calculated)**: {metrics.initial_portfolio_risk_pct:.4f}%",
         ])
-    if proposal.position_sizing and metrics is None:
-        parts.extend(["", f"**Position Sizing**: {proposal.position_sizing}"])
     parts.extend([
         "",
         f"FINAL TRANSACTION PROPOSAL: **{proposal.action.value.upper()}**",

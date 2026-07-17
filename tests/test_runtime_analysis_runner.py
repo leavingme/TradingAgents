@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import pytest
@@ -110,7 +111,7 @@ class FakeTradingAgentsGraph:
         self.memory_log = FakeMemoryLog()
         self.logged = []
 
-    def _resolve_pending_entries(self, ticker):
+    def _resolve_pending_entries(self, ticker, as_of_date=None):
         self.resolved = ticker
 
     def resolve_instrument_context(self, ticker, asset_type):
@@ -156,6 +157,7 @@ def test_runtime_config_rejects_per_run_risk_policy_override():
 
 def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_path):
     from tradingagents.runtime import analysis_runner
+    from tradingagents.runtime.history import history_store
 
     monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", FakeTradingAgentsGraph)
 
@@ -187,6 +189,45 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert completed.content["decision"] == "Hold"
     assert completed.content["decision_as_of"] == completed.timestamp
     assert Path(completed.content["report_path"]).exists()
+    stored = history_store.get_run("run-1")
+    manifest = json.loads(stored["architecture_manifest_json"])
+    assert stored["architecture_version"] == request.architecture_version
+    assert len(stored["architecture_fingerprint"]) == 64
+    assert manifest["llm_provider"] == "minimax-cn"
+    assert manifest["quick_think_llm"] == "MiniMax-M3"
+    assert manifest["longitudinal_context_mode"] == "research_and_portfolio"
+
+
+def test_canonical_runtime_injects_sqlite_longitudinal_context(monkeypatch, tmp_path):
+    from tradingagents.runtime import analysis_runner
+    from tradingagents.runtime.history import history_store
+
+    seen = {}
+
+    class CapturingCompiledGraph(FakeCompiledGraph):
+        def stream(self, init_state, **kwargs):
+            seen.update(init_state)
+            yield from super().stream(init_state, **kwargs)
+
+    class CapturingGraph(FakeTradingAgentsGraph):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.graph = CapturingCompiledGraph()
+
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", CapturingGraph)
+    monkeypatch.setattr(
+        history_store,
+        "get_longitudinal_context",
+        lambda ticker, information_cutoff=None: '{"schema":"audited-test"}',
+    )
+    list(run_analysis_stream(AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-05",
+        selected_analysts=("market",),
+        report_dir=tmp_path / "reports",
+        run_id="runtime-longitudinal-context",
+    )))
+    assert seen["past_context"] == '{"schema":"audited-test"}'
 
 
 def test_run_analysis_stream_binds_and_resets_analysis_date(monkeypatch, tmp_path):
@@ -465,6 +506,31 @@ def test_run_analysis_once_returns_final_result(monkeypatch, tmp_path):
     assert result.final_state["final_trade_decision"] == "Hold"
     assert result.report_path is not None
     assert result.report_path.exists()
+
+
+def test_point_in_time_run_does_not_resolve_future_outcomes(monkeypatch, tmp_path):
+    from tradingagents.runtime import analysis_runner
+
+    resolved = []
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", FakeTradingAgentsGraph)
+    monkeypatch.setattr(
+        FakeTradingAgentsGraph,
+        "_resolve_pending_entries",
+        lambda self, ticker, as_of_date=None: resolved.append((ticker, as_of_date)),
+    )
+    result = run_analysis_once(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-05",
+            analysis_mode="point_in_time",
+            information_cutoff="2026-07-05T16:00:00-04:00",
+            selected_analysts=("market",),
+            report_dir=tmp_path / "reports",
+            run_id="historical-no-reflection",
+        )
+    )
+    assert result.decision_status == "validated"
+    assert resolved == []
 
 
 def test_run_analysis_once_returns_no_decision_for_review_required(monkeypatch):

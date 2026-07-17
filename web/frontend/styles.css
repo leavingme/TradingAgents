@@ -265,6 +265,77 @@ h1 {
 .status-dot.warning  { background: var(--accent-amber); }
 .status-dot.error    { background: var(--accent-red); }
 
+/* Run-level data quality notice */
+.data-quality-notice {
+  margin-bottom: 14px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--text-secondary);
+}
+
+.data-quality-notice details {
+  padding: 10px 14px;
+}
+
+.data-quality-notice summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.data-quality-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 50%;
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--accent-amber);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.data-quality-notice p {
+  margin: 9px 0 0 27px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.data-quality-notice ul {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0 27px;
+  padding: 0;
+  list-style: none;
+}
+
+.data-quality-notice li {
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(245, 158, 11, 0.18);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.data-quality-item-title {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.data-quality-item-meta,
+.data-quality-item-reason {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
 /* Meta chips */
 .run-meta {
   display: flex;
@@ -1067,6 +1138,8 @@ h2, .panel-title {
 
 .history-status.completed { color: var(--accent-green); background: rgba(16,185,129,0.12); }
 .history-status.data_degraded,
+.history-status.data_partial,
+.history-status.data_fallback,
 .history-status.data_unavailable { color: var(--accent-amber); background: rgba(245,158,11,0.12); }
 .history-status.running   { color: var(--accent-amber);  background: rgba(245,158,11,0.12); }
 .history-status.failed    { color: var(--accent-red);    background: rgba(239,68,68,0.12); }
@@ -1417,6 +1490,11 @@ h2, .panel-title {
 }
 
 @media (max-width: 640px) {
+  .data-quality-notice p,
+  .data-quality-notice ul {
+    margin-left: 0;
+  }
+
   .topbar {
     flex-direction: column;
     align-items: stretch;

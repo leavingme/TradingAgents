@@ -9,7 +9,11 @@ def test_web_config_store_persists_runtime_and_provider_settings(tmp_path):
 
     initial = store.load()
     assert initial["persisted"] is False
-    assert [row["id"] for row in initial["providers"]["social_data"]] == ["bird", "reddit"]
+    assert [row["id"] for row in initial["providers"]["social_data"]] == [
+        "bird",
+        "stocktwits_browser",
+        "reddit",
+    ]
     assert initial["providers"]["technical_indicators"][:3] == [
         {"id": "westock", "enabled": True},
         {"id": "longbridge_mcp", "enabled": True},
@@ -38,6 +42,7 @@ def test_web_config_store_persists_runtime_and_provider_settings(tmp_path):
     assert saved["providers"]["social_data"] == [
         {"id": "reddit", "enabled": True},
         {"id": "bird", "enabled": False},
+        {"id": "stocktwits_browser", "enabled": False},
     ]
     assert WebConfigStore(path).load() == saved
 
@@ -96,6 +101,27 @@ def test_web_config_store_migrates_legacy_default_indicator_chain(tmp_path):
         {"id": "longbridge_mcp", "enabled": True},
     ]
     assert {row["id"]: row["enabled"] for row in indicators}["longbridge"] is False
+
+
+def test_web_config_store_migrates_legacy_default_social_chain(tmp_path):
+    path = tmp_path / "legacy-social.json"
+    path.write_text(json.dumps({
+        "settings": {},
+        "providers": {
+            "social_data": [
+                {"id": "bird", "enabled": True},
+                {"id": "reddit", "enabled": True},
+            ],
+        },
+    }))
+
+    social = WebConfigStore(path).load()["providers"]["social_data"]
+
+    assert social == [
+        {"id": "bird", "enabled": True},
+        {"id": "stocktwits_browser", "enabled": True},
+        {"id": "reddit", "enabled": True},
+    ]
 
 
 def test_web_config_api_round_trip(monkeypatch, tmp_path):

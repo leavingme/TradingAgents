@@ -1,0 +1,14 @@
+[Unit]
+Description=TradingAgents post-close scheduled analyses
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/data/workspace/TradingAgents
+ExecStart=/usr/bin/zsh -lc 'source /home/ubuntu/.zshrc; exec /data/workspace/TradingAgents/venv/bin/python3.12 /data/workspace/TradingAgents/scripts/daily_analysis.py run'
+TimeoutStartSec=infinity
+Nice=10
+
+[Install]
+WantedBy=default.target

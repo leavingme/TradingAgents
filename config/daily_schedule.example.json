@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "max_attempts_per_date": 2,
+  "retry_after_minutes": 60,
+  "stale_active_after_minutes": 360,
+  "targets": [
+    {
+      "symbol": "NVDA",
+      "asset_type": "stock",
+      "timezone": "America/New_York",
+      "run_after": "16:30",
+      "architecture_version": "2026-07-17.2",
+      "longitudinal_context_mode": "research_and_portfolio",
+      "weekdays": [0, 1, 2, 3, 4],
+      "selected_analysts": ["market", "social", "news", "fundamentals"]
+    }
+  ]
+}

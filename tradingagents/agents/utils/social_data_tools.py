@@ -20,3 +20,23 @@ def get_social_posts(
             route_to_vendor("get_social_posts", ticker, start_date, end_date)
         )
     })
+
+
+@tool
+def get_stocktwits_messages(
+    ticker: Annotated[str, "Ticker symbol"],
+    start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
+    end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+    **kwargs,
+) -> str:
+    """Retrieve recent StockTwits messages and sentiment for a ticker.
+
+    Returns validated bullish/bearish labels and recent messages with timestamps.
+    """
+    return render_untrusted_payload({
+        "stocktwits": render_social_feed(
+            route_to_vendor(
+                "get_stocktwits_messages", ticker, start_date, end_date
+            )
+        )
+    })

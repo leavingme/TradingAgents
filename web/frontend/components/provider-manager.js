@@ -2,13 +2,14 @@ const STORAGE_KEY = 'tradingagents.web.providers';
 const LEGACY_CORE_DEFAULT = ['westock', 'longbridge_mcp', 'longbridge', 'alpha_vantage'];
 const LEGACY_NEWS_DEFAULT = ['westock', 'duckduckgo', 'alpha_vantage'];
 const LEGACY_TECHNICAL_DEFAULT = ['longbridge_mcp', 'longbridge', 'westock'];
+const LEGACY_SOCIAL_DEFAULT = ['bird', 'reddit'];
 
 const CATEGORY_VENDORS = {
   core_stock_apis: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   technical_indicators: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   fundamental_data: ['longbridge_mcp', 'longbridge', 'westock', 'alpha_vantage'],
   news_data: ['longbridge_mcp', 'longbridge', 'westock', 'duckduckgo', 'alpha_vantage'],
-  social_data: ['bird', 'reddit'],
+  social_data: ['bird', 'stocktwits_browser', 'reddit'],
   macro_data: ['fred'],
   prediction_markets: ['polymarket'],
 };
@@ -22,6 +23,7 @@ const PROVIDER_META = {
   fred: { name: 'FRED' },
   polymarket: { name: 'Polymarket' },
   bird: { name: 'Bird (X/Twitter)' },
+  stocktwits_browser: { name: 'StockTwits (Browser JSON)' },
   reddit: { name: 'Reddit', verifiable: false },
 };
 
@@ -30,7 +32,7 @@ const FALLBACK_DEFAULTS = {
   technical_indicators: 'westock, longbridge_mcp',
   fundamental_data: 'longbridge_mcp, longbridge, westock',
   news_data: 'longbridge_mcp, longbridge, westock, duckduckgo, alpha_vantage',
-  social_data: 'bird, reddit',
+  social_data: 'bird, stocktwits_browser, reddit',
   macro_data: 'fred',
   prediction_markets: 'polymarket',
 };
@@ -93,6 +95,16 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
       saved.social_data.push({ id: 'reddit', enabled: true });
     }
     const defaults = configDefaults()?.data_vendors || FALLBACK_DEFAULTS;
+    if (Array.isArray(saved?.social_data)) {
+      const enabledSocialIds = saved.social_data
+        .filter(row => row?.enabled !== false)
+        .map(row => row?.id);
+      const isLegacySocialDefault = enabledSocialIds.length === LEGACY_SOCIAL_DEFAULT.length
+        && enabledSocialIds.every((id, index) => id === LEGACY_SOCIAL_DEFAULT[index]);
+      if (isLegacySocialDefault) {
+        saved.social_data = parseDefaults('social_data', defaults.social_data);
+      }
+    }
     if (Array.isArray(saved?.news_data)) {
       const enabledNewsIds = saved.news_data
         .filter(row => row?.enabled !== false)

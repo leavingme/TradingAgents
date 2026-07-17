@@ -51,6 +51,10 @@ class AgentState(MessagesState):
     trade_date: Annotated[str, "What date we are trading at"]
     verified_market_snapshot: Annotated[dict, "Server-generated trusted market inputs"]
     trade_risk_policy: Annotated[dict, "Server-owned executable risk limits"]
+    longitudinal_context_mode: Annotated[
+        str,
+        "Server-owned audited outcome injection topology",
+    ]
 
     sender: Annotated[str, "Agent that sent this message"]
 
@@ -76,4 +80,7 @@ class AgentState(MessagesState):
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
     decision_status: Annotated[str, "validated, review_required, or unavailable"]
-    past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
+    past_context: Annotated[
+        str,
+        "Audited SQLite fixed-horizon outcomes injected at run start",
+    ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import os
 import secrets
@@ -169,6 +170,15 @@ async def get_env_status():
         "configured": True,
         "required": False,
     }
+    data_vendors["stocktwits_browser"] = {
+        "env_var": "playwright + google-chrome/chromium",
+        "configured": importlib.util.find_spec("playwright") is not None
+        and (
+            shutil.which("google-chrome") is not None
+            or shutil.which("chromium") is not None
+        ),
+        "required": True,
+    }
     # 5. Polymarket, DuckDuckGo, and Westock do not require credentials
     for v in ["polymarket", "duckduckgo", "westock"]:
         data_vendors[v] = {
@@ -252,7 +262,22 @@ async def stream_run_events(run_id: str):
             while replay_index < len(current.events):
                 event = current.events[replay_index]
                 replay_index += 1
-                yield _sse(event.type, event.to_dict())
+                payload = event.to_dict()
+                if (
+                    event.type in {"run_completed", "error"}
+                    and isinstance(payload.get("content"), dict)
+                ):
+                    # Vendor health is derived from the append-only ledger and
+                    # may gain richer summary fields after an older terminal
+                    # event was persisted. Replay the current canonical summary
+                    # so refresh/deep-link views cannot overwrite the Run API's
+                    # data with a stale embedded snapshot.
+                    payload["content"] = {
+                        **payload["content"],
+                        "data_status": current.data_status,
+                        "vendor_summary": current.vendor_summary,
+                    }
+                yield _sse(event.type, payload)
 
             if current.status in (
                 "completed", "review_required", "unavailable", "failed", "cancelled"
@@ -276,6 +301,23 @@ async def get_run_vendor_calls(run_id: str):
     from tradingagents.runtime import history_store
 
     return history_store.get_vendor_calls(run_id)
+
+
+@app.get("/api/evaluations")
+async def get_decision_evaluations(ticker: str | None = None, limit: int = 1000):
+    """Return immutable fixed-horizon outcomes and architecture rollups."""
+    from tradingagents.evaluation import architecture_rollups
+    from tradingagents.runtime import history_store
+
+    bounded_limit = max(1, min(limit, 5000))
+    evaluations = history_store.list_decision_evaluations(
+        ticker=ticker,
+        limit=bounded_limit,
+    )
+    return {
+        "evaluations": evaluations,
+        "rollups": architecture_rollups(evaluations),
+    }
 
 
 @app.get("/api/runs/{run_id}/report", response_class=PlainTextResponse)

@@ -106,10 +106,23 @@ def test_reddit_social_setting_controls_sentiment_prefetch(monkeypatch):
     assert sentiment_analyst._social_source_enabled("reddit") is False
 
 
-def test_stocktwits_default_block_does_not_claim_live_data():
+def test_stocktwits_browser_setting_controls_sentiment_prefetch(monkeypatch):
     from tradingagents.agents.analysts import sentiment_analyst
 
-    block = sentiment_analyst._stocktwits_disabled_block()
+    monkeypatch.setattr(
+        sentiment_analyst,
+        "get_config",
+        lambda: {
+            "data_vendors": {
+                "social_data": "bird, stocktwits_browser, reddit"
+            }
+        },
+    )
+    assert sentiment_analyst._social_source_enabled("stocktwits_browser") is True
 
-    assert block.startswith("<StockTwits disabled:")
-    assert "browser challenge" in block
+    monkeypatch.setattr(
+        sentiment_analyst,
+        "get_config",
+        lambda: {"data_vendors": {"social_data": "bird, reddit"}},
+    )
+    assert sentiment_analyst._social_source_enabled("stocktwits_browser") is False

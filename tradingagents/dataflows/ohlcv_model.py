@@ -93,8 +93,39 @@ def append_ohlcv_audit(cache_dir: str, cache_key: str, batch: OHLCVBatch) -> Non
         "bar_count": len(batch.bars),
         "first_trading_date": batch.bars[0].trading_date if batch.bars else None,
         "last_trading_date": batch.bars[-1].trading_date if batch.bars else None,
+        "trading_dates": [bar.trading_date for bar in batch.bars],
         "raw_timestamps": [bar.raw_timestamp for bar in batch.bars],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def resolve_ohlcv_source_id(
+    cache_dir: str,
+    cache_key: str,
+    trading_date: str,
+) -> str | None:
+    """Resolve one cached bar to an exact audited vendor batch."""
+    path = Path(cache_dir) / "ohlcv_audit.jsonl"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            record = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if record.get("cache_key") != cache_key:
+            continue
+        # Older range-only records cannot prove that a particular session was
+        # present, so they are intentionally ineligible for evaluation.
+        if trading_date not in (record.get("trading_dates") or []):
+            continue
+        vendor = record.get("vendor")
+        batch_id = record.get("batch_id")
+        if not vendor or not batch_id:
+            continue
+        return f"ohlcv:{vendor}:{batch_id}:{trading_date}"
+    return None

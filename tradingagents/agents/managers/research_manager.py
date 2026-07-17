@@ -19,6 +19,20 @@ def create_research_manager(llm):
     def research_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)
         history = state["investment_debate_state"].get("history", "")
+        longitudinal_context = (
+            state.get("past_context", "")
+            if state.get("longitudinal_context_mode") == "research_and_portfolio"
+            else ""
+        )
+        calibration = (
+            "\n\n**Audited Prior Fixed-Horizon Outcomes (JSON):**\n"
+            f"{longitudinal_context}\n"
+            "Use these only to calibrate recurring strengths or failure modes. "
+            "They do not prove causality, may reflect a different market regime, "
+            "and cannot authorize any entry, stop, target, or position value."
+            if longitudinal_context
+            else ""
+        )
 
         investment_debate_state = state["investment_debate_state"]
 
@@ -40,7 +54,7 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 ---
 
 **Debate History:**
-{history}""" + get_language_instruction()
+{history}{calibration}""" + get_language_instruction()
 
         investment_plan = invoke_structured_or_freetext(
             structured_llm,

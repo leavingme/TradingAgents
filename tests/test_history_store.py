@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pathlib import Path
 from tradingagents.runtime import AnalysisRequest, run_analysis_once, history_store, RunHistoryStore
@@ -217,17 +219,34 @@ def test_vendor_summary_distinguishes_fallback_and_unavailable(tmp_path: Path):
     assert summary["data_status"] == "degraded"
     assert summary["fallback_domains"] == ["core_stock_apis"]
     assert summary["unavailable_domains"] == ["news_data"]
+    assert summary["partially_available_domains"] == []
     assert summary["attempt_count"] == 3
     assert summary["trajectories"] == [
         {
             "call_id": "fallback-call", "category": "core_stock_apis",
             "method": "get_stock_data", "agent": "Market Analyst", "symbol": "NVDA",
             "status": "degraded", "selected_vendor": "fallback", "attempt_count": 2,
+            "attempts": [
+                {
+                    "attempt": 1, "vendor": "primary", "status": "rate_limited",
+                    "selected": False, "error_type": "VendorRateLimitError",
+                    "error_detail": "HTTP 429",
+                },
+                {
+                    "attempt": 2, "vendor": "fallback", "status": "available",
+                    "selected": True, "error_type": None, "error_detail": None,
+                },
+            ],
         },
         {
             "call_id": "missing-call", "category": "news_data", "method": "get_news",
             "agent": "Market Analyst", "symbol": "NVDA", "status": "unavailable",
             "selected_vendor": None, "attempt_count": 1,
+            "attempts": [{
+                "attempt": 1, "vendor": "only", "status": "no_data",
+                "selected": False, "error_type": "NoMarketDataError",
+                "error_detail": "no articles before cutoff",
+            }],
         },
     ]
 
@@ -249,4 +268,83 @@ def test_vendor_summary_treats_all_available_supporting_call_as_available():
 
     assert summary["data_status"] == "available"
     assert summary["unavailable_domains"] == []
+    assert summary["partially_available_domains"] == []
     assert summary["trajectories"] == []
+
+
+def test_vendor_summary_reports_mixed_domain_as_partial_not_unavailable():
+    calls = [
+        {
+            "call_id": "prediction-fed", "attempt": 1, "vendor": "polymarket",
+            "category": "prediction_markets", "method": "get_prediction_markets",
+            "agent": "News Analyst", "symbol": "Fed rate cut 2026",
+            "status": "available", "selected": True,
+            "error_type": None, "error_detail": None,
+        },
+        {
+            "call_id": "prediction-earnings", "attempt": 1,
+            "vendor": "polymarket", "category": "prediction_markets",
+            "method": "get_prediction_markets", "agent": "News Analyst",
+            "symbol": "NVDA Nvidia earnings", "status": "invalid",
+            "selected": False, "error_type": "NoMarketDataError",
+            "error_detail": "no markets passed expiry validation",
+        },
+    ]
+
+    summary = summarize_vendor_calls(calls)
+
+    assert summary["data_status"] == "degraded"
+    assert summary["partially_available_domains"] == ["prediction_markets"]
+    assert summary["unavailable_domains"] == []
+    assert summary["trajectories"][0]["symbol"] == "NVDA Nvidia earnings"
+    assert summary["trajectories"][0]["attempts"] == [{
+        "attempt": 1, "vendor": "polymarket", "status": "invalid",
+        "selected": False, "error_type": "NoMarketDataError",
+        "error_detail": "no markets passed expiry validation",
+    }]
+
+
+def test_longitudinal_context_is_structured_audited_and_cutoff_safe(tmp_path):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    store.create_run(
+        "evaluated-nvda", "NVDA", "2026-07-01", "stock", ["market"],
+        "minimax-cn", 1, architecture_version="baseline",
+    )
+    store.add_decision_evaluation({
+        "run_id": "evaluated-nvda",
+        "horizon_sessions": 5,
+        "ticker": "NVDA",
+        "analysis_date": "2026-07-01",
+        "rating": "Buy",
+        "benchmark": "SPY",
+        "entry_date": "2026-07-01",
+        "exit_date": "2026-07-08",
+        "stock_entry_close": 100.0,
+        "stock_exit_close": 105.0,
+        "benchmark_entry_close": 500.0,
+        "benchmark_exit_close": 510.0,
+        "stock_entry_source_id": "ohlcv:test:stock-entry:2026-07-01",
+        "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-08",
+        "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-01",
+        "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-08",
+        "raw_return": 0.05,
+        "benchmark_return": 0.02,
+        "alpha_return": 0.03,
+        "exposure": 1.0,
+        "directional_hit": True,
+        "score": 0.03,
+        "architecture_version": "baseline",
+        "evaluated_at": "2026-07-10T20:00:00+00:00",
+    })
+
+    assert store.get_longitudinal_context(
+        "NVDA", information_cutoff="2026-07-10T15:59:59-04:00"
+    ) == ""
+    context = json.loads(store.get_longitudinal_context(
+        "NVDA", information_cutoff="2026-07-10T16:00:01-04:00"
+    ))
+    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v1"
+    assert context["same_symbol_outcomes"][0]["run_id"] == "evaluated-nvda"
+    assert context["same_symbol_outcomes"][0]["directional_hit"] is True
+    assert "reflection" not in context["same_symbol_outcomes"][0]
+    assert context["architecture_rollups"][0]["sample_count"] == 1

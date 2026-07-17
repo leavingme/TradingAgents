@@ -244,6 +244,58 @@ def test_stream_run_events_replays_stored_events(monkeypatch):
     assert '"text": "hello"' in body
 
 
+def test_stream_terminal_event_uses_current_vendor_summary(monkeypatch):
+    from web.backend import main
+
+    def fake_start_background_run(run_id, request, task_store):
+        task_store.mark_started(run_id)
+        task_store.add_event(run_id, AnalysisEvent(
+            type="run_completed",
+            run_id=run_id,
+            content={
+                "decision": "Hold",
+                "decision_status": "validated",
+                "data_status": "degraded",
+                "vendor_summary": {
+                    "data_status": "degraded",
+                    "unavailable_domains": ["prediction_markets"],
+                },
+            },
+        ))
+        record = task_store.get(run_id)
+        record.vendor_summary = {
+            "data_status": "degraded",
+            "partially_available_domains": ["prediction_markets"],
+            "unavailable_domains": [],
+            "trajectories": [{
+                "symbol": "NVDA Nvidia earnings",
+                "status": "unavailable",
+                "attempts": [{
+                    "vendor": "polymarket",
+                    "status": "invalid",
+                    "error_detail": "expired market",
+                }],
+            }],
+        }
+        task_store.mark_finished(run_id, "completed")
+
+    monkeypatch.setattr(main, "start_background_run", fake_start_background_run)
+
+    async def exercise():
+        created = await main.create_run(
+            main.RunCreateRequest(ticker="NVDA", analysis_date="2026-07-05")
+        )
+        response = await main.stream_run_events(created["run_id"])
+        chunks = [chunk async for chunk in response.body_iterator]
+        return "".join(chunks)
+
+    body = asyncio.run(exercise())
+
+    assert '"partially_available_domains": ["prediction_markets"]' in body
+    assert '"vendor": "polymarket"' in body
+    assert '"error_detail": "expired market"' in body
+
+
 def test_stream_run_events_does_not_repeat_replayed_live_event(monkeypatch):
     from web.backend import main
 
@@ -604,3 +656,56 @@ def test_manual_vendor_verification_endpoint(monkeypatch):
     result = asyncio.run(main.verify_data_vendor("news_data", "westock"))
 
     assert result == expected
+
+
+def test_evaluation_endpoint_returns_rows_and_rollups():
+    from tradingagents.runtime import history_store
+    from web.backend import main
+
+    history_store.create_run(
+        "evaluated-run",
+        "NVDA",
+        "2026-07-01",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        architecture_version="baseline",
+    )
+    history_store.add_decision_evaluation({
+        "run_id": "evaluated-run",
+        "horizon_sessions": 5,
+        "ticker": "NVDA",
+        "analysis_date": "2026-07-01",
+        "rating": "Buy",
+        "benchmark": "SPY",
+        "entry_date": "2026-07-01",
+        "exit_date": "2026-07-08",
+        "stock_entry_close": 100.0,
+        "stock_exit_close": 104.0,
+        "benchmark_entry_close": 500.0,
+        "benchmark_exit_close": 505.0,
+        "stock_entry_source_id": "ohlcv:test:stock-entry:2026-07-01",
+        "stock_exit_source_id": "ohlcv:test:stock-exit:2026-07-08",
+        "benchmark_entry_source_id": "ohlcv:test:bench-entry:2026-07-01",
+        "benchmark_exit_source_id": "ohlcv:test:bench-exit:2026-07-08",
+        "raw_return": 0.04,
+        "benchmark_return": 0.01,
+        "alpha_return": 0.03,
+        "exposure": 1.0,
+        "directional_hit": True,
+        "score": 0.03,
+        "architecture_version": "baseline",
+    })
+
+    response = asyncio.run(main.get_decision_evaluations(ticker="nvda", limit=50))
+    assert len(response["evaluations"]) == 1
+    assert response["rollups"] == [{
+        "architecture_version": "baseline",
+        "horizon_sessions": 5,
+        "sample_count": 1,
+        "directional_hit_rate": 1.0,
+        "mean_raw_return": 0.04,
+        "mean_alpha_return": 0.03,
+        "mean_score": 0.03,
+    }]

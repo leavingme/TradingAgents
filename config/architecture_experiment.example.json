@@ -1,0 +1,28 @@
+{
+  "enabled": false,
+  "max_attempts_per_date": 1,
+  "retry_after_minutes": 60,
+  "stale_active_after_minutes": 360,
+  "targets": [
+    {
+      "symbol": "NVDA",
+      "asset_type": "stock",
+      "timezone": "America/New_York",
+      "run_after": "16:30",
+      "weekdays": [0, 1, 2, 3, 4],
+      "architecture_version": "pm-only-baseline-v1",
+      "longitudinal_context_mode": "portfolio_only",
+      "selected_analysts": ["market", "social", "news", "fundamentals"]
+    },
+    {
+      "symbol": "NVDA",
+      "asset_type": "stock",
+      "timezone": "America/New_York",
+      "run_after": "16:30",
+      "weekdays": [0, 1, 2, 3, 4],
+      "architecture_version": "rm-pm-context-challenger-v1",
+      "longitudinal_context_mode": "research_and_portfolio",
+      "selected_analysts": ["market", "social", "news", "fundamentals"]
+    }
+  ]
+}

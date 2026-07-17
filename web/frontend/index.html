@@ -8,7 +8,7 @@
     <!-- Vendored so a local refresh never waits for an external CDN. -->
     <script src="/static/vendor/marked-15.0.12.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css?v=20260714-vendor-trajectory" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260716-data-quality-details" />
   </head>
   <body>
     <!-- Ambient background orbs -->
@@ -67,6 +67,17 @@
             </div>
           </div>
         </header>
+
+        <section id="dataQualityNotice" class="data-quality-notice" hidden aria-live="polite">
+          <details id="dataQualityDetails" open>
+            <summary>
+              <span class="data-quality-icon" aria-hidden="true">!</span>
+              <span id="dataQualityTitle">Partial evidence missing</span>
+            </summary>
+            <p id="dataQualityDescription"></p>
+            <ul id="dataQualityList"></ul>
+          </details>
+        </section>
 
         <!-- Control band (run form) -->
         <section id="runControls" class="control-band" aria-label="Run controls">
@@ -912,6 +923,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260714-vendor-trajectory" type="module"></script>
+    <script src="/static/app.js?v=20260716-data-quality-details" type="module"></script>
   </body>
 </html>

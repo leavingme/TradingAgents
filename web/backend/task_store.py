@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from tradingagents.runtime import AnalysisEvent, history_store
+from tradingagents.architecture import AGENT_ARCHITECTURE_VERSION
 from .models import RunCreateRequest, RunStatus
 
 def _now() -> str:
@@ -139,6 +140,7 @@ class TaskStore:
                 research_depth=request.research_depth,
                 status=record.status,
                 created_at=record.created_at,
+                architecture_version=AGENT_ARCHITECTURE_VERSION,
             )
             return record
 

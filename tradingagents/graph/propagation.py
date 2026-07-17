@@ -22,10 +22,12 @@ class Propagator:
         asset_type: str = "stock",
         past_context: str = "",
         instrument_context: str = "",
+        longitudinal_context_mode: str = "research_and_portfolio",
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph.
 
-        ``instrument_context`` is the deterministic ticker-identity string
+        ``past_context`` contains deterministic audited outcome JSON from the
+        canonical history store. ``instrument_context`` is the ticker-identity string
         resolved once at run start (see
         ``TradingAgentsGraph.resolve_instrument_context``). When empty, agents
         fall back to ticker-only context via
@@ -38,6 +40,7 @@ class Propagator:
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
             "past_context": past_context,
+            "longitudinal_context_mode": longitudinal_context_mode,
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",

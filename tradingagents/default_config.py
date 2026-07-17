@@ -77,9 +77,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Pending entries are never pruned. None disables rotation entirely.
     "memory_log_max_entries": None,
     # LLM settings
-    "llm_provider": "openai",
-    "deep_think_llm": "gpt-5.5",
-    "quick_think_llm": "gpt-5.4-mini",
+    "llm_provider": "minimax-cn",
+    "deep_think_llm": "MiniMax-M3",
+    "quick_think_llm": "MiniMax-M3",
     # When None, each provider's client falls back to its own default endpoint
     # (api.openai.com for OpenAI, generativelanguage.googleapis.com for Gemini, ...).
     # The CLI overrides this per provider when the user picks one. Keeping a
@@ -105,6 +105,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
     "max_recur_limit": 100,
+    # Server-owned topology for audited longitudinal outcome evidence.
+    # ``portfolio_only`` is retained as the controlled shadow baseline;
+    # production injects the same evidence into Research Manager and PM.
+    "longitudinal_context_mode": "research_and_portfolio",
     # Server-owned executable risk policy. These values are never accepted
     # from LLM structured output or untrusted per-run config overrides.
     "trade_risk_policy": {
@@ -142,7 +146,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "technical_indicators": "westock, longbridge_mcp",
         "fundamental_data": "longbridge_mcp, longbridge, westock",
         "news_data": "longbridge_mcp, longbridge, westock, duckduckgo, alpha_vantage",
-        "social_data": "bird, reddit",
+        "social_data": "bird, stocktwits_browser, reddit",
         "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },

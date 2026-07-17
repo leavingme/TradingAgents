@@ -5,11 +5,11 @@
 
 ## 当前结论
 
-- 截至 2026-07-15，没有未完成的明确 P0。
+- 截至 2026-07-17，收盘后每日运行目标新增后，发现并修复了“5 日结果在第 1 日提前结算”与历史复现写入事后反思两个 P0 正确性缺陷；没有仍未处理的明确 P0。
 - 当前排序遵循 `AGENTS.md` 的四级原则：**安全与正确性 → 运行可靠性/成本 → 核心研究能力 → 高复杂度扩展**。
 - 排名是执行顺序，不是功能价值评分。默认启用且可能影响决策的链路，优先于尚未开放的未来能力。
-- 第 1–5 项已完成；下一项是第 6 项仓位引擎与交易校验器解耦。原第 6 项
-  “运行上下文压缩”经讨论后暂缓并移至路线末尾，未来基于单 Agent 单次请求审计再议。
+- 第 1–5 项已完成；第 6 项收盘后每日运行与固定期限结果闭环正在实施，第 7 项为
+  连续多日评估和 agent 架构实验门禁。原“运行上下文压缩”继续暂缓并置于路线末尾。
 
 ## 路线项权威顺序与状态
 
@@ -20,16 +20,18 @@
 | 3 | 已完成（2026-07-14） | 新闻、宏观校验覆盖审计 | 已逐项核对正文、发布时间、观察期、单位、revision/vintage、`source_id` 与 cutoff，并补齐缺口。 |
 | 4 | 已完成（2026-07-14） | SSE / report-section 节流 | 已按 run + section 合并高频中间版本，并消除 Web bridge 重复持久化和 SSE replay 重复发送。 |
 | 5 | 已完成（2026-07-14） | 技术指标批量获取 | 已实现单次规范 OHLCV、本地批量计算、批量 MCP fallback 和逐项确定性校验。 |
-| 6 | 未完成 | 仓位引擎与交易校验器解耦 | 分离建议仓位计算与服务端风险硬门禁；现有风险政策已 fail-closed，因此不是 P0。 |
-| 7 | 未完成 | Longbridge 前瞻研究数据域 | 接入一致预期、EPS、财务日历、评级、filings 和空头数据。 |
-| 8 | 未完成 | 跨市场 Session Engine | 正确建模交易所时区、DST、节假日、半日市及盘前/盘中/盘后。 |
-| 9 | 未完成 | 空头与衍生品交易校验 | 在开放做空或期权前建立独立方向、收益结构和 Greeks 风险门禁。 |
-| 10 | 未完成 | Longbridge 只读账户风险输入 | 用真实持仓、购买力、保证金和汇率约束仓位，同时坚持最小 OAuth 权限。 |
-| 11 | 未完成 | Longbridge 基本面与持仓拥挤增强 | 增加业务分部、估值、持有人、资金流和微观结构证据。 |
-| 12 | 未完成 | Longbridge 独立宏观 vendor | 增加 FRED 之外的结构化宏观来源，优先级低于现有宏观校验闭环。 |
-| 13 | 未完成 | 独立 Reviewer 模型 | 增强工程复盘，但只能作为建议层，不能掌握关闭权。 |
-| 14 | 未完成 | 衍生品数据与选股能力 | 必须等待衍生品风险模型与 universe 阶段完成。 |
-| 15 | 暂缓（最低优先级） | 运行上下文压缩（原第 6 项） | 累计 token 高不等于单 Agent 上下文重复；跨角色共享证据和跨轮携带历史属于辩论机制，未来只按单 Agent 单次请求审计后再议。 |
+| 6 | 进行中 | 收盘后每日运行与固定期限结果闭环 | 用户明确要求；无人值守运行会放大模型配置漂移、重复启动、短期限误结算和前视副作用，必须先做可靠性与正确性门禁。 |
+| 7 | 进行中 | 连续多日评估与 agent 架构实验门禁 | 结构化保存结果、滚动指标和架构版本；无配对证据时禁止自动晋升 prompt 或拓扑。 |
+| 8 | 未完成 | 仓位引擎与交易校验器解耦 | 分离建议仓位计算与服务端风险硬门禁；现有风险政策已 fail-closed，因此不是 P0。 |
+| 9 | 未完成 | Longbridge 前瞻研究数据域 | 接入一致预期、EPS、财务日历、评级、filings 和空头数据。 |
+| 10 | 未完成 | 跨市场 Session Engine | 正确建模交易所时区、DST、节假日、半日市及盘前/盘中/盘后。 |
+| 11 | 未完成 | 空头与衍生品交易校验 | 在开放做空或期权前建立独立方向、收益结构和 Greeks 风险门禁。 |
+| 12 | 未完成 | Longbridge 只读账户风险输入 | 用真实持仓、购买力、保证金和汇率约束仓位，同时坚持最小 OAuth 权限。 |
+| 13 | 未完成 | Longbridge 基本面与持仓拥挤增强 | 增加业务分部、估值、持有人、资金流和微观结构证据。 |
+| 14 | 未完成 | Longbridge 独立宏观 vendor | 增加 FRED 之外的结构化宏观来源，优先级低于现有宏观校验闭环。 |
+| 15 | 未完成 | 独立 Reviewer 模型 | 增强工程复盘，但只能作为建议层，不能掌握关闭权。 |
+| 16 | 未完成 | 衍生品数据与选股能力 | 必须等待衍生品风险模型与 universe 阶段完成。 |
+| 17 | 暂缓（最低优先级） | 运行上下文压缩 | 累计 token 高不等于单 Agent 上下文重复；跨角色共享证据和跨轮携带历史属于辩论机制，未来只按单 Agent 单次请求审计后再议。 |
 
 ## 执行计划与验收条件
 
@@ -47,6 +49,7 @@
   - 降级、`review_required` 和 `unavailable` 不得显示为普通成功或投资 Hold。
   - 刷新和历史回放必须从持久化事件恢复相同的失败与 fallback 轨迹。
   - 完成证据：新增一等 `vendor_attempt` runtime 事件，逐条携带数据域、`call_id`、attempt、vendor、状态、错误类型/脱敏详情及是否选中；事件与 append-only ledger 使用同一已落盘记录。终态事件和 Run API 通过确定性汇总分别暴露 `decision_status` 与 `data_status=available|degraded|unavailable|not_observed`，并列出 fallback/unavailable 数据域和异常轨迹。Web 实时流、历史 SSE replay 和运行历史均显示降级状态，不再把降级运行只呈现为普通完成或 Hold。相关 runtime/history/vendor/Web 回归测试 80 项及项目 Web/CLI 快速门禁 61 项通过，前端语法与模块测试通过；长期 Web 服务热加载后保持 active，真实 `/api/runs` 已从既有 SQLite ledger 恢复 `data_status=degraded` 和 `fundamental_data` 不可用轨迹。
+  - 2026-07-16 展示语义修复：同一数据域中成功与失败查询并存时归入 `partially_available_domains`，不再把整个能力误列为 `unavailable_domains`；异常轨迹携带逐次 vendor、状态、错误类型与脱敏详情。Web 实时完成、历史深链接和运行历史状态区分“部分证据缺失”与“已使用备用数据源”，并展示受影响主题、Agent、数据源路径及具体原因。
   - Langfuse 可作为可选的 OpenTelemetry/Langfuse span 镜像，用于跨运行查询和仪表盘；它不得替代 SQLite/runtime 权威事件链，也不得因采样、网络或外部服务故障阻断分析。接入时需显式创建 vendor span 或配置过滤，因为当前 Langfuse SDK 默认聚焦 LLM/GenAI span。
 
 - [x] **3. 新闻、宏观校验覆盖审计**
@@ -60,7 +63,7 @@
 
   - 最终提交前聚合回归覆盖 FRED、history、vendor 日期、新闻 citation、指标与交易门禁，共 114 项通过。
 
-### 第二阶段：运行可靠性/成本（4–5）
+### 第二阶段：运行可靠性/成本（4–7）
 
 - [x] **4. SSE / report-section 节流**
   - 按 run + section 合并高频中间更新，最终状态和最后一个 section 版本不得丢失。
@@ -74,51 +77,64 @@
   - 批量结果必须与现有逐项结果在约定容差内一致。
   - 完成证据：Market Analyst 的 `get_indicators` schema 改为一次接收最多 8 个指标，默认 westock/stockstats 路径只加载一次 canonical OHLCV、创建一个 stockstats frame 并逐项生成结构化 `IndicatorBatch`；同 symbol/date 的缓存填充增加 singleflight，避免并发 cache miss 击穿 Longbridge。router 对每条序列分别执行预热、日期、freshness、数值范围与 Close 相对范围 validator；本地部分失败时只把缺失集合合并为一次 Longbridge MCP 多 `plot()` `quant_run`，仍未解决的个别项才进入旧单项兼容 fallback，所有 batch 与 fallback vendor attempt 保持 run-scoped ledger 可见。基线 NVDA 运行曾产生 10 次技术指标调用和 26 次 Longbridge OHLCV 调用，同秒最多 6 个 OHLCV 请求；新默认 live probe 以一次 batch 在 1.2 秒内返回 8 个有效 section，真实 MCP probe 以一次请求返回 RSI+ATR 并通过 `2026-07-13` 最新交易日校验。批量与旧逐项结果在 `1e-12` 相对容差内一致；指标/OHLCV/router/Web 相关测试 97 项通过、1 项显式 live provider 测试按环境跳过，项目 Web/CLI 门禁 101 项通过，前端语法与 Python 编译检查通过。
 
-### 第三阶段：核心研究能力（6–8）
+- [ ] **6. 收盘后每日运行与固定期限结果闭环**
+  - 用户级 systemd timer 每 15 分钟检查各标的交易所本地 `run_after`，实际执行仍通过 canonical runtime；配置、unit 和日志不得包含凭据。
+  - 同 symbol + market-data date 幂等；活动/成功/人工复核结果不重跑，基础设施失败有延迟、次数上限和跨进程锁，防止并发与成本失控。
+  - 自动运行复用服务端 Web 的 LLM、研究深度、输出语言和 vendor 顺序，避免 skill worker 使用不兼容默认模型。
+  - 固定 5-session 结果只在决策日与之后第 5 个共同交易日均存在时结算；1–4 日保持 pending。`point_in_time` 禁止产生事后反思或结果写入。
+  - 当前证据：repo-native scheduler、systemd unit、NVDA 正式配置和运维文档已实现；用户级 timer 已 `enable --now`，每 15 分钟检查，正式 oneshot 在未到时段时以 `not_due`/exit 0 完成。canonical 默认已统一为 `minimax-cn` + `MiniMax-M3`，修复 skill worker 请求错误模型的问题。调度、history、runtime、Web、CLI、结构化 agent、社交 vendor、纵向评估和 OHLCV provenance 相关 277 项通过，前端模块/语法检查通过；Providers 桌面与精确 390×844 视口均无横向 overflow。关闭仍需首次实际收盘后运行证据。
 
-- [ ] **6. 仓位引擎与交易校验器解耦**
+- [ ] **7. 连续多日评估与 agent 架构实验门禁**
+  - `decision_evaluations` 以原始 run 为主键保存架构版本、固定 horizon、rating、benchmark、raw/benchmark/alpha return、方向命中和确定性 score；不得只依赖 Markdown 反思。
+  - 提供按架构版本和 horizon 的 sample count、hit rate、平均 return/alpha/score 聚合，并保留 CLI/API 查询。
+  - 架构 challenger 至少满足样本门槛；顺序实盘 cohort 受 regime 混杂，即使 point estimate 更好也只能 `review_required`，无配对 shadow 证据不得自动晋升或改写 prompt/agent 拓扑。
+  - 当前证据：结构化表、确定性评分、rollup、CLI 与 `/api/evaluations` 已实现；每条结果强制保存 entry/exit 日期、标的/基准四个收盘价和四个逐交易日 OHLCV stable source ID，旧 range-only provenance 不能冒充可审计结果。canonical runtime 已从 SQLite 构造 cutoff-safe 固定 schema JSON，统一注入 Research Manager 与 Portfolio Manager，不再依赖 LLM Markdown 反思。每个 run 保存有效 agent/model/topology manifest 与 SHA-256 fingerprint；比较器拒绝同版本混杂配置，只接受相同 ticker/date/horizon、entry/exit、四个收盘价及 raw/alpha 一致的成对 shadow，计算 score delta、hit-rate delta、标准误和 95% 下界，任何结果仍需人工复核。默认禁用的 PM-only baseline / RM+PM challenger 模板已提供，未在无预算授权下开启。长期 Web 服务此前已验证接口返回 200，空样本明确呈现为 0 而非伪造指标。关闭仍需累积至少一个真实 5-session 结果，并在用户批准成本后积累配对 shadow 样本。
+
+### 第三阶段：核心研究能力（8–10）
+
+- [ ] **8. 仓位引擎与交易校验器解耦**
   - `PositionSizingEngine` 负责固定风险、ATR 风险、波动率目标、分数凯利、账户权益和最大名义敞口下的建议仓位。
   - `TradePlanValidator` 独立重算并执行组合损失、集中度、购买力和账户限制硬门禁；LLM 不能提高服务端限制。
 
-- [ ] **7. Longbridge 前瞻研究数据域**
+- [ ] **9. Longbridge 前瞻研究数据域**
   - 接入 `consensus`、`forecast_eps`、`finance_calendar`、`institution_rating`、`filings`、`short_positions` 和 `short_trades`。
   - 建立包含 `as_of`、发布日期、事件日期、标的、币种、期间、稳定 `source_id` 和 vendor `call_id` 的统一模型与 validator。
   - 验证后分别提供给 Fundamentals、News、Bull/Bear 和 Risk Agent；当前快照不得泄漏到历史运行。
 
-- [ ] **8. 跨市场 Session Engine**
+- [ ] **10. 跨市场 Session Engine**
   - 使用权威交易日历建模交易所时区、DST、节假日、半日市和 `pre|regular|post` session。
   - 分别保存 `market_date`、`observed_at`、`published_at` 和 `available_at`；盘前盘后数据不得覆盖规范日 K。
   - A/H/ADR、汇率、换股比例和产业链映射只生成可审计只读证据；lead-lag 必须验证历史稳定性、流动性、点差、成本和可转换性，不得描述为无风险套利。
 
-### 第四阶段：高复杂度扩展（9–14）
+### 第四阶段：高复杂度扩展（11–16）
 
-- [ ] **9. 空头与衍生品交易校验**
+- [ ] **11. 空头与衍生品交易校验**
   - 新增显式 `side=long|short|flat`；Sell/Underweight 只代表减仓，不得隐式开空。
   - 空头股票验证 `target < entry < stop`；期权独立建模权利金、行权价、到期日、乘数、IV、Greeks 和非线性损益。
 
-- [ ] **10. Longbridge 只读账户风险输入**
+- [ ] **12. Longbridge 只读账户风险输入**
   - 以最小 OAuth 权限读取余额、持仓、保证金、购买力和汇率，并作为服务端风险政策输入。
   - 不向分析 Agent 暴露下单、撤单、改单、DCA、提醒或 Watchlist 写操作。
 
-- [ ] **11. Longbridge 基本面与持仓拥挤增强**
+- [ ] **13. Longbridge 基本面与持仓拥挤增强**
   - 逐项审计并接入业务分部、估值历史/同行、股东/基金持仓、内部人交易、资金流、交易统计、市场温度和异动。
   - 每项必须基于真实 schema 单独建立 adapter、模型和 validator，禁止依据工具描述批量生成。
 
-- [ ] **12. Longbridge 独立宏观 vendor**
+- [ ] **14. Longbridge 独立宏观 vendor**
   - 将 `macrodata` 与宏观事件日历注册为独立 vendor，映射到 `MacroSeries`。
   - 校验单位、观察期、发布日期和 cutoff；不得隐藏在 FRED 或其他 vendor 内部。
 
-- [ ] **13. 独立 Reviewer 模型**
+- [ ] **15. 独立 Reviewer 模型**
   - 可选 `review-model` 只读取不可变 execution evidence，输出带 event/vendor/source 引用的结构化 findings。
   - Reviewer 不得修改历史、直接关闭 finding 或决定 gate 通过；仍需人工确认和确定性验证。
 
-- [ ] **14. 衍生品数据与选股能力**
-  - option chain、IV、Greeks 必须等待第 9 项风险模型完成。
+- [ ] **16. 衍生品数据与选股能力**
+  - option chain、IV、Greeks 必须等待第 11 项风险模型完成。
   - screener、rank、top movers 必须等待独立 universe/选股阶段，不直接塞入现有单标的 Agent 工具集。
 
-### 暂缓议题：最低优先级（15）
+### 暂缓议题：最低优先级（17）
 
-- [ ] **15. 运行上下文压缩（原第 6 项，暂缓）**
+- [ ] **17. 运行上下文压缩（暂缓）**
   - 历史基准证据：NVDA depth=1 两次运行累计输入 token 为 254,861 和 252,244；
     该总量只证明运行成本较高，不能证明单个 Agent 收到了重复或无用上下文。
   - 讨论结论：不同角色读取相同 Analyst 证据，以及同一角色在后续轮次携带既有历史，
@@ -147,8 +163,8 @@
 
 - [x] 行情、技术指标和财务数据进入 Agent 前经过统一领域模型与确定性 validator。
 - [x] `NewsFeed`、`MacroSeries` 和 `SocialFeed` 已结构化；外部内容以 `untrusted_data` JSON 传输并清除提示注入控制文本。
-- [x] StockTwits 历史 keyless symbol stream 已因 Cloudflare browser challenge 从默认 Sentiment 路径退役；运行不再重复请求并产生 403。当前使用已验证的 Bird/X 与 Reddit，只有取得官方批准的服务端 API 和原始 schema 后才允许将 StockTwits 作为独立结构化 vendor 重新接入，禁止保存浏览器 challenge cookie 或抓取 HTML 绕过。
-  - 完成证据：官方旧 endpoint 的只读探针返回 HTTP 403、`cf-mitigated: challenge`；403 现在映射为明确且不可重试的 unavailable marker，Sentiment 默认只注入 disabled marker 而不发起网络请求。StockTwits/Sentiment/不可信内容相关测试 34 项通过。
+- [x] StockTwits 当前 symbol stream 已作为独立 `stocktwits_browser` vendor 接入默认 Sentiment 路径；无状态 Playwright/系统 Chrome 只读取 endpoint 原始 JSON，不保存 cookie、不抓取 HTML。原始消息直接映射 `SocialFeed`，经日期、去重、垃圾内容、标的、来源与 `information_cutoff` validator 后才渲染为 `untrusted_data`，所有尝试写入 run-scoped ledger；不支持快照的 `point_in_time` 运行 fail closed。
+  - 完成证据：NVDA 公共 JSON live probe 返回 30 条消息；结构化 adapter、validator、路由审计、历史时点关闭、Sentiment 预取与 Web 配置迁移均有针对性测试。Playwright 复用系统 `google-chrome`/`chromium`，不要求浏览器 cookie。
 - [x] OHLCV 采用 `OHLCVBatch` 写入契约、日期/OHLC 硬校验、原子缓存替换及 JSONL 溯源；盘中或日期漂移数据不能冒充规范日 K。
 - [x] 技术指标统一预热窗口和三年 calculation start；默认 Westock/stockstats，Longbridge MCP 为验证后 fallback。
 - [x] run-scoped vendor ledger 按 `run_id + call_id + attempt` 追加保存；审计落盘失败时禁止生成可执行报告。
@@ -159,6 +175,7 @@
 
 - [x] 可信 ATR、Close、market date 和 vendor `call_id` 由 verified snapshot 注入；LLM 不能提供权威风控输入。
 - [x] Buy/Overweight 交易计划结构化，收益风险比、ATR 距离和组合损失由代码重算；重复失败进入 `REVIEW_REQUIRED`。
+  - 完成证据：Research Manager 的非权威计划在 Trader 边界前确定性清除入场、止损、目标、期权和仓位数字；Trader schema 移除未经验证的自由文本 `position_sizing`，可执行数字只能进入服务器 validator 覆盖的专用字段。结构化决策与 runtime/Web 针对性回归共 133 项通过；MiniMax-M3 live 运行 `NVDA-e2c408b9cf6f` 以 `decision_status=validated` 完成。
 - [x] `validated|review_required|unavailable` 是一等状态；无有效决策不伪装成 Hold、不生成信号、不写绩效记忆。
 - [x] Web backend URL allowlist、路径/配置白名单、非 loopback bearer 认证、启动频率与并发限制已经完成。
 - [x] 模型 tool 参数 Schema 错误只允许一次受限纠正；vendor、认证、无数据和 validator 错误继续 fail closed。

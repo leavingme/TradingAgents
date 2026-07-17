@@ -95,6 +95,7 @@ except ImportError:
     get_longbridge_mcp_income_statement = _LBMCP_NONE
     get_longbridge_mcp_news = _LBMCP_NONE
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
+from .stocktwits_browser import fetch_stocktwits_feed as get_stocktwits_browser_feed
 from .westock import (
     get_balance_sheet as get_westock_balance_sheet,
     get_cashflow as get_westock_cashflow,
@@ -150,7 +151,7 @@ TOOLS_CATEGORIES = {
     },
     "social_data": {
         "description": "Ticker-specific social sentiment posts",
-        "tools": ["get_social_posts"],
+        "tools": ["get_social_posts", "get_stocktwits_messages"],
     },
     "macro_data": {
         "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
@@ -175,6 +176,7 @@ VENDOR_LIST = [
     "longbridge",
     "longbridge_mcp",
     "bird",
+    "stocktwits_browser",
 ]
 
 # Prediction markets remain optional enrichment. Macro observations are
@@ -248,6 +250,9 @@ VENDOR_METHODS = {
     "get_social_posts": {
         "bird": get_bird_social_posts,
     },
+    "get_stocktwits_messages": {
+        "stocktwits_browser": get_stocktwits_browser_feed,
+    },
     # macro_data
     "get_macro_indicators": {
         "fred": get_fred_macro_data,
@@ -282,7 +287,13 @@ def get_vendor(category: str, method: str = None) -> str:
 
 def _runtime_external_time_args(method: str, args: tuple) -> tuple:
     """Align current-information vendors with runtime temporal semantics."""
-    if method not in {"get_news", "get_global_news", "get_macro_indicators"}:
+    if method not in {
+        "get_news",
+        "get_global_news",
+        "get_macro_indicators",
+        "get_social_posts",
+        "get_stocktwits_messages",
+    }:
         return args
     from tradingagents.runtime.audit_context import (
         current_analysis_mode,
@@ -302,6 +313,12 @@ def _runtime_external_time_args(method: str, args: tuple) -> tuple:
     macro_end_date = cutoff.date()
     normalized = list(args)
     if method == "get_news" and len(normalized) >= 3:
+        requested_start = datetime.fromisoformat(str(normalized[1])).date()
+        requested_end = datetime.fromisoformat(str(normalized[2])).date()
+        window_days = max((requested_end - requested_start).days, 0)
+        normalized[1] = (news_end_date - timedelta(days=window_days)).isoformat()
+        normalized[2] = news_end_date.isoformat()
+    elif method in {"get_social_posts", "get_stocktwits_messages"} and len(normalized) >= 3:
         requested_start = datetime.fromisoformat(str(normalized[1])).date()
         requested_end = datetime.fromisoformat(str(normalized[2])).date()
         window_days = max((requested_end - requested_start).days, 0)
@@ -758,10 +775,26 @@ def route_to_vendor(method: str, *args, **kwargs):
                         ),
                     },
                 )()
-            elif method == "get_social_posts":
+            elif method in {"get_social_posts", "get_stocktwits_messages"}:
+                from tradingagents.runtime.audit_context import (
+                    current_analysis_mode,
+                    current_information_cutoff,
+                )
+                if current_analysis_mode() == "point_in_time":
+                    cutoff_value = current_information_cutoff()
+                    social_cutoff = datetime.fromisoformat(
+                        str(cutoff_value).replace("Z", "+00:00")
+                    )
+                else:
+                    social_cutoff = datetime.now(timezone.utc)
                 try:
                     normalized_result = validate_social_feed(
-                        result, str(args[1]), str(args[2])
+                        result,
+                        str(args[1]),
+                        str(args[2]),
+                        information_cutoff=social_cutoff,
+                        expected_source=vendor,
+                        expected_symbol=str(args[0]),
                     )
                 except (TypeError, ValueError) as exc:
                     raise NoMarketDataError(str(args[0]), detail=str(exc)) from exc
@@ -890,6 +923,7 @@ def route_to_vendor(method: str, *args, **kwargs):
             )
         if method in {
             "get_stock_data", "get_indicators", "get_indicators_batch", "get_social_posts",
+            "get_stocktwits_messages",
             "get_news", "get_global_news", "get_macro_indicators",
         } | FINANCIAL_METHODS:
             raise last_no_data
@@ -1082,6 +1116,9 @@ def _vendor_audit_metadata(method: str, args: tuple, category: str) -> dict[str,
         )
         metadata["calculation_start"] = (end - timedelta(days=days)).strftime("%Y-%m-%d")
         metadata["requested_end"] = str(args[2])
+    elif method in {"get_social_posts", "get_stocktwits_messages"} and len(args) >= 3:
+        metadata["calculation_start"] = str(args[1])
+        metadata["requested_end"] = str(args[2])
     return metadata
 
 
@@ -1196,6 +1233,9 @@ def verify_vendor(vendor: str, category: str):
     if category not in probes:
         raise ValueError(f"Unknown vendor category: {category}")
     method, args = probes[category]
+    if category == "social_data" and vendor == "stocktwits_browser":
+        method = "get_stocktwits_messages"
+        args = ("AAPL", str(now - timedelta(days=7)), str(now))
     vendor_impl = VENDOR_METHODS.get(method, {}).get(vendor)
     if vendor_impl is None:
         raise ValueError(f"Vendor '{vendor}' does not support '{category}'")
@@ -1203,6 +1243,15 @@ def verify_vendor(vendor: str, category: str):
     started = time.monotonic()
     try:
         result = impl_func(*args)
+        if method in {"get_social_posts", "get_stocktwits_messages"}:
+            result = validate_social_feed(
+                result,
+                str(args[1]),
+                str(args[2]),
+                information_cutoff=datetime.now(timezone.utc),
+                expected_source=vendor,
+                expected_symbol=str(args[0]),
+            )
         if result is None or (isinstance(result, str) and not result.strip()):
             raise NoMarketDataError("verification probe", detail="vendor returned an empty result")
     except VendorRateLimitError as exc:

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
+from tradingagents.architecture import AGENT_ARCHITECTURE_VERSION
+
 EventType = Literal[
     "run_started",
     "message",
@@ -73,6 +75,10 @@ class AnalysisRequest:
     debug: bool = False
     config_overrides: dict[str, Any] = field(default_factory=dict)
     callbacks: tuple[Any, ...] = ()
+    architecture_version: str = AGENT_ARCHITECTURE_VERSION
+    longitudinal_context_mode: Literal[
+        "portfolio_only", "research_and_portfolio"
+    ] = "research_and_portfolio"
 
     def __post_init__(self) -> None:
         from .audit_context import validate_temporal_context

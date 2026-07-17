@@ -9,8 +9,7 @@ The redesigned agent pre-fetches four complementary data sources before
 the LLM is invoked and transports them in a separate untrusted-data message:
 
   1. News headlines     — Westock (institutional framing)
-  2. StockTwits status   — the legacy keyless endpoint is retired because it
-                           requires a Cloudflare browser challenge
+  2. StockTwits posts    — validated current-stream JSON via a stateless browser
   3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
   4. X/Twitter posts     — validated read-only bird search results
 
@@ -39,6 +38,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_news,
     get_social_posts,
+    get_stocktwits_messages,
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
@@ -59,14 +59,6 @@ def _seven_days_back(trade_date: str) -> str:
 def _social_source_enabled(source: str) -> bool:
     configured = get_config().get("data_vendors", {}).get("social_data", "")
     return source in {item.strip() for item in configured.split(",") if item.strip()}
-
-
-def _stocktwits_disabled_block() -> str:
-    """Return an explicit fail-closed marker for the retired public endpoint."""
-    return (
-        "<StockTwits disabled: legacy public endpoint requires a browser challenge; "
-        "no verified server-side API is configured>"
-    )
 
 
 def create_sentiment_analyst(llm):
@@ -96,10 +88,17 @@ def create_sentiment_analyst(llm):
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
-        # Do not attempt the historical keyless endpoint: StockTwits now serves
-        # a Cloudflare browser challenge to server-side clients. Re-enable only
-        # through a separately audited, approved API vendor.
-        stocktwits_block = _stocktwits_disabled_block()
+        if _social_source_enabled("stocktwits_browser"):
+            try:
+                stocktwits_block = get_stocktwits_messages.func(
+                    sq["stocktwits"], start_date, end_date
+                )
+            except Exception as exc:
+                stocktwits_block = (
+                    f"<StockTwits unavailable: {type(exc).__name__}>"
+                )
+        else:
+            stocktwits_block = "<StockTwits disabled in social_data settings>"
         reddit_block = (
             fetch_reddit_posts(sq["reddit"])
             if _social_source_enabled("reddit")

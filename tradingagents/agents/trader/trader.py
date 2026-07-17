@@ -39,7 +39,11 @@ def create_trader(llm):
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
                     "Anchor your reasoning in the analysts' reports and the research plan."
                     " For Buy, provide every structured risk field; deterministic code calculates "
-                    "derived metrics. For Hold or Sell, omit all executable numeric fields."
+                    "derived metrics. Copy no executable price, trigger, ATR, reward/risk, option, "
+                    "hedge, or position-size number into reasoning, even when the research plan "
+                    "contains one; transfer only the selected entry, stop, target, and position "
+                    "values into their dedicated structured fields. For Hold or Sell, omit all "
+                    "executable numeric fields and keep the reasoning qualitative."
                     + get_language_instruction()
                 ),
             },
@@ -51,7 +55,9 @@ def create_trader(llm):
                     f"insights from current technical market trends, macroeconomic indicators, and "
                     f"social media sentiment. Use this plan as a foundation for evaluating your next "
                     f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n\n"
-                    f"Leverage these insights to make an informed and strategic decision."
+                    f"Treat the plan as non-authoritative research context. Do not copy any of its "
+                    f"execution numbers into prose. Only dedicated structured fields can authorize "
+                    f"a price or position value."
                 ),
             },
         ]

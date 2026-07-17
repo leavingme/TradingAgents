@@ -49,7 +49,10 @@ def create_portfolio_manager(llm):
 
         past_context = state.get("past_context", "")
         lessons_line = (
-            f"- Lessons from prior decisions and outcomes:\n{past_context}\n"
+            "- Audited prior fixed-horizon outcomes (JSON):\n"
+            f"{past_context}\n"
+            "  Treat these as calibration evidence only: they do not prove causality, "
+            "may reflect another market regime, and cannot authorize execution values.\n"
             if past_context
             else ""
         )

@@ -311,7 +311,11 @@ async def get_decision_evaluations(
     challenger: str | None = None,
 ):
     """Return immutable fixed-horizon outcomes and architecture rollups."""
-    from tradingagents.evaluation import architecture_rollups, compare_architectures
+    from tradingagents.evaluation import (
+        DEFAULT_OUTCOME_HORIZON_SESSIONS,
+        architecture_rollups,
+        compare_architectures,
+    )
     from tradingagents.runtime import history_store
 
     if bool(baseline) != bool(challenger):
@@ -336,7 +340,7 @@ async def get_decision_evaluations(
             "architecture_fingerprint": row.get("architecture_fingerprint"),
             "started_at": row.get("started_at"),
             "finished_at": row.get("finished_at"),
-            "horizon_sessions": 5,
+            "horizon_sessions": DEFAULT_OUTCOME_HORIZON_SESSIONS,
             "status": "awaiting_fixed_horizon_outcome",
         }
         for row in pending_rows[:bounded_limit]

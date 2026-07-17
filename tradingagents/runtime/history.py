@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from .events import AnalysisEvent
 from tradingagents.sqlite_utils import configure_wal, connect_sqlite
+from tradingagents.evaluation import DEFAULT_OUTCOME_HORIZON_SESSIONS
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -385,7 +386,7 @@ class RunHistoryStore:
         self,
         *,
         ticker: str | None = None,
-        horizon_sessions: int = 5,
+        horizon_sessions: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
     ) -> list[dict[str, Any]]:
         """Return validated runs whose fixed-horizon outcome is still absent."""
         ticker_clause = ""

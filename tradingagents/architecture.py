@@ -135,8 +135,10 @@ def build_architecture_manifest(
     effective_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the canonical agent topology/model manifest for one run."""
+    from tradingagents.evaluation import longitudinal_evaluation_policy
+
     return {
-        "schema": "tradingagents/agent-architecture-manifest/v3",
+        "schema": "tradingagents/agent-architecture-manifest/v4",
         "version": version,
         "implementation_digest": architecture_implementation_digest(),
         "implementation_digest_scope": list(IMPLEMENTATION_DIGEST_SCOPE),
@@ -146,6 +148,7 @@ def build_architecture_manifest(
         "quick_think_llm": quick_think_llm,
         "deep_think_llm": deep_think_llm,
         "longitudinal_context_mode": longitudinal_context_mode,
+        "longitudinal_evaluation_policy": longitudinal_evaluation_policy(),
         "decision_config": _safe_decision_config(effective_config),
     }
 

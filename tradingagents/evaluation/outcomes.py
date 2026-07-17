@@ -22,6 +22,7 @@ OUTCOME_SCORING_VERSION = "alpha-exposure-v1"
 OUTCOME_MEASUREMENT_VERSION = "post-decision-day-close-v1"
 LEGACY_OUTCOME_MEASUREMENT_VERSION = "decision-close-v1"
 DEFAULT_HOLD_BAND = 0.02
+DEFAULT_OUTCOME_HORIZON_SESSIONS = 5
 
 _RUNTIME_COST_FIELDS = (
     "runtime_seconds",
@@ -38,6 +39,16 @@ _T_975_BY_DF = (
     2.093, 2.086, 2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052,
     2.048, 2.045, 2.042,
 )
+
+
+def longitudinal_evaluation_policy() -> dict[str, Any]:
+    """Return the deterministic outcome policy that can enter agent context."""
+    return {
+        "measurement_version": OUTCOME_MEASUREMENT_VERSION,
+        "scoring_version": OUTCOME_SCORING_VERSION,
+        "hold_band": DEFAULT_HOLD_BAND,
+        "horizon_sessions": DEFAULT_OUTCOME_HORIZON_SESSIONS,
+    }
 
 
 def _student_t_critical_95(sample_count: int) -> float | None:
@@ -348,7 +359,7 @@ def compare_architectures(
     *,
     baseline: str,
     challenger: str,
-    horizon_sessions: int = 5,
+    horizon_sessions: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
     minimum_samples: int = 20,
     minimum_paired_samples: int = 20,
     minimum_score_improvement: float = 0.002,

@@ -18,11 +18,18 @@ from tradingagents.automation.daily import (  # noqa: E402
     run_due_analyses,
     scheduler_exit_code,
 )
-from tradingagents.evaluation import architecture_rollups, compare_architectures  # noqa: E402
+from tradingagents.evaluation import (  # noqa: E402
+    DEFAULT_OUTCOME_HORIZON_SESSIONS,
+    architecture_rollups,
+    compare_architectures,
+)
 from tradingagents.runtime.history import history_store  # noqa: E402
 
 
-def _pending_evaluation_summary(row: dict, horizon_sessions: int = 5) -> dict:
+def _pending_evaluation_summary(
+    row: dict,
+    horizon_sessions: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
+) -> dict:
     return {
         "run_id": row.get("run_id"),
         "ticker": row.get("ticker"),

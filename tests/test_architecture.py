@@ -53,9 +53,25 @@ def test_manifest_fingerprint_changes_with_effective_implementation(monkeypatch)
     )
     second = manifest()
 
-    assert first["schema"] == "tradingagents/agent-architecture-manifest/v3"
+    assert first["schema"] == "tradingagents/agent-architecture-manifest/v4"
     assert "tradingagents/agents/**/*.py" in first["implementation_digest_scope"]
     assert "tradingagents/automation/**/*.py" not in first["implementation_digest_scope"]
+    assert first["longitudinal_evaluation_policy"] == {
+        "measurement_version": "post-decision-day-close-v1",
+        "scoring_version": "alpha-exposure-v1",
+        "hold_band": 0.02,
+        "horizon_sessions": 5,
+    }
+    changed_policy = {
+        **first,
+        "longitudinal_evaluation_policy": {
+            **first["longitudinal_evaluation_policy"],
+            "hold_band": 0.03,
+        },
+    }
+    assert architecture.architecture_fingerprint(first) != (
+        architecture.architecture_fingerprint(changed_policy)
+    )
     assert architecture.architecture_fingerprint(first) != architecture.architecture_fingerprint(
         second
     )

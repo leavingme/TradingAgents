@@ -223,10 +223,12 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     manifest = json.loads(stored["architecture_manifest_json"])
     assert stored["architecture_version"] == request.architecture_version
     assert len(stored["architecture_fingerprint"]) == 64
-    assert manifest["schema"] == "tradingagents/agent-architecture-manifest/v3"
+    assert manifest["schema"] == "tradingagents/agent-architecture-manifest/v4"
     assert len(manifest["implementation_digest"]) == 64
     assert "tradingagents/agents/**/*.py" in manifest["implementation_digest_scope"]
     assert "tradingagents/automation/**/*.py" not in manifest["implementation_digest_scope"]
+    assert manifest["longitudinal_evaluation_policy"]["horizon_sessions"] == 5
+    assert manifest["longitudinal_evaluation_policy"]["hold_band"] == 0.02
     assert manifest["decision_config"]["output_language"] == "Chinese"
     assert manifest["decision_config"]["max_debate_rounds"] == 1
     assert "news_data" in manifest["decision_config"]["data_vendors"]

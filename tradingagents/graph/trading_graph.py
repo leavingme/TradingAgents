@@ -35,6 +35,7 @@ from tradingagents.architecture import (
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.evaluation import DEFAULT_OUTCOME_HORIZON_SESSIONS
 from tradingagents.llm_clients import create_llm_client
 from tradingagents.reporting import write_report_tree
 
@@ -236,7 +237,8 @@ class TradingAgentsGraph:
         return benchmark_map.get("", "SPY")
 
     def _fetch_returns(
-        self, ticker: str, trade_date: str, holding_days: int = 5,
+        self, ticker: str, trade_date: str,
+        holding_days: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
         benchmark: str = "SPY", as_of_date: str | None = None,
         return_details: bool = False, decision_as_of: str | None = None,
     ):

@@ -159,14 +159,17 @@ evaluation 起返回完整的 paired exclusion 诊断，即使每个架构尚未
 pre-treatment agent state、时间窗口或 outcome provenance 漂移，停止无效实验；
 未达到样本门槛时状态仍为 `insufficient_data`，且 `passes_paired_gate=false`。
 每个 run 还保存包含 analyst 集合、研究深度、模型和
-纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint。manifest v3 还包含
+纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint。manifest v4 还包含
 路径无关的决策实现摘要，以及非密钥的有效 vendor、风险策略、
 输出语言、推理强度、temperature、benchmark 和新闻配置；源码或决策配置变化会自动
 拆分 fingerprint cohort。摘要不包含绝对路径、环境变量值、backend URL、凭据或
-非 Python 文件；backend 只记录是否使用自定义端点。manifest v3 的实现摘要只覆盖
+非 Python 文件；backend 只记录是否使用自定义端点。manifest v4 的实现摘要只覆盖
 agents、graph、dataflows、LLM clients，以及影响请求、配置、时间审计和纵向上下文的
 canonical runtime 模块；scheduler、CLI、报表与 evaluation 展示代码不再因纯运维
 修改切碎长期 agent cohort。
+v4 还显式绑定纵向 evaluation 的 measurement/scoring version、Hold band 与默认
+horizon；这些政策即使位于被排除的 evaluation 展示模块，也不能在同一 agent
+fingerprint 下静默改变历史校准语义。
 rollup 按版本、fingerprint 和 horizon 分组，同一版本混入多个 fingerprint 时直接拒绝
 比较；评分版本与 Hold band 也属于 cohort 身份，baseline/challenger 必须各自唯一且
 完全一致。改变评分尺必须形成新 cohort，不能被报告成 agent 提升。即使成对 score

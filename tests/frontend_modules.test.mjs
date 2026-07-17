@@ -60,12 +60,21 @@ test('event stream dispatches typed events, closes old connections, and reports 
   });
   stream.connect('run id');
   instances[0].emit('message', { content: { text: 'hello' } });
+  instances[0].emit('longitudinal_context_status', {
+    content: { status: 'loaded', same_symbol_included_count: 1 },
+  });
   instances[0].onerror();
   instances[0].onerror();
   stream.connect('next');
   assert.equal(instances[0].closed, true);
   assert.equal(instances[0].url, '/api/runs/run%20id/events');
-  assert.deepEqual(events, [{ type: 'message', payload: { content: { text: 'hello' } } }]);
+  assert.deepEqual(events, [
+    { type: 'message', payload: { content: { text: 'hello' } } },
+    {
+      type: 'longitudinal_context_status',
+      payload: { content: { status: 'loaded', same_symbol_included_count: 1 } },
+    },
+  ]);
   assert.equal(reconnects, 1);
   stream.close();
   assert.equal(instances[1].closed, true);

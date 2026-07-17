@@ -112,6 +112,11 @@ JSON schema 注入 Research Manager 和 Portfolio Manager；不会把 LLM 生成
 `evaluated_at <= information_cutoff` 的结果；cutoff 与同/跨标的范围在 SQLite 排序和
 LIMIT 之前执行，避免未来结果或其他标的大量样本挤掉当时已经存在的同标的证据。
 新写入的 `evaluated_at` 统一规范为 UTC，旧偏移时间也按真实时刻而非字符串排序。
+每次 runtime 在构造 agent state 前还会持久化一个
+`longitudinal_context_status` 事件，只暴露 canonical schema、模式、cutoff、同/跨标的
+扫描与采用数量以及同标的架构 rollup 数，不包含历史投资内容。这样真实 5-session
+结果成熟后，可以从 SQLite/SSE 直接证明它是否进入本次上下文；非 canonical schema
+或非法 count 会在 agent 执行前 fail closed。
 `analysis_date` 是调用方请求的日 K 截止日期，不再冒充已验证的实际交易日。运行开始时
 `market_data_date` 保持为空并标记 `pending_verification`；只有 canonical OHLCV adapter
 和 validator 完成后，实际最后交易日才写入 `runs.market_data_date`、

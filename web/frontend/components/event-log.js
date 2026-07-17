@@ -35,6 +35,12 @@ export function createEventLog({ element, t, locale, formatAgentName, formatStat
     if (type === 'report_section') return `${content.section || 'report'} ${t('reportUpdated')}`;
     if (type === 'agent_status') return formatStatus(content.status || '');
     if (type === 'run_started') return `${content.ticker} · ${content.analysis_date}`;
+    if (type === 'market_data_status') {
+      return `${content.status || ''} · ${content.market_data_date || content.requested_analysis_date || ''}`;
+    }
+    if (type === 'longitudinal_context_status') {
+      return `${content.status || ''} · same ${content.same_symbol_included_count || 0}/${content.same_symbol_scanned_count || 0} · cross ${content.cross_symbol_included_count || 0}/${content.cross_symbol_scanned_count || 0}`;
+    }
     if (type === 'stats') return formatStats(content);
     return JSON.stringify(content);
   }
@@ -46,6 +52,8 @@ export function createEventLog({ element, t, locale, formatAgentName, formatStat
   function formatType(type) {
     const key = {
       run_started: 'eventRunStarted', message: 'eventMessage', tool_call: 'eventToolCall',
+      market_data_status: 'eventMarketDataStatus',
+      longitudinal_context_status: 'eventLongitudinalContextStatus',
       vendor_attempt: 'eventVendorAttempt',
       agent_status: 'eventAgentStatus', report_section: 'eventReportSection', stats: 'eventStats',
       run_completed: 'eventRunCompleted', run_cancelled: 'eventRunCancelled', error: 'eventError',

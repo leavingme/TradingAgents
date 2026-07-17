@@ -1,5 +1,6 @@
 const EVENT_TYPES = [
-  'run_started', 'message', 'tool_call', 'agent_status', 'report_section',
+  'run_started', 'market_data_status', 'longitudinal_context_status',
+  'message', 'tool_call', 'agent_status', 'report_section',
   'stats', 'run_completed', 'run_cancelled', 'error',
 ];
 

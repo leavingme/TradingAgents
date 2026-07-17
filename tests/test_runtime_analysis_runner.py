@@ -340,19 +340,68 @@ def test_canonical_runtime_injects_sqlite_longitudinal_context(monkeypatch, tmp_
             self.graph = CapturingCompiledGraph()
 
     monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", CapturingGraph)
+    context_payload = {
+        "schema": "tradingagents/audited-longitudinal-outcomes/v8",
+        "selection": {
+            "same_symbol_scanned_count": 3,
+            "same_symbol_included_count": 2,
+            "cross_symbol_scanned_count": 1,
+            "cross_symbol_included_count": 1,
+        },
+        "same_symbol_architecture_rollups": [{"sample_count": 3}],
+    }
+    context_json = json.dumps(context_payload, separators=(",", ":"))
     monkeypatch.setattr(
         history_store,
         "get_longitudinal_context",
-        lambda ticker, information_cutoff=None: '{"schema":"audited-test"}',
+        lambda ticker, information_cutoff=None: context_json,
     )
-    list(run_analysis_stream(AnalysisRequest(
+    events = list(run_analysis_stream(AnalysisRequest(
         ticker="NVDA",
         analysis_date="2026-07-05",
         selected_analysts=("market",),
         report_dir=tmp_path / "reports",
         run_id="runtime-longitudinal-context",
     )))
-    assert seen["past_context"] == '{"schema":"audited-test"}'
+    assert seen["past_context"] == context_json
+    status = next(
+        event for event in events if event.type == "longitudinal_context_status"
+    )
+    assert status.content == {
+        "mode": "research_and_portfolio",
+        "information_cutoff": None,
+        "schema": "tradingagents/audited-longitudinal-outcomes/v8",
+        "same_symbol_scanned_count": 3,
+        "same_symbol_included_count": 2,
+        "cross_symbol_scanned_count": 1,
+        "cross_symbol_included_count": 1,
+        "same_symbol_architecture_rollup_count": 1,
+        "status": "loaded",
+    }
+
+
+def test_runtime_rejects_malformed_longitudinal_context(monkeypatch, tmp_path):
+    from tradingagents.runtime import analysis_runner
+    from tradingagents.runtime.history import history_store
+
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", FakeTradingAgentsGraph)
+    monkeypatch.setattr(
+        history_store,
+        "get_longitudinal_context",
+        lambda ticker, information_cutoff=None: '{"schema":"untrusted"}',
+    )
+
+    events = list(run_analysis_stream(AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-17",
+        selected_analysts=("market",),
+        report_dir=tmp_path / "reports",
+        run_id="runtime-malformed-longitudinal-context",
+    )))
+
+    error = next(event for event in events if event.type == "error")
+    assert error.content["error_type"] == "ValueError"
+    assert "unsupported schema" in error.content["error"]
 
 
 def test_run_analysis_stream_binds_and_resets_analysis_date(monkeypatch, tmp_path):

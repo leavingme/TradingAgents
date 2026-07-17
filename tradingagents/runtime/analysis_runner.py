@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Iterator
+import json
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,62 @@ ANALYST_REPORT_MAP = {
     "news": "news_report",
     "fundamentals": "fundamentals_report",
 }
+LONGITUDINAL_CONTEXT_SCHEMA = "tradingagents/audited-longitudinal-outcomes/v8"
+
+
+def _longitudinal_context_status(
+    context: str,
+    *,
+    mode: str,
+    information_cutoff: str | None,
+) -> dict[str, Any]:
+    """Return safe counts proving which audited outcomes entered this run."""
+    base = {
+        "mode": mode,
+        "information_cutoff": information_cutoff,
+        "schema": None,
+        "same_symbol_scanned_count": 0,
+        "same_symbol_included_count": 0,
+        "cross_symbol_scanned_count": 0,
+        "cross_symbol_included_count": 0,
+        "same_symbol_architecture_rollup_count": 0,
+    }
+    if mode not in {"portfolio_only", "research_and_portfolio"}:
+        return {**base, "status": "disabled"}
+    if not context:
+        return {**base, "status": "empty"}
+    try:
+        payload = json.loads(context)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("longitudinal context must be canonical JSON") from exc
+    if not isinstance(payload, dict) or payload.get("schema") != LONGITUDINAL_CONTEXT_SCHEMA:
+        raise ValueError("longitudinal context has an unsupported schema")
+    selection = payload.get("selection")
+    rollups = payload.get("same_symbol_architecture_rollups")
+    if not isinstance(selection, dict) or not isinstance(rollups, list):
+        raise ValueError("longitudinal context lacks selection metadata")
+    counts: dict[str, int] = {}
+    for key in (
+        "same_symbol_scanned_count",
+        "same_symbol_included_count",
+        "cross_symbol_scanned_count",
+        "cross_symbol_included_count",
+    ):
+        value = selection.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"longitudinal context {key} must be a nonnegative integer")
+        counts[key] = value
+    if counts["same_symbol_included_count"] > counts["same_symbol_scanned_count"]:
+        raise ValueError("longitudinal same-symbol included count exceeds scanned count")
+    if counts["cross_symbol_included_count"] > counts["cross_symbol_scanned_count"]:
+        raise ValueError("longitudinal cross-symbol included count exceeds scanned count")
+    return {
+        **base,
+        **counts,
+        "status": "loaded",
+        "schema": LONGITUDINAL_CONTEXT_SCHEMA,
+        "same_symbol_architecture_rollup_count": len(rollups),
+    }
 
 
 def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
@@ -333,6 +390,19 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
                     else None
                 ),
             )
+        yield AnalysisEvent(
+            type="longitudinal_context_status",
+            run_id=request.run_id,
+            content=_longitudinal_context_status(
+                longitudinal_context,
+                mode=request.longitudinal_context_mode,
+                information_cutoff=(
+                    request.information_cutoff
+                    if request.analysis_mode == "point_in_time"
+                    else None
+                ),
+            ),
+        )
         init_agent_state = graph.propagator.create_initial_state(
             request.ticker,
             request.analysis_date,

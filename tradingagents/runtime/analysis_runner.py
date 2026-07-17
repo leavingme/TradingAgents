@@ -226,7 +226,8 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
         content={
             "ticker": request.ticker,
             "analysis_date": request.analysis_date,
-            "market_data_date": request.analysis_date,
+            "market_data_date": None,
+            "market_data_status": "pending_verification",
             "analysis_mode": request.analysis_mode,
             "information_cutoff": (
                 request.information_cutoff
@@ -288,6 +289,22 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
 
         init_agent_state["verified_market_snapshot"] = verified_snapshot_dict(
             request.ticker, request.analysis_date
+        )
+        market_data_date = str(
+            init_agent_state["verified_market_snapshot"]["market_date"]
+        )
+        history_store.update_run_market_data_date(
+            request.run_id,
+            market_data_date,
+        )
+        yield AnalysisEvent(
+            type="market_data_status",
+            run_id=request.run_id,
+            content={
+                "status": "verified",
+                "requested_analysis_date": request.analysis_date,
+                "market_data_date": market_data_date,
+            },
         )
         init_agent_state["trade_risk_policy"] = dict(config["trade_risk_policy"])
         init_agent_state["longitudinal_context_mode"] = request.longitudinal_context_mode
@@ -379,6 +396,7 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
                 "decision": final_state.get("final_trade_decision"),
                 "decision_status": final_state.get("decision_status", "unavailable"),
                 "decision_as_of": decision_as_of,
+                "market_data_date": market_data_date,
                 "architecture_input_schema": experiment_input["schema"],
                 "architecture_input_fingerprint": experiment_input["fingerprint"],
                 "architecture_input_complete": experiment_input["complete"],

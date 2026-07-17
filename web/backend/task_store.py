@@ -38,6 +38,7 @@ class RunRecord:
     report_path: str | None = None
     error: str | None = None
     decision_status: str = "unavailable"
+    market_data_date: str | None = None
     data_status: str = "not_observed"
     vendor_summary: dict[str, Any] = field(default_factory=dict)
     events: list[AnalysisEvent] = field(default_factory=list)
@@ -49,6 +50,7 @@ class RunRecord:
             "status": self.status,
             "ticker": self.request.ticker,
             "analysis_date": str(self.request.analysis_date),
+            "market_data_date": self.market_data_date,
             "asset_type": self.request.asset_type,
             "selected_analysts": list(self.request.selected_analysts),
             "created_at": self.created_at,
@@ -120,6 +122,7 @@ class TaskStore:
             report_path=run_dict["report_path"],
             error=run_dict["error"],
             decision_status=run_dict.get("decision_status", "unavailable"),
+            market_data_date=run_dict.get("market_data_date"),
             data_status=run_dict.get("data_status", "not_observed"),
             vendor_summary=run_dict.get("vendor_summary", {}),
             events=events,
@@ -193,7 +196,12 @@ class TaskStore:
             record.events.append(event)
 
             # Update in-memory state derived from event type
+            if event.type == "market_data_status" and isinstance(event.content, dict):
+                record.market_data_date = event.content.get("market_data_date")
             if event.type == "run_completed" and isinstance(event.content, dict):
+                record.market_data_date = event.content.get(
+                    "market_data_date", record.market_data_date
+                )
                 record.report_path = event.content.get("report_path")
                 record.decision_status = event.content.get(
                     "decision_status", "unavailable"

@@ -158,8 +158,22 @@ def test_runtime_config_rejects_per_run_risk_policy_override():
 def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_path):
     from tradingagents.runtime import analysis_runner
     from tradingagents.runtime.history import history_store
+    from tradingagents.dataflows import market_data_validator
 
     monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", FakeTradingAgentsGraph)
+    monkeypatch.setattr(
+        market_data_validator,
+        "verified_snapshot_dict",
+        lambda symbol, date: {
+            "symbol": symbol,
+            "market_date": "2026-07-03",
+            "close": 100.0,
+            "atr": 5.0,
+            "vendor_call_id": "test-call",
+            "calculation_start": "2023-07-06",
+            "row_count": 750,
+        },
+    )
 
     request = AnalysisRequest(
         ticker="NVDA",
@@ -172,7 +186,8 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     events = list(run_analysis_stream(request))
 
     assert events[0].type == "run_started"
-    assert events[0].content["market_data_date"] == "2026-07-05"
+    assert events[0].content["market_data_date"] is None
+    assert events[0].content["market_data_status"] == "pending_verification"
     assert events[0].content["analysis_mode"] == "live"
     assert events[0].content["information_cutoff"] == "live_at_call_time"
     assert any(event.type == "message" for event in events)
@@ -196,6 +211,7 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert isinstance(completed.content, dict)
     assert completed.content["decision"] == "Hold"
     assert completed.content["decision_as_of"] == completed.timestamp
+    assert completed.content["market_data_date"] == "2026-07-03"
     assert completed.content["architecture_input_schema"] == (
         "tradingagents/research-manager-pre-context-input/v1"
     )
@@ -203,6 +219,7 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert completed.content["architecture_input_complete"] is False
     assert Path(completed.content["report_path"]).exists()
     stored = history_store.get_run("run-1")
+    assert stored["market_data_date"] == "2026-07-03"
     manifest = json.loads(stored["architecture_manifest_json"])
     assert stored["architecture_version"] == request.architecture_version
     assert len(stored["architecture_fingerprint"]) == 64

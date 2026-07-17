@@ -18,6 +18,7 @@ def _shadow_started_at(index: int, version: str) -> str:
 
 def _comparable_input_evidence(index: int) -> dict:
     return {
+        "market_data_date": f"2026-01-{index + 1:02d}",
         "analysis_data_status": "available",
         "analysis_evidence_complete": True,
         "analysis_evidence_fingerprint": f"evidence-{index}",
@@ -51,6 +52,7 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
         architecture_version="baseline",
     )
     store.mark_started("run-1", started_at="2026-07-01T20:00:00+00:00")
+    store.update_run_market_data_date("run-1", "2026-06-30")
     store.add_event("run-1", AnalysisEvent(
         type="stats",
         run_id="run-1",
@@ -124,6 +126,7 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert rows[0]["tokens_out"] == 240
     assert rows[0]["scoring_version"] == "alpha-exposure-v1"
     assert rows[0]["measurement_version"] == "post-decision-day-close-v1"
+    assert rows[0]["market_data_date"] == "2026-06-30"
     assert rows[0]["analysis_data_status"] == "not_observed"
     assert rows[0]["analysis_evidence_complete"] == 0
     assert len(rows[0]["analysis_evidence_fingerprint"]) == 64

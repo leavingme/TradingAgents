@@ -92,6 +92,7 @@ class RunHistoryStore:
                         run_id            TEXT PRIMARY KEY,
                         ticker            TEXT NOT NULL,
                         analysis_date     TEXT NOT NULL,
+                        market_data_date  TEXT,
                         asset_type        TEXT NOT NULL,
                         selected_analysts TEXT NOT NULL,
                         llm_provider      TEXT,
@@ -152,6 +153,7 @@ class RunHistoryStore:
                         evaluated_by_run_id   TEXT,
                         ticker                TEXT NOT NULL,
                         analysis_date         TEXT NOT NULL,
+                        market_data_date      TEXT,
                         rating                TEXT NOT NULL,
                         benchmark             TEXT NOT NULL,
                         entry_date            TEXT,
@@ -218,6 +220,10 @@ class RunHistoryStore:
                     conn.execute(
                         "ALTER TABLE runs ADD COLUMN architecture_manifest_json TEXT"
                     )
+                if "market_data_date" not in run_columns:
+                    conn.execute(
+                        "ALTER TABLE runs ADD COLUMN market_data_date TEXT"
+                    )
                 evaluation_columns = {
                     row["name"]
                     for row in conn.execute("PRAGMA table_info(decision_evaluations)")
@@ -267,6 +273,11 @@ class RunHistoryStore:
                     conn.execute(
                         "ALTER TABLE decision_evaluations ADD COLUMN "
                         "architecture_input_complete INTEGER NOT NULL DEFAULT 0"
+                    )
+                if "market_data_date" not in evaluation_columns:
+                    conn.execute(
+                        "ALTER TABLE decision_evaluations ADD COLUMN "
+                        "market_data_date TEXT"
                     )
                 if "hold_band" not in evaluation_columns:
                     conn.execute(
@@ -430,6 +441,38 @@ class RunHistoryStore:
                         architecture_manifest_json,
                         run_id,
                     ),
+                )
+
+    def update_run_market_data_date(
+        self,
+        run_id: str,
+        market_data_date: str,
+    ) -> None:
+        """Persist the actual latest verified daily bar used by a run."""
+        try:
+            verified_date = datetime.strptime(
+                str(market_data_date), "%Y-%m-%d"
+            ).date()
+        except ValueError as exc:
+            raise ValueError("market_data_date must be YYYY-MM-DD") from exc
+        with self._lock:
+            with self._conn() as conn:
+                row = conn.execute(
+                    "SELECT analysis_date FROM runs WHERE run_id=?",
+                    (run_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("run_id does not exist")
+                requested_date = datetime.strptime(
+                    str(row["analysis_date"]), "%Y-%m-%d"
+                ).date()
+                if verified_date > requested_date:
+                    raise ValueError(
+                        "market_data_date cannot follow requested analysis_date"
+                    )
+                conn.execute(
+                    "UPDATE runs SET market_data_date=? WHERE run_id=?",
+                    (verified_date.isoformat(), run_id),
                 )
 
     def add_decision_evaluation(self, record: dict[str, Any]) -> None:
@@ -641,13 +684,28 @@ class RunHistoryStore:
             and architecture_input_schema
             and architecture_input_fingerprint
         )
+        market_data_date = run_record.get("market_data_date")
+        if market_data_date is not None:
+            try:
+                verified_market_date = datetime.strptime(
+                    str(market_data_date), "%Y-%m-%d"
+                ).date()
+            except ValueError as exc:
+                raise ValueError(
+                    "original run market_data_date is invalid"
+                ) from exc
+            if verified_market_date > analysis_date:
+                raise ValueError(
+                    "original run market_data_date follows analysis_date"
+                )
+            market_data_date = verified_market_date.isoformat()
         with self._lock:
             with self._conn() as conn:
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO decision_evaluations (
                         run_id, horizon_sessions, evaluated_by_run_id, ticker,
-                        analysis_date, rating, benchmark,
+                        analysis_date, market_data_date, rating, benchmark,
                         entry_date, exit_date, stock_entry_close, stock_exit_close,
                         benchmark_entry_close, benchmark_exit_close,
                         stock_entry_source_id, stock_exit_source_id,
@@ -663,12 +721,13 @@ class RunHistoryStore:
                         architecture_input_schema, architecture_input_fingerprint,
                         architecture_input_complete,
                         evaluated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record["run_id"], record["horizon_sessions"],
                         record.get("evaluated_by_run_id"), record["ticker"],
-                        record["analysis_date"], record["rating"], record["benchmark"],
+                        record["analysis_date"], market_data_date,
+                        record["rating"], record["benchmark"],
                         record.get("entry_date"), record.get("exit_date"),
                         record.get("stock_entry_close"), record.get("stock_exit_close"),
                         record.get("benchmark_entry_close"),
@@ -825,6 +884,7 @@ class RunHistoryStore:
             "run_id",
             "ticker",
             "analysis_date",
+            "market_data_date",
             "rating",
             "horizon_sessions",
             "benchmark",
@@ -859,7 +919,7 @@ class RunHistoryStore:
             "evaluated_at",
         )
         payload = {
-            "schema": "tradingagents/audited-longitudinal-outcomes/v7",
+            "schema": "tradingagents/audited-longitudinal-outcomes/v8",
             "interpretation": (
                 "Historical calibration evidence only. Outcomes do not prove causality, "
                 "may come from a different market regime, and cannot authorize trade levels."

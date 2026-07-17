@@ -77,6 +77,7 @@ def test_history_migrates_legacy_evaluations_to_explicit_scoring_policy(tmp_path
     assert columns["architecture_input_schema"]["dflt_value"] is None
     assert columns["architecture_input_fingerprint"]["dflt_value"] is None
     assert int(columns["architecture_input_complete"]["dflt_value"]) == 0
+    assert columns["market_data_date"]["dflt_value"] is None
 
 
 def test_analysis_evidence_identity_ignores_execution_noise_but_binds_results():
@@ -112,6 +113,25 @@ def test_analysis_evidence_identity_ignores_execution_noise_but_binds_results():
     assert first["fingerprint"] == second["fingerprint"]
     assert first["fingerprint"] != changed["fingerprint"]
     assert analysis_evidence_identity([])["complete"] is False
+
+
+def test_history_persists_only_verified_market_dates_on_or_before_request(tmp_path):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    store.create_run(
+        "market-date-run", "NVDA", "2026-07-05", "stock", ["market"],
+        "minimax-cn", 1,
+    )
+    store.update_run_market_data_date("market-date-run", "2026-07-03")
+    assert store.get_run("market-date-run")["market_data_date"] == "2026-07-03"
+
+    with pytest.raises(ValueError, match="cannot follow"):
+        store.update_run_market_data_date("market-date-run", "2026-07-06")
+    with pytest.raises(ValueError, match="must be YYYY-MM-DD"):
+        store.update_run_market_data_date(
+            "market-date-run", "2026-07-03T16:00:00-04:00"
+        )
+    with pytest.raises(ValueError, match="run_id does not exist"):
+        store.update_run_market_data_date("missing-run", "2026-07-03")
 
 
 def test_history_store_crud(tmp_path: Path):
@@ -426,13 +446,14 @@ def test_longitudinal_context_is_structured_audited_and_cutoff_safe(
     context = json.loads(store.get_longitudinal_context(
         "NVDA", information_cutoff="2026-07-10T16:00:01-04:00"
     ))
-    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v7"
+    assert context["schema"] == "tradingagents/audited-longitudinal-outcomes/v8"
     assert context["same_symbol_outcomes"][0]["run_id"] == "evaluated-nvda"
     assert context["same_symbol_outcomes"][0]["directional_hit"] is True
     assert context["same_symbol_outcomes"][0]["measurement_version"] == "post-decision-day-close-v1"
     assert context["same_symbol_outcomes"][0]["analysis_data_status"] == "not_observed"
     assert context["same_symbol_outcomes"][0]["analysis_evidence_complete"] == 0
     assert context["same_symbol_outcomes"][0]["architecture_input_complete"] == 0
+    assert context["same_symbol_outcomes"][0]["market_data_date"] is None
     assert "reflection" not in context["same_symbol_outcomes"][0]
     rollup = context["same_symbol_architecture_rollups"][0]
     assert rollup["sample_count"] == 1

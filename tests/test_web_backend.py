@@ -17,6 +17,14 @@ def test_create_run_and_get_status(monkeypatch):
         task_store.add_event(
             run_id,
             AnalysisEvent(
+                type="market_data_status",
+                run_id=run_id,
+                content={"status": "verified", "market_data_date": "2026-07-03"},
+            ),
+        )
+        task_store.add_event(
+            run_id,
+            AnalysisEvent(
                 type="run_completed",
                 run_id=run_id,
                 content={"decision": "Hold", "report_path": "/tmp/report.md"},
@@ -42,7 +50,8 @@ def test_create_run_and_get_status(monkeypatch):
     assert created["ticker"] == "NVDA"
     assert created["status"] == "completed"
     assert created["report_path"] == "/tmp/report.md"
-    assert status["event_count"] == 2
+    assert status["market_data_date"] == "2026-07-03"
+    assert status["event_count"] == 3
 
 
 def test_run_create_request_uses_webui_defaults():

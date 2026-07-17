@@ -12,6 +12,7 @@ from tradingagents.architecture import AGENT_ARCHITECTURE_VERSION
 
 EventType = Literal[
     "run_started",
+    "market_data_status",
     "message",
     "tool_call",
     "vendor_attempt",

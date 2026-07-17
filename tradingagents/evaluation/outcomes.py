@@ -536,7 +536,13 @@ def compare_architectures(
         ):
             evidence_mismatches += 1
             continue
-        exact_fields = ("entry_date", "exit_date")
+        exact_fields = ("market_data_date", "entry_date", "exit_date")
+        if any(
+            not base_row.get(field) or not challenger_row.get(field)
+            for field in exact_fields
+        ):
+            outcome_mismatches += 1
+            continue
         provenance_fields = (
             "stock_entry_source_id",
             "stock_exit_source_id",

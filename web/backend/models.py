@@ -104,6 +104,7 @@ class RunRecordResponse(BaseModel):
     status: RunStatus
     ticker: str
     analysis_date: str
+    market_data_date: str | None = None
     asset_type: str
     selected_analysts: list[str]
     created_at: str

@@ -302,10 +302,11 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 
 ## 分析时间轴语义
 
-- `analysis_date` / `market_data_date` 表示最近完整市场数据所属的交易日，不等于所有外部信息的截止时间。例如周一美股盘前运行时，周五可以是最新完整日 K，但周末至周一盘前的新闻、宏观和 Polymarket 实时信息仍可用于当前决策。
+- `analysis_date` 表示调用方请求的日 K 截止日期；`market_data_date` 表示结构化 OHLCV 验证后实际使用的最近完整交易日，两者不得预先假定相等。例如周一美股盘前请求周一截止时，实际完整日 K 可以仍是周五，但周末至周一盘前的新闻、宏观和 Polymarket 实时信息仍可用于当前决策。
 - 默认 `analysis_mode="live"`：新闻、宏观、社交和预测市场允许使用各自在运行调用时可获得的最新信息，最终 `run_completed.decision_as_of` 记录决策形成时刻。
 - 历史回测或时点复现必须显式使用 `analysis_mode="point_in_time"` 并提供带时区的 `information_cutoff`；不支持历史快照的当前型 vendor 必须 fail closed，不得用运行时现值冒充历史证据。
 - 必须分别保存和解释 `market_data_date`、`decision_as_of`、`information_cutoff` 与 vendor 自身的 `observed_at`/`published_at`。禁止仅因 `analysis_date` 早于当前自然日就关闭实时信息源。
+- `market_data_date` 只能从通过 deterministic validator 的结构化 OHLCV 最新行确定；验证前必须保持未知，且不得晚于 `analysis_date`。run、terminal event、evaluation 和纵向上下文必须保存该实际日期；架构 paired comparison 必须要求两臂日期非空且相同。
 - live 决策不得使用 `decision_as_of` 所在交易所本地日期当日或更早的收盘价作为可执行 entry 或结果计量起点，即使 `analysis_date` 更早。固定期限评估按原始 run 分别使用决策市场日之后第一个标的/基准共同收盘价入场，再到第 5 个后续共同收盘价结算；计量版本、决策时刻、交易所时区和 entry cutoff 必须持久化并隔离旧 cohort。SQLite 是待结算 run 的权威来源，不得依赖 Markdown pending 条目触发结算。
 
 ## 测试和验证注意事项

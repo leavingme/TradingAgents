@@ -1,4 +1,20 @@
 export function createEventLog({ element, t, locale, formatAgentName, formatStatus, formatStats }) {
+  function evaluationCode(value) {
+    const key = {
+      insufficient_outcome_samples: 'evaluationCodeInsufficientOutcomeSamples',
+      outcome_uncertainty_not_ready: 'evaluationCodeOutcomeUncertaintyNotReady',
+      incomplete_input_audit: 'evaluationCodeIncompleteInputAudit',
+      ready_for_controlled_experiment_design: 'evaluationCodeReadyForExperiment',
+      continue_sample_collection: 'evaluationCodeContinueCollection',
+      repair_temporal_evidence: 'evaluationCodeRepairTemporalEvidence',
+      repair_input_audit: 'evaluationCodeRepairInputAudit',
+      investigate_persistent_underperformance: 'evaluationCodeInvestigatePersistent',
+      investigate_recent_deterioration: 'evaluationCodeInvestigateRecent',
+      design_controlled_challenger: 'evaluationCodeDesignChallenger',
+    }[value];
+    return key ? t(key) : String(value || '').replaceAll('_', ' ');
+  }
+
   function append(type, agent, text) {
     const item = document.createElement('article');
     item.className = 'event';
@@ -41,6 +57,10 @@ export function createEventLog({ element, t, locale, formatAgentName, formatStat
     if (type === 'longitudinal_context_status') {
       return `${content.status || ''} · same ${content.same_symbol_included_count || 0}/${content.same_symbol_scanned_count || 0} · cross ${content.cross_symbol_included_count || 0}/${content.cross_symbol_scanned_count || 0}`;
     }
+    if (type === 'architecture_evaluation_status') {
+      const architecture = content.current_architecture || {};
+      return `${content.status || ''} · ${architecture.sample_count || 0} ${t('samples')} · ${evaluationCode(architecture.readiness_status || 'insufficient_outcome_samples')} · ${evaluationCode(architecture.recommended_action || 'continue_sample_collection')}`;
+    }
     if (type === 'stats') return formatStats(content);
     return JSON.stringify(content);
   }
@@ -54,6 +74,7 @@ export function createEventLog({ element, t, locale, formatAgentName, formatStat
       run_started: 'eventRunStarted', message: 'eventMessage', tool_call: 'eventToolCall',
       market_data_status: 'eventMarketDataStatus',
       longitudinal_context_status: 'eventLongitudinalContextStatus',
+      architecture_evaluation_status: 'eventArchitectureEvaluationStatus',
       vendor_attempt: 'eventVendorAttempt',
       agent_status: 'eventAgentStatus', report_section: 'eventReportSection', stats: 'eventStats',
       run_completed: 'eventRunCompleted', run_cancelled: 'eventRunCancelled', error: 'eventError',

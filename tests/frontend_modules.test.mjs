@@ -86,6 +86,15 @@ test('event stream dispatches typed events, closes old connections, and reports 
   instances[0].emit('longitudinal_context_status', {
     content: { status: 'loaded', same_symbol_included_count: 1 },
   });
+  instances[0].emit('architecture_evaluation_status', {
+    content: {
+      status: 'loaded',
+      current_architecture: {
+        sample_count: 20,
+        readiness_status: 'ready_for_controlled_experiment_design',
+      },
+    },
+  });
   instances[0].onerror();
   instances[0].onerror();
   stream.connect('next');
@@ -96,6 +105,18 @@ test('event stream dispatches typed events, closes old connections, and reports 
     {
       type: 'longitudinal_context_status',
       payload: { content: { status: 'loaded', same_symbol_included_count: 1 } },
+    },
+    {
+      type: 'architecture_evaluation_status',
+      payload: {
+        content: {
+          status: 'loaded',
+          current_architecture: {
+            sample_count: 20,
+            readiness_status: 'ready_for_controlled_experiment_design',
+          },
+        },
+      },
     },
   ]);
   assert.equal(reconnects, 1);
@@ -242,6 +263,34 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
       sampleCount: 5,
     },
   });
+});
+
+test('event log localizes architecture evaluation readiness', { concurrency: false }, async () => {
+  const labels = {
+    samples: '样本',
+    evaluationCodeReadyForExperiment: '可以设计受控实验',
+    evaluationCodeInvestigateRecent: '调查近期退化',
+  };
+  const { createEventLog } = await importSource('components/event-log.js');
+  const log = createEventLog({
+    element: { replaceChildren() {} },
+    t: key => labels[key] || key,
+    locale: () => 'zh',
+    formatAgentName: value => value,
+    formatStatus: value => value,
+    formatStats: () => '',
+  });
+  assert.equal(
+    log.text('architecture_evaluation_status', {
+      status: 'loaded',
+      current_architecture: {
+        sample_count: 20,
+        readiness_status: 'ready_for_controlled_experiment_design',
+        recommended_action: 'investigate_recent_deterioration',
+      },
+    }),
+    'loaded · 20 样本 · 可以设计受控实验 · 调查近期退化',
+  );
 });
 
 test('report reading mode preserves content until the user resumes live updates', { concurrency: false }, async () => {

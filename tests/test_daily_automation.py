@@ -9,8 +9,12 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from tradingagents.automation.daily import (
+    ARCHITECTURE_EVALUATION_SCAN_LIMIT,
+    ARCHITECTURE_EVALUATION_STATUS_SCHEMA,
     DailySchedule,
     ScheduledTarget,
+    _architecture_evaluation_status,
+    _record_architecture_evaluation_status,
     load_runtime_preferences,
     run_due_analyses,
     scheduler_exit_code,
@@ -354,6 +358,116 @@ def test_runtime_preferences_apply_same_legacy_migration_as_web(tmp_path):
     )
 
 
+def test_architecture_evaluation_status_is_compact_and_scoped_to_run_identity():
+    class FakeStore:
+        def __init__(self):
+            self.evaluation_query = None
+
+        def get_run(self, run_id):
+            assert run_id == "scheduled-run"
+            return {
+                "architecture_version": "production",
+                "architecture_fingerprint": "production-fingerprint",
+            }
+
+        def list_decision_evaluations(self, **kwargs):
+            self.evaluation_query = kwargs
+            return [{
+                "ticker": "NVDA",
+                "analysis_date": "2026-07-01",
+                "entry_date": "2026-07-02",
+                "exit_date": "2026-07-09",
+                "architecture_version": "production",
+                "architecture_fingerprint": "production-fingerprint",
+                "horizon_sessions": 5,
+                "rating": "Buy",
+                "directional_hit": True,
+                "raw_return": 0.02,
+                "alpha_return": 0.01,
+                "score": 0.01,
+                "analysis_evidence_complete": True,
+                "architecture_input_complete": True,
+            }]
+
+        def list_unevaluated_validated_runs(self, **kwargs):
+            assert kwargs == {"ticker": "NVDA"}
+            return [{"run_id": "pending"}]
+
+    store = FakeStore()
+    status = _architecture_evaluation_status(
+        store,
+        run_id="scheduled-run",
+        ticker="NVDA",
+    )
+
+    assert store.evaluation_query == {
+        "ticker": "NVDA",
+        "limit": ARCHITECTURE_EVALUATION_SCAN_LIMIT,
+        "include_runtime_metrics": False,
+    }
+    assert status == {
+        "schema": ARCHITECTURE_EVALUATION_STATUS_SCHEMA,
+        "status": "loaded",
+        "ticker": "NVDA",
+        "scan_limit": ARCHITECTURE_EVALUATION_SCAN_LIMIT,
+        "evaluated_count_scanned": 1,
+        "pending_evaluation_count": 1,
+        "cohort_count": 1,
+        "other_cohort_count": 0,
+        "current_architecture": {
+            "architecture_version": "production",
+            "architecture_fingerprint": "production-fingerprint",
+            "observed": True,
+            "sample_count": 1,
+            "outcome_status": "insufficient_samples",
+            "readiness_status": "insufficient_outcome_samples",
+            "recommended_action": "continue_sample_collection",
+            "controlled_experiment_ready": False,
+        },
+    }
+    serialized = json.dumps(status)
+    assert "raw_return" not in serialized
+    assert "alpha_return" not in serialized
+    assert "agent_costs" not in serialized
+
+
+def test_architecture_evaluation_status_persists_and_redacts_failures(tmp_path):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    store.create_run(
+        "scheduled-run", "NVDA", "2026-07-17", "stock", ["market"],
+        "minimax-cn", 1, architecture_version="production",
+        architecture_fingerprint="production-fingerprint",
+    )
+
+    status = _record_architecture_evaluation_status(
+        store,
+        run_id="scheduled-run",
+        ticker="NVDA",
+    )
+
+    assert status["status"] == "empty"
+    events = store.get_run("scheduled-run")["events"]
+    assert events[-1]["type"] == "architecture_evaluation_status"
+    assert events[-1]["content"] == status
+
+    class FailingStore:
+        def get_run(self, run_id):
+            raise RuntimeError("credential=sentinel-secret")
+
+    failure = _record_architecture_evaluation_status(
+        FailingStore(),
+        run_id="failed-run",
+        ticker="NVDA",
+    )
+    assert failure == {
+        "schema": ARCHITECTURE_EVALUATION_STATUS_SCHEMA,
+        "status": "unavailable",
+        "ticker": "NVDA",
+        "error_type": "RuntimeError",
+    }
+    assert "sentinel-secret" not in json.dumps(failure)
+
+
 def test_due_run_reuses_preferences_and_is_idempotent(tmp_path, monkeypatch):
     store = RunHistoryStore(tmp_path / "runs.db")
     captured = []
@@ -405,6 +519,9 @@ def test_due_run_reuses_preferences_and_is_idempotent(tmp_path, monkeypatch):
         lock_path=tmp_path / "daily.lock",
     )
     assert first[0]["status"] == "completed"
+    assert first[0]["architecture_evaluation_status"]["status"] == "empty"
+    persisted = store.get_run(first[0]["run_id"])["events"]
+    assert persisted[-1]["type"] == "architecture_evaluation_status"
     assert second[0]["status"] == "already_recorded"
     assert len(captured) == 1
     assert captured[0].llm_provider == "minimax-cn"
@@ -638,6 +755,7 @@ def test_market_data_pending_retries_without_consuming_analysis_attempt(
     )
 
     assert first[0]["status"] == "market_data_pending"
+    assert first[0]["architecture_evaluation_status"] is None
     assert calls[0].require_exact_market_data_date is True
     assert waiting[0]["status"] == "market_data_wait"
     assert retry[0]["status"] == "completed"

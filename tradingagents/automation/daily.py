@@ -46,6 +46,10 @@ _TERMINAL_STATUSES = {
 _SCHEDULER_FAILURE_STATUSES = {
     "failed", "unavailable", "attempts_exhausted", "market_data_unavailable"
 }
+ARCHITECTURE_EVALUATION_STATUS_SCHEMA = (
+    "tradingagents/architecture-evaluation-status/v1"
+)
+ARCHITECTURE_EVALUATION_SCAN_LIMIT = 5000
 _SETTING_KEYS = {
     "research_depth",
     "llm_provider",
@@ -68,6 +72,112 @@ _ALLOWED_VENDORS = {
     "macro_data": {"fred"},
     "prediction_markets": {"polymarket"},
 }
+
+
+def _architecture_evaluation_status(
+    store: RunHistoryStore,
+    *,
+    run_id: str,
+    ticker: str,
+) -> dict[str, Any]:
+    """Build the compact post-run evaluation snapshot used by the scheduler."""
+    from tradingagents.evaluation import architecture_rollups
+
+    run = store.get_run(run_id)
+    if not isinstance(run, dict):
+        raise ValueError("scheduled run is missing from history")
+    architecture_version = str(run.get("architecture_version") or "").strip()
+    architecture_fingerprint = str(
+        run.get("architecture_fingerprint") or ""
+    ).strip()
+    if not architecture_version or not architecture_fingerprint:
+        raise ValueError("scheduled run lacks architecture identity")
+    evaluations = store.list_decision_evaluations(
+        ticker=ticker,
+        limit=ARCHITECTURE_EVALUATION_SCAN_LIMIT,
+        include_runtime_metrics=False,
+    )
+    rollups = architecture_rollups(evaluations)
+    selected = next(
+        (
+            row
+            for row in rollups
+            if row.get("architecture_version") == architecture_version
+            and row.get("architecture_fingerprint") == architecture_fingerprint
+        ),
+        None,
+    )
+    outcome = selected.get("outcome_assessment") if isinstance(selected, dict) else None
+    outcome = outcome if isinstance(outcome, dict) else {}
+    optimization = (
+        selected.get("optimization_assessment")
+        if isinstance(selected, dict)
+        else None
+    )
+    optimization = optimization if isinstance(optimization, dict) else {}
+    return {
+        "schema": ARCHITECTURE_EVALUATION_STATUS_SCHEMA,
+        "status": "loaded" if evaluations else "empty",
+        "ticker": ticker,
+        "scan_limit": ARCHITECTURE_EVALUATION_SCAN_LIMIT,
+        "evaluated_count_scanned": len(evaluations),
+        "pending_evaluation_count": len(
+            store.list_unevaluated_validated_runs(ticker=ticker)
+        ),
+        "cohort_count": len(rollups),
+        "other_cohort_count": len(rollups) - int(selected is not None),
+        "current_architecture": {
+            "architecture_version": architecture_version,
+            "architecture_fingerprint": architecture_fingerprint,
+            "observed": selected is not None,
+            "sample_count": (
+                int(selected.get("sample_count") or 0) if selected else 0
+            ),
+            "outcome_status": outcome.get("status") or "not_observed",
+            "readiness_status": (
+                optimization.get("readiness_status")
+                or "insufficient_outcome_samples"
+            ),
+            "recommended_action": (
+                optimization.get("recommended_action")
+                or "continue_sample_collection"
+            ),
+            "controlled_experiment_ready": bool(
+                optimization.get("controlled_experiment_ready")
+            ),
+        },
+    }
+
+
+def _record_architecture_evaluation_status(
+    store: RunHistoryStore,
+    *,
+    run_id: str,
+    ticker: str,
+) -> dict[str, Any]:
+    """Persist a safe snapshot without changing an already formed decision."""
+    try:
+        content = _architecture_evaluation_status(
+            store,
+            run_id=run_id,
+            ticker=ticker,
+        )
+        store.add_event(
+            run_id,
+            AnalysisEvent(  # type: ignore[arg-type]
+                type="architecture_evaluation_status",
+                run_id=run_id,
+                content=content,
+            ),
+        )
+        return content
+    except Exception as exc:
+        return {
+            "schema": ARCHITECTURE_EVALUATION_STATUS_SCHEMA,
+            "status": "unavailable",
+            "ticker": ticker,
+            "error_type": type(exc).__name__,
+        }
 
 
 def _default_schedule_path() -> Path:
@@ -697,6 +807,15 @@ def run_due_analyses(
                 "unavailable": "unavailable",
                 "market_data_pending": "market_data_pending",
             }.get(decision_status, "unavailable")
+            evaluation_status = (
+                None
+                if decision_status == "market_data_pending"
+                else _record_architecture_evaluation_status(
+                    store,
+                    run_id=result.run_id,
+                    ticker=target.symbol,
+                )
+            )
             outcomes.append(
                 {
                     "symbol": target.symbol,
@@ -708,6 +827,7 @@ def run_due_analyses(
                     "planned_execution_order": execution_order,
                     "execution_group_size": execution_group_size,
                     "report_path": str(result.report_path) if result.report_path else None,
+                    "architecture_evaluation_status": evaluation_status,
                 }
             )
         return outcomes

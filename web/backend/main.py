@@ -144,12 +144,15 @@ async def get_env_status():
         "configured": bool(os.environ.get("ALPHA_VANTAGE_API_KEY")),
         "required": True,
     }
-    # 3. Longbridge MCP (presence of token file)
-    from tradingagents.dataflows.longbridge_mcp import TOKEN_PATH
+    # 3. Longbridge MCP (validated token schema + timezone-aware expiry)
+    from tradingagents.dataflows.longbridge_mcp import get_token_status
+    longbridge_mcp_status = get_token_status()
     data_vendors["longbridge_mcp"] = {
         "env_var": ".longbridge_mcp_token.json",
-        "configured": TOKEN_PATH.exists(),
+        "configured": longbridge_mcp_status["configured"],
         "required": True,
+        "credential_status": longbridge_mcp_status["status"],
+        "expires_at": longbridge_mcp_status["expires_at"],
     }
     # 4. Longbridge CLI (presence of CLI executable)
     import shutil

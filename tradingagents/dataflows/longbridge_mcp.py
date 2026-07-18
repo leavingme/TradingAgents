@@ -4,7 +4,7 @@ Longbridge MCP vendor for TradingAgents (2026-07-04 new path).
 Uses the Longbridge HTTP MCP service at https://mcp.longbridge.com (or .cn for
 mainland). Activated by `scripts/activate_longbridge_mcp.py --auth-code <CODE>`,
 which writes a bearer token to:
-    /data/disk/workspace/TradingAgents/.longbridge_mcp_token.json   (mode 0600)
+    /data/workspace/TradingAgents/.longbridge_mcp_token.json   (mode 0600)
 
 Design notes:
   - Transport: streamable HTTP. We POST JSON-RPC and parse the SSE `data:` line.
@@ -77,15 +77,41 @@ def _load_token() -> Optional[dict]:
         return None
 
 
-def _is_expired(token: dict, skew_seconds: int = 60) -> bool:
+def _token_expiry(token: dict) -> datetime | None:
     expiry_str = token.get("expiry")
-    if not expiry_str:
-        return False  # unknown -> assume valid; the next call will sort it out
+    if not isinstance(expiry_str, str) or not expiry_str.strip():
+        return None
     try:
         expiry = datetime.fromisoformat(expiry_str)
-    except ValueError:
-        return False
+    except (TypeError, ValueError):
+        return None
+    if expiry.tzinfo is None or expiry.utcoffset() is None:
+        return None
+    return expiry
+
+
+def _is_expired(token: dict, skew_seconds: int = 60) -> bool:
+    expiry = _token_expiry(token)
+    if expiry is None:
+        return True
     return datetime.now(expiry.tzinfo) >= expiry - timedelta(seconds=skew_seconds)
+
+
+def get_token_status(skew_seconds: int = 60) -> dict[str, str | bool | None]:
+    """Return credential health without exposing token material or file paths."""
+    token = _load_token()
+    if token is None:
+        return {"configured": False, "status": "missing", "expires_at": None}
+    if not isinstance(token, dict):
+        return {"configured": False, "status": "invalid", "expires_at": None}
+    access_token = token.get("access_token")
+    expiry = _token_expiry(token)
+    if not isinstance(access_token, str) or not access_token.strip() or expiry is None:
+        return {"configured": False, "status": "invalid", "expires_at": None}
+    expires_at = expiry.astimezone(timezone.utc).isoformat()
+    if datetime.now(expiry.tzinfo) >= expiry - timedelta(seconds=skew_seconds):
+        return {"configured": False, "status": "expired", "expires_at": expires_at}
+    return {"configured": True, "status": "valid", "expires_at": expires_at}
 
 
 def _write_token_from_payload(payload: dict, base_url: str) -> None:
@@ -143,16 +169,19 @@ class LongbridgeMCPClient:
         tok = _load_token()
         if not tok:
             raise MCPNotActivatedError(
-                f"No token at {TOKEN_PATH}. Run "
-                f"scripts/activate_longbridge_mcp.py --auth-code <CODE> first."
+                "Longbridge MCP token is not configured."
             )
+        if not isinstance(tok, dict):
+            raise MCPAuthError("Longbridge MCP token payload is invalid.")
+        access_token = tok.get("access_token")
+        if not isinstance(access_token, str) or not access_token.strip():
+            raise MCPAuthError("Longbridge MCP token payload is invalid.")
         if _is_expired(tok):
             raise MCPAuthError(
-                f"Stored MCP token expired (expiry={tok.get('expiry')}). "
-                f"Re-run scripts/activate_longbridge_mcp.py to refresh."
+                "Longbridge MCP token is expired or has invalid expiry metadata."
             )
         self.base_url = base_url or tok.get("base_url") or DEFAULT_BASE_URL
-        self.access_token = tok["access_token"]
+        self.access_token = access_token
         self._id = 0
         self._tool_index: Optional[dict[str, dict]] = None  # lazy
 
@@ -178,12 +207,16 @@ class LongbridgeMCPClient:
             with urllib.request.urlopen(req, timeout=45) as r:
                 data = r.read().decode("utf-8")
         except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
+            e.close()
             if e.code in (401, 403):
-                raise MCPAuthError(f"{e.code} {e.reason}: {body[:300]}") from e
-            raise MCPTransportError(f"HTTP {e.code}: {body[:500]}") from e
-        except urllib.error.URLError as e:
-            raise MCPTransportError(f"Network error: {e.reason}") from e
+                raise MCPAuthError(
+                    f"Longbridge MCP authentication rejected (HTTP {e.code})."
+                ) from None
+            raise MCPTransportError(
+                f"Longbridge MCP request failed (HTTP {e.code})."
+            ) from None
+        except urllib.error.URLError:
+            raise MCPTransportError("Longbridge MCP network request failed.") from None
 
         # SSE envelope: `data: {...}\n\n`
         for line in data.splitlines():
@@ -196,14 +229,21 @@ class LongbridgeMCPClient:
         # Some endpoints return plain JSON
         try:
             return json.loads(data)
-        except json.JSONDecodeError as e:
-            raise MCPTransportError(f"no SSE data + not JSON: {e}; body[:300]={data[:300]}")
+        except json.JSONDecodeError:
+            raise MCPTransportError(
+                "Longbridge MCP response was neither SSE JSON nor plain JSON."
+            ) from None
 
     def _rpc(self, method: str, params: dict | None = None) -> Any:
         self._id += 1
         resp = self._post({"jsonrpc": "2.0", "id": self._id, "method": method, "params": params or {}})
         if "error" in resp:
-            raise MCPTransportError(f"JSON-RPC error: {resp['error']}")
+            error = resp.get("error")
+            code = error.get("code") if isinstance(error, dict) else None
+            safe_code = code if isinstance(code, int) else "unknown"
+            raise MCPTransportError(
+                f"Longbridge MCP JSON-RPC request failed (code={safe_code})."
+            )
         return resp.get("result")
 
     def _list_tools(self) -> dict[str, dict]:
@@ -219,7 +259,9 @@ class LongbridgeMCPClient:
         if name not in self.tools:
             self._tool_index = None  # force re-discovery
             if name not in self.tools:
-                raise MCPTransportError(f"Tool '{name}' not exposed by MCP server")
+                raise MCPTransportError(
+                    "Requested Longbridge MCP tool is not exposed by the server."
+                )
         result = self._rpc("tools/call", {"name": name, "arguments": arguments or {}})
         return _coerce_tool_result(result)
 
@@ -234,11 +276,7 @@ def _coerce_tool_result(result: Any) -> Any:
     if not isinstance(result, dict):
         return result
     if result.get("isError"):
-        content = result.get("content") or []
-        msg = "; ".join(
-            (c.get("text") or "") for c in content if isinstance(c, dict)
-        )
-        raise MCPTransportError(f"tool returned isError=true: {msg[:500]}")
+        raise MCPTransportError("Longbridge MCP tool returned an error result.")
     content = result.get("content")
     if not isinstance(content, list) or not content:
         return result
@@ -292,8 +330,7 @@ def _resolve_tool(client: LongbridgeMCPClient, capability: str) -> str:
         client._tool_index = None
         if name not in client.tools:
             raise MCPTransportError(
-                f"Tool '{name}' (capability '{capability}') not exposed by MCP server. "
-                f"Available ({len(client.tools)}): {sorted(client.tools)[:30]}..."
+                f"Longbridge MCP capability '{capability}' is unavailable."
             )
     return name
 

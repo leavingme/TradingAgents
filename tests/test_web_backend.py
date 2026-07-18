@@ -140,14 +140,31 @@ def test_get_analyst_prompts_exposes_prompt_catalog():
 
 def test_get_env_status_reports_provider_key_presence(monkeypatch):
     from web.backend import main
+    from tradingagents.dataflows import longbridge_mcp
 
     monkeypatch.setenv("MINIMAX_CN_API_KEY", "test-key")
+    monkeypatch.setattr(
+        longbridge_mcp,
+        "_load_token",
+        lambda: {
+            "access_token": "sentinel-secret",
+            "expiry": "2000-01-01T00:00:00+00:00",
+        },
+    )
     status = asyncio.run(main.get_env_status())
 
     assert status["providers"]["minimax-cn"]["env_var"] == "MINIMAX_CN_API_KEY"
     assert status["providers"]["minimax-cn"]["configured"] is True
     assert status["providers"]["ollama"]["required"] is False
     assert status["providers"]["openai_compatible"]["required"] is False
+    assert status["data_vendors"]["longbridge_mcp"] == {
+        "env_var": ".longbridge_mcp_token.json",
+        "configured": False,
+        "required": True,
+        "credential_status": "expired",
+        "expires_at": "2000-01-01T00:00:00+00:00",
+    }
+    assert "sentinel-secret" not in str(status)
 
 
 def test_run_create_request_passes_webui_config():

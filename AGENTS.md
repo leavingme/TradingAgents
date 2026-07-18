@@ -373,7 +373,13 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - **Longbridge token 过期时间**：token 位于仓库根目录
   `.longbridge_mcp_token.json`，签发后约 14–30 天过期（以文件内 `expiry` 为准）。
   运行长 smoke 或自然调度前只读取并检查 expiry 字段，不输出 token 字段。截至
-  2026-07-17：过期时间为 2026-07-18 23:56 CST，晚于首个自然调度窗口。
+  2026-07-18：过期时间为 2026-07-18 23:56 CST，晚于首个自然调度窗口但早于
+  下一次周一窗口。expiry 缺失、格式错误或无时区必须视为过期并触发
+  `MCPAuthError`；不得假定 token 有效。独立 Longbridge CLI OAuth 是 MCP 认证失败时
+  的第一 fallback，但每次到期前仍需用真实结构化能力探测确认其健康。
+  `/api/config/env-status` 的 `configured` 必须基于 token schema 和带时区 expiry
+  验证，不能只根据文件是否存在；可额外返回不含凭据的 `credential_status` 和
+  UTC `expires_at`。
 - **Longbridge-first OHLCV**：原始 OHLCV 默认优先使用 Longbridge MCP/CLI，
   Westock 作为覆盖率或 Longbridge 不可用时的 fallback。技术指标和基本面仍按
   各自配置链路。当分析日为当前交易日时，收盘缓冲期结束前不得把当日日 K

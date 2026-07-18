@@ -16,11 +16,17 @@ from .outcomes import (
     longitudinal_evaluation_policy,
     score_outcome,
 )
-from .operator_costs import attach_operator_cost_metrics
+from .operator_costs import (
+    ARCHITECTURE_RUN_COST_ROLLUP_SCHEMA,
+    architecture_run_cost_rollups,
+    attach_operator_cost_metrics,
+    load_operator_run_costs,
+)
 
 __all__ = [
     "ARCHITECTURE_OPTIMIZATION_ASSESSMENT_SCHEMA",
     "ARCHITECTURE_OUTCOME_ASSESSMENT_SCHEMA",
+    "ARCHITECTURE_RUN_COST_ROLLUP_SCHEMA",
     "DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES",
     "OutcomeMeasurement",
     "OUTCOME_SCORING_VERSION",
@@ -30,8 +36,10 @@ __all__ = [
     "DEFAULT_HOLD_BAND",
     "DEFAULT_OUTCOME_HORIZON_SESSIONS",
     "architecture_rollups",
+    "architecture_run_cost_rollups",
     "attach_operator_cost_metrics",
     "compare_architectures",
     "longitudinal_evaluation_policy",
+    "load_operator_run_costs",
     "score_outcome",
 ]

@@ -21,8 +21,10 @@ from tradingagents.automation.daily import (  # noqa: E402
 from tradingagents.evaluation import (  # noqa: E402
     DEFAULT_OUTCOME_HORIZON_SESSIONS,
     architecture_rollups,
+    architecture_run_cost_rollups,
     attach_operator_cost_metrics,
     compare_architectures,
+    load_operator_run_costs,
 )
 from tradingagents.runtime.history import history_store  # noqa: E402
 
@@ -68,6 +70,10 @@ def main() -> int:
             store=history_store,
         )
         pending = history_store.list_unevaluated_validated_runs(ticker=args.ticker)
+        run_cost_rows = load_operator_run_costs(
+            store=history_store,
+            ticker=args.ticker,
+        )
         payload = {
             "evaluation_count": len(evaluations),
             "pending_evaluation_count": len(pending),
@@ -75,6 +81,8 @@ def main() -> int:
                 _pending_evaluation_summary(row) for row in pending
             ],
             "rollups": architecture_rollups(evaluations),
+            "run_cost_sample_count": len(run_cost_rows),
+            "run_cost_rollups": architecture_run_cost_rollups(run_cost_rows),
         }
         if args.baseline and args.challenger:
             if args.baseline == args.challenger:

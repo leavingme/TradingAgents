@@ -93,10 +93,13 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
   字符数和错误计数；未知名称统一归入 `Unattributed`。不得保存参数、结果正文、错误
   正文或其 hash。它属于 operator 复盘证据，不得进入 Agent 纵向上下文或改变决策
   architecture fingerprint。
-- 多日逐工具成本只允许在 CLI/API operator 查询边界按 evaluation `run_id` 回读最终 stats；
-  最多处理 5000 行，必须复制而非改写 History Store 返回值。rollup/paired comparison 可
-  公开覆盖数、均值、差值和执行顺序分层，但 `include_runtime_costs=False` 的 Agent 纵向
-  上下文必须完全排除 `tool_context` 与优化 assessment。
+- 多日逐工具成本只允许在 CLI/API operator 查询边界按 `run_id` 回读最终 stats；最多
+  处理 5000 行，必须复制而非改写 History Store 返回值。已结算 outcome rollup 与尚未
+  结算的终态 run cost rollup 必须分开：后者可立即包含 completed/review_required/failed
+  的成本与状态分布，但 cost-only cohort 不得进入收益比较或降低 5-session/配对晋级门槛。
+  rollup/paired comparison 可公开覆盖数、均值、差值和执行顺序分层，但
+  `include_runtime_costs=False` 的 Agent 纵向上下文必须完全排除 `tool_context` 与优化
+  assessment。
 - 历史 run 和刷新语义必须从 SQLite + persisted events 恢复。刷新页面后，已完成
   agent 仍应显示完成状态；运行中的任务应通过 SSE replay + live queue 继续呈现。
 - 每个完成 Graph 的每日调度 live run 应在 canonical decision 已形成后追加

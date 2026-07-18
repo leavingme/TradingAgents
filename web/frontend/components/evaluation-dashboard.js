@@ -19,73 +19,108 @@ export function buildEvaluationViewModel(payload = {}) {
     ? payload.pending_evaluations
     : [];
   const rollups = Array.isArray(payload.rollups) ? payload.rollups : [];
-  const cohorts = rollups.map(row => ({
-    key: cohortKey(row),
-    version: String(row?.architecture_version || 'unknown'),
-    fingerprint: String(row?.architecture_fingerprint || 'unknown'),
-    sampleCount: Number(row?.sample_count || 0),
-    hitRate: finiteNumber(row?.directional_hit_rate),
-    meanAlpha: finiteNumber(row?.mean_alpha_return),
-    meanScore: finiteNumber(row?.mean_score),
-    outcomeStatus: String(row?.outcome_assessment?.status || 'not_observed'),
-    optimization: {
-      readinessStatus: String(
-        row?.optimization_assessment?.readiness_status || 'not_observed',
+  const runCostRollups = Array.isArray(payload.run_cost_rollups)
+    ? payload.run_cost_rollups
+    : [];
+  const outcomeByKey = new Map(rollups.map(row => [cohortKey(row), row]));
+  const costByKey = new Map(runCostRollups.map(row => [cohortKey(row), row]));
+  const cohortKeys = [...new Set([...outcomeByKey.keys(), ...costByKey.keys()])];
+  const cohorts = cohortKeys.map(key => {
+    const row = outcomeByKey.get(key) || {};
+    const runCost = costByKey.get(key) || {};
+    const agentHotspots = Array.isArray(runCost.agent_hotspots)
+      ? runCost.agent_hotspots
+      : row?.optimization_assessment?.cost_hotspots;
+    const toolHotspots = Array.isArray(runCost.tool_context_hotspots)
+      ? runCost.tool_context_hotspots
+      : row?.optimization_assessment?.tool_context_hotspots;
+    return {
+      key,
+      version: String(
+        row?.architecture_version || runCost?.architecture_version || 'unknown',
       ),
-      recommendedAction: String(
-        row?.optimization_assessment?.recommended_action
-          || 'continue_sample_collection',
+      fingerprint: String(
+        row?.architecture_fingerprint
+          || runCost?.architecture_fingerprint
+          || 'unknown',
       ),
-      controlledExperimentReady: Boolean(
-        row?.optimization_assessment?.controlled_experiment_ready,
-      ),
-      costHotspots: Array.isArray(row?.optimization_assessment?.cost_hotspots)
-        ? row.optimization_assessment.cost_hotspots.slice(0, 3).map(item => ({
-          agent: String(item?.agent || 'unknown'),
-          meanTokensIn: finiteNumber(item?.mean_tokens_in),
-          sampleCount: Number(item?.sample_count || 0),
-        }))
-        : [],
-      toolContextHotspots: Array.isArray(
-        row?.optimization_assessment?.tool_context_hotspots,
-      )
-        ? row.optimization_assessment.tool_context_hotspots.slice(0, 3).map(item => ({
-          tool: String(item?.tool || 'unknown'),
-          meanOutputChars: finiteNumber(item?.mean_output_chars),
-          sampleCount: Number(item?.sample_count || 0),
-        }))
-        : [],
-      weakestRating: row?.optimization_assessment?.weakest_rating
-        ? {
-          rating: String(row.optimization_assessment.weakest_rating.rating || 'unknown'),
-          meanScore: finiteNumber(
-            row.optimization_assessment.weakest_rating.mean_score,
-          ),
-          sampleCount: Number(
-            row.optimization_assessment.weakest_rating.sample_count || 0,
-          ),
-        }
-        : null,
-    },
-    rolling: Object.entries(
-      row?.outcome_assessment?.rolling_monitoring?.tickers || {},
-    ).flatMap(([ticker, tickerData]) => Object.entries(tickerData?.windows || {}).map(
-      ([windowSize, window]) => ({
-        ticker,
-        windowSize: Number(windowSize),
-        status: String(window?.status || 'insufficient_history'),
-        currentCount: Number(window?.current?.sample_count || 0),
-        currentMeanScore: finiteNumber(window?.current?.mean_score),
-        previousMeanScore: finiteNumber(window?.previous?.mean_score),
-        scoreDelta: finiteNumber(window?.current_minus_previous?.mean_score),
-        alphaDelta: finiteNumber(window?.current_minus_previous?.mean_alpha_return),
-      }),
-    )),
-  }));
+      sampleCount: Number(row?.sample_count || 0),
+      costSampleCount: Number(runCost?.sample_count || 0),
+      costStatsObservedCount: Number(runCost?.stats_observed_count || 0),
+      runStatusCounts: runCost?.run_status_counts
+        && typeof runCost.run_status_counts === 'object'
+        ? Object.fromEntries(Object.entries(runCost.run_status_counts).map(
+          ([status, count]) => [String(status), Number(count || 0)],
+        ))
+        : {},
+      hitRate: finiteNumber(row?.directional_hit_rate),
+      meanAlpha: finiteNumber(row?.mean_alpha_return),
+      meanScore: finiteNumber(row?.mean_score),
+      outcomeStatus: String(row?.outcome_assessment?.status || 'not_observed'),
+      optimization: {
+        readinessStatus: String(
+          row?.optimization_assessment?.readiness_status || 'not_observed',
+        ),
+        recommendedAction: String(
+          row?.optimization_assessment?.recommended_action
+            || 'continue_sample_collection',
+        ),
+        controlledExperimentReady: Boolean(
+          row?.optimization_assessment?.controlled_experiment_ready,
+        ),
+        costHotspots: Array.isArray(agentHotspots)
+          ? agentHotspots.slice(0, 3).map(item => ({
+            agent: String(item?.agent || 'unknown'),
+            meanTokensIn: finiteNumber(item?.mean_tokens_in),
+            sampleCount: Number(item?.sample_count || 0),
+          }))
+          : [],
+        toolContextHotspots: Array.isArray(toolHotspots)
+          ? toolHotspots.slice(0, 3).map(item => ({
+            tool: String(item?.tool || 'unknown'),
+            meanOutputChars: finiteNumber(item?.mean_output_chars),
+            sampleCount: Number(item?.sample_count || 0),
+          }))
+          : [],
+        weakestRating: row?.optimization_assessment?.weakest_rating
+          ? {
+            rating: String(row.optimization_assessment.weakest_rating.rating || 'unknown'),
+            meanScore: finiteNumber(
+              row.optimization_assessment.weakest_rating.mean_score,
+            ),
+            sampleCount: Number(
+              row.optimization_assessment.weakest_rating.sample_count || 0,
+            ),
+          }
+          : null,
+      },
+      rolling: Object.entries(
+        row?.outcome_assessment?.rolling_monitoring?.tickers || {},
+      ).flatMap(([ticker, tickerData]) => Object.entries(tickerData?.windows || {}).map(
+        ([windowSize, window]) => ({
+          ticker,
+          windowSize: Number(windowSize),
+          status: String(window?.status || 'insufficient_history'),
+          currentCount: Number(window?.current?.sample_count || 0),
+          currentMeanScore: finiteNumber(window?.current?.mean_score),
+          previousMeanScore: finiteNumber(window?.previous?.mean_score),
+          scoreDelta: finiteNumber(window?.current_minus_previous?.mean_score),
+          alphaDelta: finiteNumber(window?.current_minus_previous?.mean_alpha_return),
+        }),
+      )),
+    };
+  });
   return {
     evaluationCount: evaluations.length,
     pendingCount: Number(payload.pending_evaluation_count ?? pending.length),
     cohortCount: cohorts.length,
+    runCostSampleCount: Number(
+      payload.run_cost_sample_count
+        ?? runCostRollups.reduce(
+          (total, row) => total + Number(row.sample_count || 0),
+          0,
+        ),
+    ),
     pending,
     cohorts,
     comparison: payload.comparison || null,
@@ -190,6 +225,7 @@ export function createEvaluationDashboard({
       metric(t('evaluatedResults'), view.evaluationCount),
       metric(t('pendingResults'), view.pendingCount),
       metric(t('architectureCohorts'), view.cohortCount),
+      metric(t('costRuns'), view.runCostSampleCount),
     );
   }
 
@@ -254,6 +290,7 @@ export function createEvaluationDashboard({
         metric(t('hitRate'), percent(cohort.hitRate)),
         metric(t('meanAlpha'), percent(cohort.meanAlpha)),
         metric(t('meanScore'), number(cohort.meanScore)),
+        metric(t('costRuns'), cohort.costSampleCount),
       );
       card.append(header, metrics);
       const diagnostic = element('div', 'evaluation-diagnostic');
@@ -272,6 +309,20 @@ export function createEvaluationDashboard({
           t(cohort.optimization.controlledExperimentReady ? 'yes' : 'no'),
         ),
       );
+      if (cohort.costSampleCount) {
+        diagnostic.append(
+          comparisonRow(
+            t('statsCoverage'),
+            `${cohort.costStatsObservedCount}/${cohort.costSampleCount}`,
+          ),
+          comparisonRow(
+            t('runStatuses'),
+            Object.entries(cohort.runStatusCounts)
+              .map(([status, count]) => `${status}: ${count}`)
+              .join(' · '),
+          ),
+        );
+      }
       if (cohort.optimization.costHotspots.length) {
         diagnostic.append(comparisonRow(
           t('costHotspots'),
@@ -325,7 +376,8 @@ export function createEvaluationDashboard({
   function populateComparison(view) {
     const previousBaseline = baselineField.value;
     const previousChallenger = challengerField.value;
-    const options = view.cohorts.map(cohort => {
+    const comparableCohorts = view.cohorts.filter(cohort => cohort.sampleCount > 0);
+    const options = comparableCohorts.map(cohort => {
       const option = element(
         'option',
         null,
@@ -336,13 +388,15 @@ export function createEvaluationDashboard({
     });
     baselineField.replaceChildren(...options.map(option => option.cloneNode(true)));
     challengerField.replaceChildren(...options.map(option => option.cloneNode(true)));
-    const keys = new Set(view.cohorts.map(cohort => cohort.key));
+    const keys = new Set(comparableCohorts.map(cohort => cohort.key));
     baselineField.value = keys.has(previousBaseline)
       ? previousBaseline
-      : (view.cohorts[0]?.key || '');
+      : (comparableCohorts[0]?.key || '');
     challengerField.value = keys.has(previousChallenger)
       ? previousChallenger
-      : (view.cohorts.find(cohort => cohort.version !== view.cohorts[0]?.version)?.key || '');
+      : (comparableCohorts.find(
+        cohort => cohort.version !== comparableCohorts[0]?.version,
+      )?.key || '');
     compareButton.disabled = !baselineField.value || !challengerField.value;
   }
 

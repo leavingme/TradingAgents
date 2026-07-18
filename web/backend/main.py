@@ -320,8 +320,10 @@ async def get_decision_evaluations(
     from tradingagents.evaluation import (
         DEFAULT_OUTCOME_HORIZON_SESSIONS,
         architecture_rollups,
+        architecture_run_cost_rollups,
         attach_operator_cost_metrics,
         compare_architectures,
+        load_operator_run_costs,
     )
     from tradingagents.runtime import history_store
 
@@ -370,6 +372,11 @@ async def get_decision_evaluations(
         store=history_store,
     )
     pending_rows = history_store.list_unevaluated_validated_runs(ticker=ticker)
+    run_cost_rows = load_operator_run_costs(
+        store=history_store,
+        ticker=ticker,
+        limit=bounded_limit,
+    )
     pending = [
         {
             "run_id": row.get("run_id"),
@@ -391,6 +398,8 @@ async def get_decision_evaluations(
         "pending_evaluation_count": len(pending_rows),
         "pending_evaluations": pending,
         "rollups": architecture_rollups(evaluations),
+        "run_cost_sample_count": len(run_cost_rows),
+        "run_cost_rollups": architecture_run_cost_rollups(run_cost_rows),
     }
     if baseline and challenger:
         try:

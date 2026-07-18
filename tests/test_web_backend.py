@@ -847,6 +847,19 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
     assert response["evaluations"][0]["tool_context"]["get_news"][
         "output_chars"
     ] == 80000
+    assert response["run_cost_sample_count"] == 2
+    evaluated_cost = next(
+        row
+        for row in response["run_cost_rollups"]
+        if row["architecture_fingerprint"] == "legacy-unspecified"
+    )
+    assert evaluated_cost["sample_count"] == 1
+    assert evaluated_cost["mean_tokens_in"] == 900.0
+    assert evaluated_cost["tool_context_hotspots"] == [{
+        "tool": "get_news",
+        "mean_output_chars": 80000.0,
+        "sample_count": 1,
+    }]
     assert response["rollups"] == [{
         "architecture_version": "baseline",
         "architecture_fingerprint": "legacy-unspecified",

@@ -8,7 +8,7 @@ import { createEventStream } from './event-stream.js?v=20260718-architecture-eva
 import { createRouter } from './router.js';
 import { createSettingsController } from './components/settings-controller.js';
 import { createI18n } from './i18n.js';
-import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-tool-context-rollups';
+import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-immediate-cost-rollups';
 
 /**
  * TradingAgents Web UI — Enhanced Application Script
@@ -243,6 +243,9 @@ const translations = {
     evaluatedResults: 'Evaluated results',
     pendingResults: 'Pending results',
     architectureCohorts: 'Architecture cohorts',
+    costRuns: 'Cost runs',
+    statsCoverage: 'Stats coverage',
+    runStatuses: 'Run statuses',
     noEvaluations: 'No mature fixed-horizon outcomes yet.',
     noPendingEvaluations: 'No validated decisions are awaiting settlement.',
     loadingEvaluations: 'Loading audited evaluations…',
@@ -557,6 +560,9 @@ const translations = {
     evaluatedResults: '已结算结果',
     pendingResults: '待结算结果',
     architectureCohorts: '架构 Cohort',
+    costRuns: '成本运行样本',
+    statsCoverage: '统计覆盖',
+    runStatuses: '运行状态',
     noEvaluations: '尚无成熟的固定期限结果。',
     noPendingEvaluations: '目前没有等待结算的有效决策。',
     loadingEvaluations: '正在加载经审计的评估…',

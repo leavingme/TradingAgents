@@ -191,6 +191,32 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
     evaluations: [{ run_id: 'evaluated' }],
     pending_evaluation_count: 1,
     pending_evaluations: [{ run_id: 'pending' }],
+    run_cost_sample_count: 2,
+    run_cost_rollups: [{
+      architecture_version: 'candidate',
+      architecture_fingerprint: 'fingerprint',
+      sample_count: 1,
+      stats_observed_count: 1,
+      run_status_counts: { completed: 1 },
+      agent_hotspots: [{
+        agent: 'Research Manager',
+        mean_tokens_in: 1100,
+        sample_count: 1,
+      }],
+      tool_context_hotspots: [{
+        tool: 'get_financial_evidence',
+        mean_output_chars: 40000,
+        sample_count: 1,
+      }],
+    }, {
+      architecture_version: 'new-cost-only',
+      architecture_fingerprint: 'new-fingerprint',
+      sample_count: 1,
+      stats_observed_count: 1,
+      run_status_counts: { review_required: 1 },
+      agent_hotspots: [],
+      tool_context_hotspots: [],
+    }],
     rollups: [{
       architecture_version: 'candidate',
       architecture_fingerprint: 'fingerprint',
@@ -242,7 +268,13 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   });
   assert.equal(view.evaluationCount, 1);
   assert.equal(view.pendingCount, 1);
-  assert.equal(view.cohortCount, 1);
+  assert.equal(view.cohortCount, 2);
+  assert.equal(view.runCostSampleCount, 2);
+  assert.equal(view.cohorts[0].costSampleCount, 1);
+  assert.equal(view.cohorts[0].costStatsObservedCount, 1);
+  assert.deepEqual(view.cohorts[0].runStatusCounts, { completed: 1 });
+  assert.equal(view.cohorts[1].sampleCount, 0);
+  assert.equal(view.cohorts[1].costSampleCount, 1);
   assert.deepEqual(view.cohorts[0].rolling[0], {
     ticker: 'NVDA',
     windowSize: 5,
@@ -259,13 +291,13 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
     controlledExperimentReady: true,
     costHotspots: [{
       agent: 'Research Manager',
-      meanTokensIn: 1200,
-      sampleCount: 20,
+      meanTokensIn: 1100,
+      sampleCount: 1,
     }],
     toolContextHotspots: [{
       tool: 'get_financial_evidence',
-      meanOutputChars: 42000,
-      sampleCount: 20,
+      meanOutputChars: 40000,
+      sampleCount: 1,
     }],
     weakestRating: {
       rating: 'hold',

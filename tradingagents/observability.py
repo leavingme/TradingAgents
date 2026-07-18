@@ -79,3 +79,15 @@ def normalize_stats_breakdown(value: Any) -> dict[str, dict[str, dict[str, int]]
                 field: int(metrics[field]) for field in fields
             }
     return normalized
+
+
+def normalize_stats_snapshot(value: Any) -> dict[str, Any]:
+    """Normalize top-level totals and bounded breakdowns from one stats event."""
+    breakdown = normalize_stats_breakdown(value)
+    totals: dict[str, int] = {}
+    if isinstance(value, dict):
+        for field in STATS_COST_FIELDS:
+            metric = _normalized_metric(value.get(field))
+            if metric is not None:
+                totals[field] = metric
+    return {"totals": totals, **breakdown}

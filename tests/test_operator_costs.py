@@ -1,6 +1,10 @@
 import pytest
 
-from tradingagents.evaluation import attach_operator_cost_metrics
+from tradingagents.evaluation import (
+    architecture_run_cost_rollups,
+    attach_operator_cost_metrics,
+    load_operator_run_costs,
+)
 
 
 class FakeStore:
@@ -71,3 +75,105 @@ def test_operator_cost_enrichment_rejects_unbounded_queries():
             [{"run_id": "same"}] * 5001,
             store=FakeStore(),
         )
+
+
+class RunCostStore:
+    def __init__(self):
+        self.rows = [
+            {
+                "run_id": "run-1",
+                "ticker": "NVDA",
+                "analysis_date": "2026-07-17",
+                "status": "completed",
+                "decision_status": "validated",
+                "architecture_version": "production",
+                "architecture_fingerprint": "fp",
+                "started_at": "2026-07-17T20:00:00+00:00",
+                "finished_at": "2026-07-17T20:02:00+00:00",
+            },
+            {
+                "run_id": "run-2",
+                "ticker": "NVDA",
+                "analysis_date": "2026-07-18",
+                "status": "review_required",
+                "decision_status": "review_required",
+                "architecture_version": "production",
+                "architecture_fingerprint": "fp",
+                "started_at": "2026-07-18T20:00:00+00:00",
+                "finished_at": "2026-07-18T20:03:00+00:00",
+            },
+            {
+                "run_id": "running",
+                "ticker": "NVDA",
+                "status": "running",
+                "architecture_version": "production",
+                "architecture_fingerprint": "fp",
+            },
+            {
+                "run_id": "other",
+                "ticker": "AAPL",
+                "status": "completed",
+                "architecture_version": "production",
+                "architecture_fingerprint": "fp",
+            },
+        ]
+
+    def list_runs(self, limit):
+        assert limit == 5000
+        return self.rows
+
+    def get_run(self, run_id):
+        index = 1 if run_id == "run-1" else 2
+        return {
+            "events": [{
+                "type": "stats",
+                "content": {
+                    "llm_calls": 10 + index,
+                    "tool_calls": 20 + index,
+                    "tokens_in": 1000 * index,
+                    "tokens_out": 100 * index,
+                    "by_agent": {
+                        "News Analyst": {
+                            "llm_calls": 2,
+                            "tool_calls": 3,
+                            "tokens_in": 700 * index,
+                            "tokens_out": 70 * index,
+                        },
+                    },
+                    "by_tool": {
+                        "get_news": {
+                            "tool_calls": 2,
+                            "input_chars": 20,
+                            "output_chars": 40000 * index,
+                            "errors": 0,
+                        },
+                    },
+                },
+            }],
+        }
+
+
+def test_run_cost_rollups_use_terminal_runs_before_outcome_maturity():
+    rows = load_operator_run_costs(store=RunCostStore(), ticker="nvda")
+    assert [row["run_id"] for row in rows] == ["run-1", "run-2"]
+
+    rollup = architecture_run_cost_rollups(rows)[0]
+    assert rollup["schema"] == "tradingagents/architecture-run-cost-rollup/v1"
+    assert rollup["sample_count"] == 2
+    assert rollup["stats_observed_count"] == 2
+    assert rollup["run_status_counts"] == {
+        "completed": 1,
+        "review_required": 1,
+    }
+    assert rollup["mean_runtime_seconds"] == 150.0
+    assert rollup["mean_tokens_in"] == 1500.0
+    assert rollup["agent_hotspots"] == [{
+        "agent": "News Analyst",
+        "mean_tokens_in": 1050.0,
+        "sample_count": 2,
+    }]
+    assert rollup["tool_context_hotspots"] == [{
+        "tool": "get_news",
+        "mean_output_chars": 60000.0,
+        "sample_count": 2,
+    }]

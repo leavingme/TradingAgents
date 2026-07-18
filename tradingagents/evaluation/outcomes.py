@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite, sqrt
-from statistics import fmean, stdev
+from statistics import fmean, median, stdev
 from typing import Any
 
 
@@ -23,7 +23,11 @@ OUTCOME_MEASUREMENT_VERSION = "post-decision-day-close-v1"
 LEGACY_OUTCOME_MEASUREMENT_VERSION = "decision-close-v1"
 DEFAULT_HOLD_BAND = 0.02
 DEFAULT_OUTCOME_HORIZON_SESSIONS = 5
+DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES = 20
 LONGITUDINAL_CONTEXT_SCHEMA = "tradingagents/audited-longitudinal-outcomes/v8"
+ARCHITECTURE_OUTCOME_ASSESSMENT_SCHEMA = (
+    "tradingagents/architecture-outcome-assessment/v1"
+)
 
 _RUNTIME_COST_FIELDS = (
     "runtime_seconds",
@@ -115,6 +119,16 @@ def _runtime_cost_value(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return numeric if isfinite(numeric) and numeric >= 0 else None
+
+
+def _finite_number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if isfinite(numeric) else None
 
 
 def _agent_cost_mapping(value: Any) -> dict[str, dict[str, Any]]:
@@ -401,6 +415,135 @@ def _overlap_adjusted_standard_error(
     }
 
 
+def _architecture_outcome_assessment(
+    rows: list[dict[str, Any]],
+    *,
+    horizon_sessions: int,
+) -> dict[str, Any]:
+    """Describe one architecture cohort without claiming causal improvement."""
+    score_rows = [
+        (row, score)
+        for row in rows
+        if (score := _finite_number(row.get("score"))) is not None
+    ]
+    scores = [score for _, score in score_rows]
+    alpha_returns = [
+        value
+        for row in rows
+        if (value := _finite_number(row.get("alpha_return"))) is not None
+    ]
+    raw_returns = [
+        value
+        for row in rows
+        if (value := _finite_number(row.get("raw_return"))) is not None
+    ]
+    negative_scores = [value for value in scores if value < 0]
+
+    series_by_ticker: dict[str, list[tuple[str, str, str, float]]] = defaultdict(list)
+    for row, score in score_rows:
+        ticker = row.get("ticker")
+        analysis_date = row.get("analysis_date")
+        entry_date = row.get("entry_date")
+        exit_date = row.get("exit_date")
+        if not all(
+            isinstance(value, str) and value
+            for value in (ticker, analysis_date, entry_date, exit_date)
+        ):
+            continue
+        series_by_ticker[str(ticker).upper()].append(
+            (str(analysis_date), str(entry_date), str(exit_date), score)
+        )
+    temporal_sample_count = sum(len(values) for values in series_by_ticker.values())
+    uncertainty = _overlap_adjusted_standard_error(
+        series_by_ticker,
+        horizon_sessions=horizon_sessions,
+    )
+    effective_sample_count = (
+        max(
+            2,
+            min(
+                temporal_sample_count,
+                int(uncertainty["overlap_effective_sample_size"] + 1e-12),
+            ),
+        )
+        if temporal_sample_count > 1
+        else temporal_sample_count
+    )
+    critical_value = _student_t_critical_95(effective_sample_count)
+    standard_error = uncertainty["standard_error"]
+    score_mean = fmean(scores) if scores else None
+    margin = (
+        critical_value * standard_error
+        if critical_value is not None
+        and standard_error is not None
+        and temporal_sample_count == len(scores)
+        else None
+    )
+
+    rating_groups: dict[str, list[tuple[dict[str, Any], float]]] = defaultdict(list)
+    for row, score in score_rows:
+        rating = str(row.get("rating") or "unknown").strip().lower()
+        if rating not in _EXPOSURE:
+            rating = "unknown"
+        rating_groups[rating].append((row, score))
+    rating_breakdown = {}
+    for rating, group in sorted(rating_groups.items()):
+        group_alpha = [
+            value
+            for row, _ in group
+            if (value := _finite_number(row.get("alpha_return"))) is not None
+        ]
+        rating_breakdown[rating] = {
+            "sample_count": len(group),
+            "directional_hit_rate": fmean(
+                bool(row.get("directional_hit")) for row, _ in group
+            ),
+            "mean_alpha_return": fmean(group_alpha) if group_alpha else None,
+            "mean_score": fmean(score for _, score in group),
+        }
+
+    if len(scores) < DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES:
+        status = "insufficient_samples"
+    elif temporal_sample_count != len(scores):
+        status = "incomplete_temporal_evidence"
+    else:
+        status = "uncertainty_ready"
+    return {
+        "schema": ARCHITECTURE_OUTCOME_ASSESSMENT_SCHEMA,
+        "status": status,
+        "minimum_samples": DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES,
+        "score_sample_count": len(scores),
+        "temporal_sample_count": temporal_sample_count,
+        "missing_temporal_windows": len(scores) - temporal_sample_count,
+        "mean_score": score_mean,
+        "median_score": median(scores) if scores else None,
+        "score_standard_deviation": stdev(scores) if len(scores) > 1 else None,
+        "negative_score_rate": (
+            len(negative_scores) / len(scores) if scores else None
+        ),
+        "worst_score": min(scores) if scores else None,
+        "mean_negative_score": (
+            fmean(negative_scores) if negative_scores else None
+        ),
+        "median_alpha_return": median(alpha_returns) if alpha_returns else None,
+        "median_raw_return": median(raw_returns) if raw_returns else None,
+        "lower_95_mean_score": (
+            score_mean - margin
+            if score_mean is not None and margin is not None
+            else None
+        ),
+        "upper_95_mean_score": (
+            score_mean + margin
+            if score_mean is not None and margin is not None
+            else None
+        ),
+        "critical_value": critical_value,
+        "critical_effective_sample_count": effective_sample_count,
+        **uncertainty,
+        "rating_breakdown": rating_breakdown,
+    }
+
+
 def _scoring_policy(row: dict[str, Any]) -> tuple[str, float]:
     version = str(row.get("scoring_version") or OUTCOME_SCORING_VERSION)
     hold_band = float(row.get("hold_band", DEFAULT_HOLD_BAND))
@@ -485,8 +628,9 @@ def architecture_rollups(
 ) -> list[dict[str, Any]]:
     """Aggregate immutable evaluations without mixing architecture fingerprints.
 
-    Runtime cost metrics belong in operator-facing optimization views. Callers
-    constructing investment-agent context can exclude them explicitly.
+    Runtime cost metrics and descriptive uncertainty assessments belong in
+    operator-facing optimization views. Callers constructing investment-agent
+    context exclude both through ``include_runtime_costs=False``.
     """
     groups: dict[
         tuple[str, str, str, str, float, int], list[dict[str, Any]]
@@ -542,6 +686,10 @@ def architecture_rollups(
             ),
         }
         if include_runtime_costs:
+            rollup["outcome_assessment"] = _architecture_outcome_assessment(
+                rows,
+                horizon_sessions=horizon,
+            )
             for field in _RUNTIME_COST_FIELDS:
                 values = [
                     value
@@ -588,8 +736,8 @@ def compare_architectures(
     baseline_fingerprint: str | None = None,
     challenger_fingerprint: str | None = None,
     horizon_sessions: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
-    minimum_samples: int = 20,
-    minimum_paired_samples: int = 20,
+    minimum_samples: int = DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES,
+    minimum_paired_samples: int = DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES,
     minimum_score_improvement: float = 0.002,
     maximum_pair_start_gap_seconds: float = 3600.0,
 ) -> dict[str, Any]:

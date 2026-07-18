@@ -722,6 +722,59 @@ def test_architecture_rollups_do_not_merge_mixed_fingerprints():
     assert {row["architecture_fingerprint"] for row in rollups} == {"fp-a", "fp-b"}
 
 
+def test_architecture_rollup_assesses_multi_day_distribution_and_overlap():
+    rows = []
+    for index in range(20):
+        score = 0.01 if index < 15 else -0.02
+        rows.append({
+            "ticker": "NVDA",
+            "analysis_date": f"2026-01-{index + 1:02d}",
+            "entry_date": f"2026-01-{index + 1:02d}",
+            "exit_date": "2026-02-01",
+            "architecture_version": "candidate",
+            "architecture_fingerprint": "candidate-fp",
+            "horizon_sessions": 5,
+            "rating": "Buy" if index < 10 else "Hold",
+            "directional_hit": score > 0,
+            "raw_return": score + 0.01,
+            "alpha_return": score,
+            "score": score,
+        })
+
+    assessment = architecture_rollups(rows)[0]["outcome_assessment"]
+
+    assert assessment["status"] == "uncertainty_ready"
+    assert assessment["score_sample_count"] == 20
+    assert assessment["temporal_sample_count"] == 20
+    assert assessment["negative_score_rate"] == 0.25
+    assert assessment["worst_score"] == -0.02
+    assert assessment["mean_negative_score"] == -0.02
+    assert assessment["median_score"] == 0.01
+    assert assessment["overlap_pairs_used"] > 0
+    assert assessment["overlap_adjusted_standard_error"] >= (
+        assessment["iid_standard_error"]
+    )
+    assert assessment["lower_95_mean_score"] is not None
+    assert assessment["upper_95_mean_score"] is not None
+    assert assessment["rating_breakdown"]["buy"]["sample_count"] == 10
+    assert assessment["rating_breakdown"]["hold"]["sample_count"] == 10
+    agent_context_rollup = architecture_rollups(
+        rows,
+        include_runtime_costs=False,
+    )[0]
+    assert "outcome_assessment" not in agent_context_rollup
+
+    incomplete = [dict(row) for row in rows]
+    incomplete[0].pop("exit_date")
+    incomplete_assessment = architecture_rollups(incomplete)[0][
+        "outcome_assessment"
+    ]
+    assert incomplete_assessment["status"] == "incomplete_temporal_evidence"
+    assert incomplete_assessment["missing_temporal_windows"] == 1
+    assert incomplete_assessment["lower_95_mean_score"] is None
+    assert incomplete_assessment["upper_95_mean_score"] is None
+
+
 def test_architecture_pairing_requires_identical_ohlcv_provenance():
     evaluations = []
     for index in range(20):

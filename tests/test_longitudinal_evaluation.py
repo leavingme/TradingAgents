@@ -758,6 +758,23 @@ def test_architecture_rollup_assesses_multi_day_distribution_and_overlap():
     assert assessment["upper_95_mean_score"] is not None
     assert assessment["rating_breakdown"]["buy"]["sample_count"] == 10
     assert assessment["rating_breakdown"]["hold"]["sample_count"] == 10
+    monitoring = assessment["rolling_monitoring"]
+    assert monitoring["schema"] == (
+        "tradingagents/rolling-outcome-monitoring/v1"
+    )
+    assert monitoring["automatic_architecture_mutation_allowed"] is False
+    assert monitoring["causal_claim_allowed"] is False
+    nvda = monitoring["tickers"]["NVDA"]
+    assert nvda["distinct_analysis_date_count"] == 20
+    assert nvda["ambiguous_analysis_date_count"] == 0
+    assert nvda["windows"]["5"]["status"] == "comparison_ready"
+    assert nvda["windows"]["5"]["current"]["mean_score"] == -0.02
+    assert nvda["windows"]["5"]["previous"]["mean_score"] == 0.01
+    assert nvda["windows"]["5"]["current_minus_previous"]["mean_score"] == (
+        pytest.approx(-0.03)
+    )
+    assert nvda["windows"]["10"]["status"] == "comparison_ready"
+    assert nvda["windows"]["20"]["status"] == "insufficient_history"
     agent_context_rollup = architecture_rollups(
         rows,
         include_runtime_costs=False,
@@ -773,6 +790,36 @@ def test_architecture_rollup_assesses_multi_day_distribution_and_overlap():
     assert incomplete_assessment["missing_temporal_windows"] == 1
     assert incomplete_assessment["lower_95_mean_score"] is None
     assert incomplete_assessment["upper_95_mean_score"] is None
+
+
+def test_rolling_monitoring_excludes_ambiguous_same_day_retries():
+    rows = []
+    for index in range(12):
+        rows.append({
+            "run_id": f"run-{index}",
+            "ticker": "NVDA",
+            "analysis_date": f"2026-03-{index + 1:02d}",
+            "architecture_version": "candidate",
+            "architecture_fingerprint": "candidate-fp",
+            "horizon_sessions": 5,
+            "directional_hit": True,
+            "raw_return": 0.01,
+            "alpha_return": 0.01,
+            "score": 0.01,
+        })
+    rows.append({**rows[4], "run_id": "retry-same-date", "score": -0.50})
+
+    monitoring = architecture_rollups(rows)[0]["outcome_assessment"][
+        "rolling_monitoring"
+    ]
+    nvda = monitoring["tickers"]["NVDA"]
+
+    assert nvda["distinct_analysis_date_count"] == 11
+    assert nvda["ambiguous_analysis_date_count"] == 1
+    assert nvda["ambiguous_rows_excluded"] == 2
+    assert nvda["windows"]["5"]["status"] == "comparison_ready"
+    assert nvda["windows"]["5"]["current"]["mean_score"] == 0.01
+    assert nvda["windows"]["5"]["previous"]["mean_score"] == 0.01
 
 
 def test_architecture_pairing_requires_identical_ohlcv_provenance():

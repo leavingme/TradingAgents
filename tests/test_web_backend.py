@@ -841,7 +841,7 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         "analysis_evidence_complete_count": 0,
         "architecture_input_complete_count": 0,
         "outcome_assessment": {
-            "schema": "tradingagents/architecture-outcome-assessment/v1",
+            "schema": "tradingagents/architecture-outcome-assessment/v2",
             "status": "insufficient_samples",
             "minimum_samples": 20,
             "score_sample_count": 1,
@@ -873,6 +873,54 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
                     "mean_alpha_return": 0.03,
                     "mean_score": 0.03,
                 }
+            },
+            "rolling_monitoring": {
+                "schema": "tradingagents/rolling-outcome-monitoring/v1",
+                "interpretation": (
+                    "Descriptive recent-versus-previous monitoring only. "
+                    "Sequential windows can overlap in return exposure and remain "
+                    "regime-confounded."
+                ),
+                "automatic_architecture_mutation_allowed": False,
+                "causal_claim_allowed": False,
+                "ordering": "ticker_then_analysis_date",
+                "window_sizes": [5, 10, 20],
+                "invalid_rows_excluded": 0,
+                "tickers": {
+                    "NVDA": {
+                        "distinct_analysis_date_count": 1,
+                        "ambiguous_analysis_date_count": 0,
+                        "ambiguous_rows_excluded": 0,
+                        "windows": {
+                            str(size): {
+                                "status": "insufficient_history",
+                                "required_samples": 2 * size,
+                                "current": {
+                                    "sample_count": 1,
+                                    "from_analysis_date": "2026-07-01",
+                                    "through_analysis_date": "2026-07-01",
+                                    "mean_score": 0.03,
+                                    "median_score": 0.03,
+                                    "mean_alpha_return": 0.03,
+                                    "directional_hit_rate": 1.0,
+                                    "negative_score_rate": 0.0,
+                                },
+                                "previous": {
+                                    "sample_count": 0,
+                                    "from_analysis_date": None,
+                                    "through_analysis_date": None,
+                                    "mean_score": None,
+                                    "median_score": None,
+                                    "mean_alpha_return": None,
+                                    "directional_hit_rate": None,
+                                    "negative_score_rate": None,
+                                },
+                                "current_minus_previous": None,
+                            }
+                            for size in (5, 10, 20)
+                        },
+                    }
+                },
             },
         },
         "runtime_seconds_sample_count": 1,

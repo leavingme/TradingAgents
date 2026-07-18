@@ -116,13 +116,19 @@ tool calls、input/output tokens；History/API 的单次结果公开 `agent_cost
 `evaluated_at <= information_cutoff` 的结果；cutoff 与同/跨标的范围在 SQLite 排序和
 LIMIT 之前执行，避免未来结果或其他标的大量样本挤掉当时已经存在的同标的证据。
 新写入的 `evaluated_at` 统一规范为 UTC，旧偏移时间也按真实时刻而非字符串排序。
-operator-facing rollup 还返回 `architecture-outcome-assessment/v1`：score 的均值、中位数、
+operator-facing rollup 还返回 `architecture-outcome-assessment/v2`：score 的均值、中位数、
 标准差、负值比例与最差值，raw/alpha 中位数，按 rating 的样本数/命中率/均值，以及
 重叠 5-session 窗口校正后的 mean-score 95% 区间。少于 20 个样本标记为
 `insufficient_samples`；达到样本数但缺少 ticker/entry/exit 窗口则标记为
 `incomplete_temporal_evidence`，不得展示成不确定性就绪。该 assessment 与 runtime cost
 一样只供优化查询；`include_runtime_costs=False` 的 Agent 纵向上下文明确排除它，避免
 在 architecture fingerprint 不变时静默改变 Research/Portfolio Manager 输入。
+v2 内含 operator-only 的 `rolling-outcome-monitoring/v1`：分别按 ticker 与唯一
+`analysis_date` 生成最近 5/10/20 个已结算结果，并与紧邻的前一等长窗口比较 score、
+alpha、方向命中率和负分率。同一架构同一 ticker/date 出现多个重跑或 remediation 时，
+该日期全部从滚动序列排除并单独计数，避免单一市场日被重复加权。窗口结果只用于发现
+近期变化，明确标记为 return exposure 可能重叠、regime-confounded、不得做因果归因，
+也不得自动修改 prompt、模型或 Agent 拓扑。
 每次 runtime 在构造 agent state 前还会持久化一个
 `longitudinal_context_status` 事件，只暴露 canonical schema、模式、cutoff、同/跨标的
 扫描与采用数量以及同标的架构 rollup 数，不包含历史投资内容。这样真实 5-session

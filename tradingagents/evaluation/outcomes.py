@@ -26,8 +26,12 @@ DEFAULT_OUTCOME_HORIZON_SESSIONS = 5
 DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES = 20
 LONGITUDINAL_CONTEXT_SCHEMA = "tradingagents/audited-longitudinal-outcomes/v8"
 ARCHITECTURE_OUTCOME_ASSESSMENT_SCHEMA = (
-    "tradingagents/architecture-outcome-assessment/v1"
+    "tradingagents/architecture-outcome-assessment/v2"
 )
+ROLLING_OUTCOME_MONITORING_SCHEMA = (
+    "tradingagents/rolling-outcome-monitoring/v1"
+)
+ROLLING_OUTCOME_WINDOW_SIZES = (5, 10, 20)
 
 _RUNTIME_COST_FIELDS = (
     "runtime_seconds",
@@ -415,6 +419,130 @@ def _overlap_adjusted_standard_error(
     }
 
 
+def _outcome_window_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    scores = [float(row["score"]) for row in rows]
+    alpha_returns = [float(row["alpha_return"]) for row in rows]
+    return {
+        "sample_count": len(rows),
+        "from_analysis_date": rows[0]["analysis_date"] if rows else None,
+        "through_analysis_date": rows[-1]["analysis_date"] if rows else None,
+        "mean_score": fmean(scores) if scores else None,
+        "median_score": median(scores) if scores else None,
+        "mean_alpha_return": fmean(alpha_returns) if alpha_returns else None,
+        "directional_hit_rate": (
+            fmean(bool(row["directional_hit"]) for row in rows) if rows else None
+        ),
+        "negative_score_rate": (
+            fmean(score < 0 for score in scores) if scores else None
+        ),
+    }
+
+
+def _rolling_outcome_monitoring(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Describe recent outcome drift without treating it as causal evidence.
+
+    A single architecture can have retries or remediation runs on the same
+    ticker/date. Those dates are ambiguous for a longitudinal sequence and are
+    excluded instead of being allowed to overweight one market day.
+    """
+    by_ticker_date: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    invalid_rows = 0
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        analysis_date = str(row.get("analysis_date") or "").strip()
+        score = _finite_number(row.get("score"))
+        alpha_return = _finite_number(row.get("alpha_return"))
+        try:
+            parsed_date = datetime.fromisoformat(analysis_date).date()
+        except (TypeError, ValueError):
+            invalid_rows += 1
+            continue
+        if (
+            not ticker
+            or score is None
+            or alpha_return is None
+            or "directional_hit" not in row
+        ):
+            invalid_rows += 1
+            continue
+        normalized = dict(row)
+        normalized["ticker"] = ticker
+        normalized["analysis_date"] = parsed_date.isoformat()
+        normalized["score"] = score
+        normalized["alpha_return"] = alpha_return
+        by_ticker_date[ticker][parsed_date.isoformat()].append(normalized)
+
+    ticker_payloads: dict[str, Any] = {}
+    for ticker, dated_rows in sorted(by_ticker_date.items()):
+        ambiguous_dates = sorted(
+            analysis_date
+            for analysis_date, variants in dated_rows.items()
+            if len(variants) != 1
+        )
+        eligible = sorted(
+            (
+                variants[0]
+                for analysis_date, variants in dated_rows.items()
+                if len(variants) == 1
+            ),
+            key=lambda row: str(row["analysis_date"]),
+        )
+        windows: dict[str, Any] = {}
+        for window_size in ROLLING_OUTCOME_WINDOW_SIZES:
+            current = eligible[-window_size:]
+            previous = eligible[-2 * window_size : -window_size]
+            current_summary = _outcome_window_summary(current)
+            previous_summary = _outcome_window_summary(previous)
+            comparison_ready = (
+                len(current) == window_size and len(previous) == window_size
+            )
+            windows[str(window_size)] = {
+                "status": (
+                    "comparison_ready" if comparison_ready else "insufficient_history"
+                ),
+                "required_samples": 2 * window_size,
+                "current": current_summary,
+                "previous": previous_summary,
+                "current_minus_previous": (
+                    {
+                        field: current_summary[field] - previous_summary[field]
+                        for field in (
+                            "mean_score",
+                            "mean_alpha_return",
+                            "directional_hit_rate",
+                            "negative_score_rate",
+                        )
+                    }
+                    if comparison_ready
+                    else None
+                ),
+            }
+        ticker_payloads[ticker] = {
+            "distinct_analysis_date_count": len(eligible),
+            "ambiguous_analysis_date_count": len(ambiguous_dates),
+            "ambiguous_rows_excluded": sum(
+                len(dated_rows[analysis_date]) for analysis_date in ambiguous_dates
+            ),
+            "windows": windows,
+        }
+
+    return {
+        "schema": ROLLING_OUTCOME_MONITORING_SCHEMA,
+        "interpretation": (
+            "Descriptive recent-versus-previous monitoring only. Sequential windows "
+            "can overlap in return exposure and remain regime-confounded."
+        ),
+        "automatic_architecture_mutation_allowed": False,
+        "causal_claim_allowed": False,
+        "ordering": "ticker_then_analysis_date",
+        "window_sizes": list(ROLLING_OUTCOME_WINDOW_SIZES),
+        "invalid_rows_excluded": invalid_rows,
+        "tickers": ticker_payloads,
+    }
+
+
 def _architecture_outcome_assessment(
     rows: list[dict[str, Any]],
     *,
@@ -541,6 +669,7 @@ def _architecture_outcome_assessment(
         "critical_effective_sample_count": effective_sample_count,
         **uncertainty,
         "rating_breakdown": rating_breakdown,
+        "rolling_monitoring": _rolling_outcome_monitoring(rows),
     }
 
 

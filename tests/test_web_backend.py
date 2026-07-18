@@ -826,6 +826,7 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
     ))
 
     response = asyncio.run(main.get_decision_evaluations(ticker="nvda", limit=50))
+    assert response["ticker_scope"] == "NVDA"
     assert len(response["evaluations"]) == 1
     assert response["pending_evaluation_count"] == 1
     assert response["pending_evaluations"] == [{
@@ -853,6 +854,10 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         for row in response["run_cost_rollups"]
         if row["architecture_fingerprint"] == "legacy-unspecified"
     )
+    assert evaluated_cost["schema"] == (
+        "tradingagents/architecture-run-cost-rollup/v2"
+    )
+    assert evaluated_cost["ticker"] == "NVDA"
     assert evaluated_cost["sample_count"] == 1
     assert evaluated_cost["mean_tokens_in"] == 900.0
     assert evaluated_cost["tool_context_hotspots"] == [{
@@ -860,6 +865,13 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         "mean_output_chars": 80000.0,
         "sample_count": 1,
     }]
+    assert evaluated_cost["rolling_cost_monitoring"][
+        "distinct_analysis_date_count"
+    ] == 1
+    assert evaluated_cost["cost_assessment"]["status"] == (
+        "insufficient_cost_history"
+    )
+    assert evaluated_cost["cost_assessment"]["promotion_gate_effect"] == "none"
     assert response["rollups"] == [{
         "architecture_version": "baseline",
         "architecture_fingerprint": "legacy-unspecified",

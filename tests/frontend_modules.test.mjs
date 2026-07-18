@@ -188,11 +188,13 @@ test('router restores evaluation deep links and invokes the loader', { concurren
 test('evaluation view model exposes rolling and pending evidence', { concurrency: false }, async () => {
   const { buildEvaluationViewModel } = await importSource('components/evaluation-dashboard.js');
   const view = buildEvaluationViewModel({
+    ticker_scope: 'NVDA',
     evaluations: [{ run_id: 'evaluated' }],
     pending_evaluation_count: 1,
     pending_evaluations: [{ run_id: 'pending' }],
     run_cost_sample_count: 2,
     run_cost_rollups: [{
+      ticker: 'NVDA',
       architecture_version: 'candidate',
       architecture_fingerprint: 'fingerprint',
       sample_count: 1,
@@ -208,7 +210,31 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
         mean_output_chars: 40000,
         sample_count: 1,
       }],
+      cost_assessment: {
+        status: 'recent_cost_increase_observed',
+        recommended_action: 'investigate_recent_cost_increase',
+        distinct_analysis_date_count: 10,
+        high_context_run_count: 1,
+      },
+      rolling_cost_monitoring: {
+        windows: {
+          5: {
+            status: 'comparison_ready',
+            current: {
+              analysis_date_count: 5,
+              run_count: 6,
+              mean_daily_tokens_in: 134000,
+            },
+            previous: { mean_daily_tokens_in: 100000 },
+            current_minus_previous: {
+              mean_daily_tokens_in: 34000,
+              mean_daily_tokens_in_ratio: 0.34,
+            },
+          },
+        },
+      },
     }, {
+      ticker: 'NVDA',
       architecture_version: 'new-cost-only',
       architecture_fingerprint: 'new-fingerprint',
       sample_count: 1,
@@ -273,6 +299,22 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   assert.equal(view.cohorts[0].costSampleCount, 1);
   assert.equal(view.cohorts[0].costStatsObservedCount, 1);
   assert.deepEqual(view.cohorts[0].runStatusCounts, { completed: 1 });
+  assert.deepEqual(view.cohorts[0].costAssessment, {
+    status: 'recent_cost_increase_observed',
+    recommendedAction: 'investigate_recent_cost_increase',
+    distinctAnalysisDateCount: 10,
+    highContextRunCount: 1,
+  });
+  assert.deepEqual(view.cohorts[0].costRolling, [{
+    windowSize: 5,
+    status: 'comparison_ready',
+    currentDateCount: 5,
+    currentRunCount: 6,
+    currentMeanTokensIn: 134000,
+    previousMeanTokensIn: 100000,
+    tokenDelta: 34000,
+    tokenDeltaRatio: 0.34,
+  }]);
   assert.equal(view.cohorts[1].sampleCount, 0);
   assert.equal(view.cohorts[1].costSampleCount, 1);
   assert.deepEqual(view.cohorts[0].rolling[0], {
@@ -305,6 +347,35 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
       sampleCount: 5,
     },
   });
+});
+
+test('evaluation view model keeps same architecture costs isolated by ticker', { concurrency: false }, async () => {
+  const { buildEvaluationViewModel } = await importSource('components/evaluation-dashboard.js');
+  const view = buildEvaluationViewModel({
+    rollups: [{
+      architecture_version: 'production',
+      architecture_fingerprint: 'same',
+      sample_count: 4,
+    }],
+    run_cost_rollups: [{
+      ticker: 'NVDA',
+      architecture_version: 'production',
+      architecture_fingerprint: 'same',
+      sample_count: 2,
+    }, {
+      ticker: 'AAPL',
+      architecture_version: 'production',
+      architecture_fingerprint: 'same',
+      sample_count: 3,
+    }],
+  });
+
+  assert.equal(view.cohortCount, 3);
+  assert.deepEqual(
+    view.cohorts.map(row => [row.ticker, row.sampleCount, row.costSampleCount]),
+    [['', 4, 0], ['NVDA', 0, 2], ['AAPL', 0, 3]],
+  );
+  assert.equal(new Set(view.cohorts.map(row => row.key)).size, 3);
 });
 
 test('event log localizes architecture evaluation readiness', { concurrency: false }, async () => {

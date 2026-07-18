@@ -100,6 +100,11 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
   rollup/paired comparison 可公开覆盖数、均值、差值和执行顺序分层，但
   `include_runtime_costs=False` 的 Agent 纵向上下文必须完全排除 `tool_context` 与优化
   assessment。
+- 未成熟 outcome 的运行成本 rollup 必须按 ticker、架构版本和 fingerprint 隔离；跨标的
+  即使架构身份相同也不得混合。同一 analysis date 的重试/remediation 必须先汇总全部终态
+  尝试的 token/runtime，再进入 5/10/20 分析日窗口，避免漏算重试成本或重复加权日期。
+  stats/input-token 覆盖不完整时成本诊断必须 fail closed；成本趋势只允许生成 operator
+  建议，固定不得形成收益结论、自动改动架构或影响 outcome/paired promotion gate。
 - 历史 run 和刷新语义必须从 SQLite + persisted events 恢复。刷新页面后，已完成
   agent 仍应显示完成状态；运行中的任务应通过 SSE replay + live queue 继续呈现。
 - 每个完成 Graph 的每日调度 live run 应在 canonical decision 已形成后追加

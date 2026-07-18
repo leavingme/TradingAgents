@@ -364,17 +364,20 @@ async def get_decision_evaluations(
             detail="architecture selectors are too long",
         )
     bounded_limit = max(1, min(limit, 5000))
+    ticker_scope = ticker.strip().upper() if ticker and ticker.strip() else None
     evaluations = attach_operator_cost_metrics(
         history_store.list_decision_evaluations(
-            ticker=ticker,
+            ticker=ticker_scope,
             limit=bounded_limit,
         ),
         store=history_store,
     )
-    pending_rows = history_store.list_unevaluated_validated_runs(ticker=ticker)
+    pending_rows = history_store.list_unevaluated_validated_runs(
+        ticker=ticker_scope
+    )
     run_cost_rows = load_operator_run_costs(
         store=history_store,
-        ticker=ticker,
+        ticker=ticker_scope,
         limit=bounded_limit,
     )
     pending = [
@@ -394,6 +397,7 @@ async def get_decision_evaluations(
         for row in pending_rows[:bounded_limit]
     ]
     payload = {
+        "ticker_scope": ticker_scope,
         "evaluations": evaluations,
         "pending_evaluation_count": len(pending_rows),
         "pending_evaluations": pending,

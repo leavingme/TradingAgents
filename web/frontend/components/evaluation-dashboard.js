@@ -13,6 +13,14 @@ function cohortKey(row) {
   ]);
 }
 
+function tickerCohortKey(row) {
+  return JSON.stringify([
+    String(row?.architecture_version || ''),
+    String(row?.architecture_fingerprint || ''),
+    String(row?.ticker || '').toUpperCase(),
+  ]);
+}
+
 export function buildEvaluationViewModel(payload = {}) {
   const evaluations = Array.isArray(payload.evaluations) ? payload.evaluations : [];
   const pending = Array.isArray(payload.pending_evaluations)
@@ -23,7 +31,26 @@ export function buildEvaluationViewModel(payload = {}) {
     ? payload.run_cost_rollups
     : [];
   const outcomeByKey = new Map(rollups.map(row => [cohortKey(row), row]));
-  const costByKey = new Map(runCostRollups.map(row => [cohortKey(row), row]));
+  const tickerScope = String(payload.ticker_scope || '').toUpperCase();
+  const costRowsByKey = new Map();
+  runCostRollups.forEach(row => {
+    const key = cohortKey(row);
+    const existing = costRowsByKey.get(key) || [];
+    existing.push(row);
+    costRowsByKey.set(key, existing);
+  });
+  const costByKey = new Map();
+  costRowsByKey.forEach((rows, key) => {
+    if (
+      rows.length === 1
+      && tickerScope
+      && String(rows[0]?.ticker || '').toUpperCase() === tickerScope
+    ) {
+      costByKey.set(key, rows[0]);
+    } else {
+      rows.forEach(row => costByKey.set(tickerCohortKey(row), row));
+    }
+  });
   const cohortKeys = [...new Set([...outcomeByKey.keys(), ...costByKey.keys()])];
   const cohorts = cohortKeys.map(key => {
     const row = outcomeByKey.get(key) || {};
@@ -36,6 +63,7 @@ export function buildEvaluationViewModel(payload = {}) {
       : row?.optimization_assessment?.tool_context_hotspots;
     return {
       key,
+      ticker: String(runCost?.ticker || row?.ticker || ''),
       version: String(
         row?.architecture_version || runCost?.architecture_version || 'unknown',
       ),
@@ -53,6 +81,19 @@ export function buildEvaluationViewModel(payload = {}) {
           ([status, count]) => [String(status), Number(count || 0)],
         ))
         : {},
+      costAssessment: {
+        status: String(runCost?.cost_assessment?.status || 'not_observed'),
+        recommendedAction: String(
+          runCost?.cost_assessment?.recommended_action
+            || 'continue_cost_collection',
+        ),
+        distinctAnalysisDateCount: Number(
+          runCost?.cost_assessment?.distinct_analysis_date_count || 0,
+        ),
+        highContextRunCount: Number(
+          runCost?.cost_assessment?.high_context_run_count || 0,
+        ),
+      },
       hitRate: finiteNumber(row?.directional_hit_rate),
       meanAlpha: finiteNumber(row?.mean_alpha_return),
       meanScore: finiteNumber(row?.mean_score),
@@ -108,6 +149,22 @@ export function buildEvaluationViewModel(payload = {}) {
           alphaDelta: finiteNumber(window?.current_minus_previous?.mean_alpha_return),
         }),
       )),
+      costRolling: Object.entries(
+        runCost?.rolling_cost_monitoring?.windows || {},
+      ).map(([windowSize, window]) => ({
+        windowSize: Number(windowSize),
+        status: String(window?.status || 'insufficient_history'),
+        currentDateCount: Number(window?.current?.analysis_date_count || 0),
+        currentRunCount: Number(window?.current?.run_count || 0),
+        currentMeanTokensIn: finiteNumber(window?.current?.mean_daily_tokens_in),
+        previousMeanTokensIn: finiteNumber(window?.previous?.mean_daily_tokens_in),
+        tokenDelta: finiteNumber(
+          window?.current_minus_previous?.mean_daily_tokens_in,
+        ),
+        tokenDeltaRatio: finiteNumber(
+          window?.current_minus_previous?.mean_daily_tokens_in_ratio,
+        ),
+      })).sort((left, right) => left.windowSize - right.windowSize),
     };
   });
   return {
@@ -187,6 +244,16 @@ export function createEvaluationDashboard({
     investigate_persistent_underperformance: 'evaluationCodeInvestigatePersistent',
     investigate_recent_deterioration: 'evaluationCodeInvestigateRecent',
     design_controlled_challenger: 'evaluationCodeDesignChallenger',
+    incomplete_cost_observability: 'evaluationCodeIncompleteCostObservability',
+    insufficient_cost_history: 'evaluationCodeInsufficientCostHistory',
+    reliability_attention_required: 'evaluationCodeReliabilityAttention',
+    recent_cost_increase_observed: 'evaluationCodeRecentCostIncrease',
+    cost_baseline_ready: 'evaluationCodeCostBaselineReady',
+    repair_cost_observability: 'evaluationCodeRepairCostObservability',
+    continue_cost_collection: 'evaluationCodeContinueCostCollection',
+    investigate_run_reliability: 'evaluationCodeInvestigateRunReliability',
+    investigate_recent_cost_increase: 'evaluationCodeInvestigateCostIncrease',
+    monitor_cost_and_design_challenger: 'evaluationCodeMonitorCost',
   };
 
   function codeLabel(value) {
@@ -267,6 +334,50 @@ export function createEvaluationDashboard({
     return wrapper;
   }
 
+  function costRollingTable(rows) {
+    const wrapper = element('div', 'evaluation-table-wrap');
+    const table = element('table', 'evaluation-table');
+    const head = element('thead');
+    const headRow = element('tr');
+    [
+      t('rollingWindow'),
+      t('currentDailyTokens'),
+      t('previousDailyTokens'),
+      t('change'),
+      t('costWindowStatus'),
+    ].forEach(label => headRow.append(element('th', null, label)));
+    head.append(headRow);
+    const body = element('tbody');
+    rows.forEach(row => {
+      const tr = element('tr');
+      tr.append(
+        element('td', null, `${row.windowSize}`),
+        element(
+          'td',
+          null,
+          `${number(row.currentMeanTokensIn, 0)} · ${row.currentDateCount}d/${row.currentRunCount}r`,
+        ),
+        element('td', null, number(row.previousMeanTokensIn, 0)),
+        element(
+          'td',
+          row.tokenDelta === null
+            ? 'evaluation-neutral'
+            : row.tokenDelta <= 0
+              ? 'evaluation-positive'
+              : 'evaluation-negative',
+          row.status === 'comparison_ready'
+            ? `${number(row.tokenDelta, 0)} (${percent(row.tokenDeltaRatio)})`
+            : '—',
+        ),
+        element('td', null, codeLabel(row.status)),
+      );
+      body.append(tr);
+    });
+    table.append(head, body);
+    wrapper.append(table);
+    return wrapper;
+  }
+
   function renderRollups(view) {
     if (!view.cohorts.length) {
       rollupsElement.replaceChildren(element('p', 'evaluation-empty', t('noEvaluations')));
@@ -277,7 +388,11 @@ export function createEvaluationDashboard({
       const header = element('div', 'evaluation-card-header');
       const title = element('div');
       title.append(
-        element('h3', null, cohort.version),
+        element(
+          'h3',
+          null,
+          cohort.ticker ? `${cohort.ticker} · ${cohort.version}` : cohort.version,
+        ),
         element('p', 'evaluation-fingerprint', `${t('fingerprint')}: ${shortFingerprint(cohort.fingerprint)}`),
       );
       header.append(
@@ -311,6 +426,18 @@ export function createEvaluationDashboard({
       );
       if (cohort.costSampleCount) {
         diagnostic.append(
+          comparisonRow(
+            t('costDiagnostic'),
+            codeLabel(cohort.costAssessment.status),
+          ),
+          comparisonRow(
+            t('costRecommendedAction'),
+            codeLabel(cohort.costAssessment.recommendedAction),
+          ),
+          comparisonRow(
+            t('costAnalysisDates'),
+            cohort.costAssessment.distinctAnalysisDateCount,
+          ),
           comparisonRow(
             t('statsCoverage'),
             `${cohort.costStatsObservedCount}/${cohort.costSampleCount}`,
@@ -348,6 +475,12 @@ export function createEvaluationDashboard({
       }
       card.append(diagnostic);
       if (cohort.rolling.length) card.append(rollingTable(cohort.rolling));
+      if (cohort.costRolling.length) {
+        card.append(
+          element('h4', null, t('rollingCostMonitoring')),
+          costRollingTable(cohort.costRolling),
+        );
+      }
       return card;
     }));
   }

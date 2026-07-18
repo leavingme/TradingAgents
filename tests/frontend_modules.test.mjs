@@ -270,6 +270,7 @@ test('event log localizes architecture evaluation readiness', { concurrency: fal
     samples: '样本',
     evaluationCodeReadyForExperiment: '可以设计受控实验',
     evaluationCodeInvestigateRecent: '调查近期退化',
+    toolOutputHotspots: '工具输出',
   };
   const { createEventLog } = await importSource('components/event-log.js');
   const log = createEventLog({
@@ -278,7 +279,7 @@ test('event log localizes architecture evaluation readiness', { concurrency: fal
     locale: () => 'zh',
     formatAgentName: value => value,
     formatStatus: value => value,
-    formatStats: () => '',
+    formatStats: () => 'stats',
   });
   assert.equal(
     log.text('architecture_evaluation_status', {
@@ -288,8 +289,27 @@ test('event log localizes architecture evaluation readiness', { concurrency: fal
         readiness_status: 'ready_for_controlled_experiment_design',
         recommended_action: 'investigate_recent_deterioration',
       },
+      context_cost_diagnostic: {
+        top_tools: [
+          { tool: 'get_news', output_chars: 80000 },
+          { tool: 'get_financial_evidence', output_chars: 42468 },
+        ],
+      },
     }),
-    'loaded · 20 样本 · 可以设计受控实验 · 调查近期退化',
+    'loaded · 20 样本 · 可以设计受控实验 · 调查近期退化 · '
+      + '工具输出: get_news 80.0K, get_financial_evidence 42.5K',
+  );
+  assert.equal(
+    log.text('stats', {
+      by_tool: {
+        get_indicators: { output_chars: 12000 },
+        get_news: { output_chars: 80000 },
+        get_financial_evidence: { output_chars: 42468 },
+        get_verified_market_snapshot: { output_chars: 2000 },
+      },
+    }),
+    'stats · 工具输出: get_news 80.0K, '
+      + 'get_financial_evidence 42.5K, get_indicators 12.0K',
   );
 });
 

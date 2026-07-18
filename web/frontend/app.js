@@ -2,7 +2,7 @@ import { createProviderManager } from './components/provider-manager.js?v=202607
 import { createAgentTimeline, formatAgentName } from './components/agent-timeline.js?v=20260711-agent-status-init';
 import { createReportViewer } from './components/report-viewer.js';
 import { createRunHistory } from './components/run-history.js?v=20260716-data-quality-details';
-import { createEventLog } from './components/event-log.js?v=20260718-architecture-evaluation-event';
+import { createEventLog } from './components/event-log.js?v=20260718-context-cost-diagnostic';
 import { api } from './api-client.js';
 import { createEventStream } from './event-stream.js?v=20260718-architecture-evaluation-event';
 import { createRouter } from './router.js';
@@ -213,6 +213,7 @@ const translations = {
     eventMarketDataStatus: 'market data status',
     eventLongitudinalContextStatus: 'longitudinal context',
     eventArchitectureEvaluationStatus: 'architecture evaluation',
+    toolOutputHotspots: 'Tool output',
     eventMessage: 'message',
     eventToolCall: 'tool call',
     eventVendorAttempt: 'vendor attempt',
@@ -524,6 +525,7 @@ const translations = {
     eventMarketDataStatus: '行情数据状态',
     eventLongitudinalContextStatus: '纵向评估上下文',
     eventArchitectureEvaluationStatus: '架构评估状态',
+    toolOutputHotspots: '工具输出',
     eventMessage: '消息',
     eventToolCall: '工具调用',
     eventVendorAttempt: '数据源尝试',

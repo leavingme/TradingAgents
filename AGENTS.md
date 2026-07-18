@@ -97,8 +97,9 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
   agent 仍应显示完成状态；运行中的任务应通过 SSE replay + live queue 继续呈现。
 - 每个完成 Graph 的每日调度 live run 应在 canonical decision 已形成后追加
   `architecture_evaluation_status`，仅记录当前 architecture identity、扫描/待结算/cohort
-  数量、实验就绪度和建议动作。不得在该事件复制逐条投资结果、收益值、Prompt 或成本
-  明细；它只作为调度/历史回放的 operator 证据，不得进入 Agent state 或改变决策。
+  数量、实验就绪度、建议动作，以及最多三个 Agent/工具的有界数字成本热点。不得在该
+  事件复制逐条投资结果、收益值、Prompt、完整成本明细或任何工具正文；它只作为调度/
+  历史回放的 operator 证据，不得进入 Agent state 或改变决策。
 - 分段报告应在每个 `report_section` 事件到达时立即可见，并能通过 report
   selector 切换，不要等最终 `run_completed` 才渲染全部报告。
 - 服务商与底层能力配置页面使用 `#providers` 路由。前端应提供各个底层能力（OHLCV、技术指标、基本面、新闻舆情、宏观数据、预测市场）的优先级重排（生成以逗号分隔的优先级字符串，例如 `"longbridge_mcp, longbridge"`）和开关，且通过 `config_overrides.data_vendors` 将修改后的服务商优先级传递给后端运行。后端 `build_runtime_config` 应当对 `config_overrides` 进行嵌套深度合并以防止局部键覆盖整个 data_vendors 字典。

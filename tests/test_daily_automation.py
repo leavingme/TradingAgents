@@ -14,6 +14,7 @@ from tradingagents.automation.daily import (
     DailySchedule,
     ScheduledTarget,
     _architecture_evaluation_status,
+    _context_cost_diagnostic,
     _record_architecture_evaluation_status,
     load_runtime_preferences,
     run_due_analyses,
@@ -424,11 +425,81 @@ def test_architecture_evaluation_status_is_compact_and_scoped_to_run_identity():
             "recommended_action": "continue_sample_collection",
             "controlled_experiment_ready": False,
         },
+        "context_cost_diagnostic": {
+            "schema": "tradingagents/context-cost-diagnostic/v1",
+            "status": "not_observed",
+            "top_agents": [],
+            "top_tools": [],
+        },
     }
     serialized = json.dumps(status)
     assert "raw_return" not in serialized
     assert "alpha_return" not in serialized
     assert "agent_costs" not in serialized
+
+
+def test_context_cost_diagnostic_is_bounded_compact_and_content_free():
+    diagnostic = _context_cost_diagnostic({
+        "events": [{
+            "type": "stats",
+            "content": {
+                "by_agent": {
+                    "News Analyst": {
+                        "llm_calls": 2, "tool_calls": 3,
+                        "tokens_in": 90_000, "tokens_out": 9_000,
+                    },
+                    "attacker-agent": {
+                        "llm_calls": 1, "tool_calls": 1,
+                        "tokens_in": 999_999, "tokens_out": 1,
+                        "payload": "credential=sentinel-secret",
+                    },
+                    "Market Analyst": {
+                        "llm_calls": 1, "tool_calls": 1,
+                        "tokens_in": 10_000_000_001, "tokens_out": 1,
+                    },
+                },
+                "by_tool": {
+                    "get_news": {
+                        "tool_calls": 3, "input_chars": 20,
+                        "output_chars": 80_000, "errors": 0,
+                        "by_agent": {"News Analyst": {"result": "secret"}},
+                    },
+                    "attacker-tool": {
+                        "tool_calls": 1, "input_chars": 1,
+                        "output_chars": 999_999, "errors": 0,
+                        "result": "credential=sentinel-secret",
+                    },
+                    "get_indicators": {
+                        "tool_calls": 1, "input_chars": 1,
+                        "output_chars": 10_000_000_001, "errors": 0,
+                    },
+                },
+            },
+        }],
+    })
+
+    assert diagnostic == {
+        "schema": "tradingagents/context-cost-diagnostic/v1",
+        "status": "observed",
+        "top_agents": [{
+            "agent": "News Analyst",
+            "llm_calls": 2,
+            "tool_calls": 3,
+            "tokens_in": 90_000,
+            "tokens_out": 9_000,
+        }],
+        "top_tools": [{
+            "tool": "get_news",
+            "tool_calls": 3,
+            "input_chars": 20,
+            "output_chars": 80_000,
+            "errors": 0,
+        }],
+    }
+    serialized = json.dumps(diagnostic)
+    assert "sentinel-secret" not in serialized
+    assert "attacker" not in serialized
+    assert "by_agent" not in serialized
 
 
 def test_architecture_evaluation_status_persists_and_redacts_failures(tmp_path):

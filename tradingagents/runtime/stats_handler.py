@@ -11,42 +11,48 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import LLMResult
 
 
+CANONICAL_STATS_AGENTS = frozenset({
+    "Market Analyst",
+    "Sentiment Analyst",
+    "News Analyst",
+    "Fundamentals Analyst",
+    "Bull Researcher",
+    "Bear Researcher",
+    "Research Manager",
+    "Trader",
+    "Aggressive Analyst",
+    "Conservative Analyst",
+    "Neutral Analyst",
+    "Portfolio Manager",
+})
+CANONICAL_STATS_TOOLS = frozenset({
+    "get_balance_sheet",
+    "get_cashflow",
+    "get_financial_evidence",
+    "get_fundamentals",
+    "get_global_news",
+    "get_indicators",
+    "get_income_statement",
+    "get_insider_transactions",
+    "get_macro_indicators",
+    "get_news",
+    "get_prediction_markets",
+    "get_social_posts",
+    "get_stock_data",
+    "get_stocktwits_messages",
+    "get_verified_market_snapshot",
+})
+STATS_COST_FIELDS = ("llm_calls", "tool_calls", "tokens_in", "tokens_out")
+STATS_TOOL_FIELDS = ("tool_calls", "input_chars", "output_chars", "errors")
+
+
 class StatsCallbackHandler(BaseCallbackHandler):
     """Track LLM calls, tool calls, and token usage across a runtime run."""
 
-    _AGENTS = frozenset({
-        "Market Analyst",
-        "Sentiment Analyst",
-        "News Analyst",
-        "Fundamentals Analyst",
-        "Bull Researcher",
-        "Bear Researcher",
-        "Research Manager",
-        "Trader",
-        "Aggressive Analyst",
-        "Conservative Analyst",
-        "Neutral Analyst",
-        "Portfolio Manager",
-    })
-    _COST_FIELDS = ("llm_calls", "tool_calls", "tokens_in", "tokens_out")
-    _TOOL_FIELDS = ("tool_calls", "input_chars", "output_chars", "errors")
-    _TOOLS = frozenset({
-        "get_financial_evidence",
-        "get_fundamentals",
-        "get_global_news",
-        "get_indicators",
-        "get_income_statement",
-        "get_insider_transactions",
-        "get_macro_indicators",
-        "get_news",
-        "get_prediction_markets",
-        "get_social_posts",
-        "get_stock_data",
-        "get_stocktwits_messages",
-        "get_verified_market_snapshot",
-        "get_balance_sheet",
-        "get_cashflow",
-    })
+    _AGENTS = CANONICAL_STATS_AGENTS
+    _COST_FIELDS = STATS_COST_FIELDS
+    _TOOL_FIELDS = STATS_TOOL_FIELDS
+    _TOOLS = CANONICAL_STATS_TOOLS
     _MAX_PAYLOAD_CHARS = 50_000_000
 
     def __init__(self) -> None:

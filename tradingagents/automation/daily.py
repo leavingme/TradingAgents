@@ -32,6 +32,12 @@ from tradingagents.dataflows.ohlcv_cache import latest_completed_daily_bar_date
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.runtime import AnalysisEvent, AnalysisRequest, run_analysis_once
 from tradingagents.runtime.history import RunHistoryStore, history_store
+from tradingagents.runtime.stats_handler import (
+    CANONICAL_STATS_AGENTS,
+    CANONICAL_STATS_TOOLS,
+    STATS_COST_FIELDS,
+    STATS_TOOL_FIELDS,
+)
 
 
 _SYMBOL_RE = re.compile(r"^[A-Za-z0-9._+\-^=]{1,32}$")
@@ -47,9 +53,11 @@ _SCHEDULER_FAILURE_STATUSES = {
     "failed", "unavailable", "attempts_exhausted", "market_data_unavailable"
 }
 ARCHITECTURE_EVALUATION_STATUS_SCHEMA = (
-    "tradingagents/architecture-evaluation-status/v1"
+    "tradingagents/architecture-evaluation-status/v2"
 )
 ARCHITECTURE_EVALUATION_SCAN_LIMIT = 5000
+CONTEXT_COST_DIAGNOSTIC_SCHEMA = "tradingagents/context-cost-diagnostic/v1"
+_MAX_DIAGNOSTIC_METRIC = 10_000_000_000
 _SETTING_KEYS = {
     "research_depth",
     "llm_provider",
@@ -72,6 +80,83 @@ _ALLOWED_VENDORS = {
     "macro_data": {"fred"},
     "prediction_markets": {"polymarket"},
 }
+
+
+def _diagnostic_metric(value: Any) -> int | None:
+    if type(value) is not int or not 0 <= value <= _MAX_DIAGNOSTIC_METRIC:
+        return None
+    return value
+
+
+def _context_cost_diagnostic(run: dict[str, Any]) -> dict[str, Any]:
+    """Summarize the final stats event without copying any payload content."""
+    events = run.get("events")
+    if not isinstance(events, list):
+        events = []
+    stats = next(
+        (
+            event.get("content")
+            for event in reversed(events)
+            if isinstance(event, dict)
+            and event.get("type") == "stats"
+            and isinstance(event.get("content"), dict)
+        ),
+        None,
+    )
+    if not isinstance(stats, dict):
+        return {
+            "schema": CONTEXT_COST_DIAGNOSTIC_SCHEMA,
+            "status": "not_observed",
+            "top_agents": [],
+            "top_tools": [],
+        }
+
+    allowed_agents = CANONICAL_STATS_AGENTS | {"Unattributed"}
+    allowed_tools = CANONICAL_STATS_TOOLS | {"Unattributed"}
+    agent_rows: list[dict[str, Any]] = []
+    by_agent = stats.get("by_agent")
+    if isinstance(by_agent, dict):
+        for agent, values in by_agent.items():
+            if agent not in allowed_agents or not isinstance(values, dict):
+                continue
+            metrics = {
+                field: _diagnostic_metric(values.get(field))
+                for field in STATS_COST_FIELDS
+            }
+            if any(value is None for value in metrics.values()):
+                continue
+            agent_rows.append({"agent": agent, **metrics})
+
+    tool_rows: list[dict[str, Any]] = []
+    by_tool = stats.get("by_tool")
+    if isinstance(by_tool, dict):
+        for tool, values in by_tool.items():
+            if tool not in allowed_tools or not isinstance(values, dict):
+                continue
+            metrics = {
+                field: _diagnostic_metric(values.get(field))
+                for field in STATS_TOOL_FIELDS
+            }
+            if any(value is None for value in metrics.values()):
+                continue
+            tool_rows.append({"tool": tool, **metrics})
+
+    top_agents = sorted(
+        agent_rows,
+        key=lambda row: (-row["tokens_in"], row["agent"]),
+    )[:3]
+    top_tools = sorted(
+        tool_rows,
+        key=lambda row: (-row["output_chars"], row["tool"]),
+    )[:3]
+    return {
+        "schema": CONTEXT_COST_DIAGNOSTIC_SCHEMA,
+        "status": (
+            "observed" if top_tools else "agent_only" if top_agents else "totals_only"
+        ),
+        "top_agents": top_agents,
+        "top_tools": top_tools,
+    }
 
 
 def _architecture_evaluation_status(
@@ -146,6 +231,7 @@ def _architecture_evaluation_status(
                 optimization.get("controlled_experiment_ready")
             ),
         },
+        "context_cost_diagnostic": _context_cost_diagnostic(run),
     }
 
 

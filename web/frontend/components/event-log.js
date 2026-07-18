@@ -1,4 +1,11 @@
 export function createEventLog({ element, t, locale, formatAgentName, formatStatus, formatStats }) {
+  function compactNumber(value) {
+    const number = Number(value) || 0;
+    if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`;
+    if (number >= 1000) return `${(number / 1000).toFixed(1)}K`;
+    return String(number);
+  }
+
   function evaluationCode(value) {
     const key = {
       insufficient_outcome_samples: 'evaluationCodeInsufficientOutcomeSamples',
@@ -59,9 +66,28 @@ export function createEventLog({ element, t, locale, formatAgentName, formatStat
     }
     if (type === 'architecture_evaluation_status') {
       const architecture = content.current_architecture || {};
-      return `${content.status || ''} · ${architecture.sample_count || 0} ${t('samples')} · ${evaluationCode(architecture.readiness_status || 'insufficient_outcome_samples')} · ${evaluationCode(architecture.recommended_action || 'continue_sample_collection')}`;
+      const tools = Array.isArray(content.context_cost_diagnostic?.top_tools)
+        ? content.context_cost_diagnostic.top_tools.slice(0, 3)
+        : [];
+      const hotspots = tools.length
+        ? ` · ${t('toolOutputHotspots')}: ${tools.map(row => `${row.tool} ${compactNumber(row.output_chars)}`).join(', ')}`
+        : '';
+      return `${content.status || ''} · ${architecture.sample_count || 0} ${t('samples')} · ${evaluationCode(architecture.readiness_status || 'insufficient_outcome_samples')} · ${evaluationCode(architecture.recommended_action || 'continue_sample_collection')}${hotspots}`;
     }
-    if (type === 'stats') return formatStats(content);
+    if (type === 'stats') {
+      const tools = content.by_tool && typeof content.by_tool === 'object'
+        ? Object.entries(content.by_tool)
+          .filter(([, values]) => values && Number.isInteger(values.output_chars) && values.output_chars >= 0)
+          .sort(([leftName, left], [rightName, right]) => (
+            right.output_chars - left.output_chars || leftName.localeCompare(rightName)
+          ))
+          .slice(0, 3)
+        : [];
+      const hotspots = tools.length
+        ? ` · ${t('toolOutputHotspots')}: ${tools.map(([tool, values]) => `${tool} ${compactNumber(values.output_chars)}`).join(', ')}`
+        : '';
+      return `${formatStats(content)}${hotspots}`;
+    }
     return JSON.stringify(content);
   }
 

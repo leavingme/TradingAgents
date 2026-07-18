@@ -320,6 +320,7 @@ async def get_decision_evaluations(
     from tradingagents.evaluation import (
         DEFAULT_OUTCOME_HORIZON_SESSIONS,
         architecture_rollups,
+        attach_operator_cost_metrics,
         compare_architectures,
     )
     from tradingagents.runtime import history_store
@@ -361,9 +362,12 @@ async def get_decision_evaluations(
             detail="architecture selectors are too long",
         )
     bounded_limit = max(1, min(limit, 5000))
-    evaluations = history_store.list_decision_evaluations(
-        ticker=ticker,
-        limit=bounded_limit,
+    evaluations = attach_operator_cost_metrics(
+        history_store.list_decision_evaluations(
+            ticker=ticker,
+            limit=bounded_limit,
+        ),
+        store=history_store,
     )
     pending_rows = history_store.list_unevaluated_validated_runs(ticker=ticker)
     pending = [

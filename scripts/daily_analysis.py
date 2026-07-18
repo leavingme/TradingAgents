@@ -21,6 +21,7 @@ from tradingagents.automation.daily import (  # noqa: E402
 from tradingagents.evaluation import (  # noqa: E402
     DEFAULT_OUTCOME_HORIZON_SESSIONS,
     architecture_rollups,
+    attach_operator_cost_metrics,
     compare_architectures,
 )
 from tradingagents.runtime.history import history_store  # noqa: E402
@@ -62,7 +63,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     if args.command == "evaluate":
-        evaluations = history_store.list_decision_evaluations(ticker=args.ticker)
+        evaluations = attach_operator_cost_metrics(
+            history_store.list_decision_evaluations(ticker=args.ticker),
+            store=history_store,
+        )
         pending = history_store.list_unevaluated_validated_runs(ticker=args.ticker)
         payload = {
             "evaluation_count": len(evaluations),

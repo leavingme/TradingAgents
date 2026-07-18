@@ -430,6 +430,28 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
                         "tokens_out": 40,
                     },
                 },
+                "tool_context": {
+                    "get_news": {
+                        "tool_calls": 2,
+                        "input_chars": 20,
+                        "output_chars": 80000 if version == "baseline" else 50000,
+                        "errors": 0,
+                    },
+                    "get_indicators": {
+                        "tool_calls": 1,
+                        "input_chars": 10,
+                        "output_chars": 12000,
+                        "errors": 0,
+                    },
+                    **({
+                        "get_verified_market_snapshot": {
+                            "tool_calls": 1,
+                            "input_chars": 10,
+                            "output_chars": 5000,
+                            "errors": 0,
+                        },
+                    } if version == "challenger" else {}),
+                },
                 "score": score,
                 **_comparable_input_evidence(index),
             })
@@ -462,6 +484,15 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert comparison["paired_agent_costs"]["Portfolio Manager"]["tokens_in"][
         "mean_delta"
     ] == 0.0
+    assert comparison["baseline"]["tool_context"]["get_news"][
+        "mean_output_chars"
+    ] == 80000.0
+    assert comparison["paired_tool_context"]["get_news"]["output_chars"][
+        "mean_reduction"
+    ] == 30000.0
+    assert comparison["paired_tool_context_by_execution_order"][
+        "baseline_first"
+    ]["get_news"]["output_chars"]["sample_count"] == 10
     assert comparison["execution_order"]["baseline_first"] == 10
     assert comparison["execution_order"]["challenger_first"] == 10
     assert comparison["execution_order"]["cost_comparison_status"] == "counterbalanced"
@@ -470,7 +501,7 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     ]["sample_count"] == 10
     assessment = comparison["optimization_assessment"]
     assert assessment["schema"] == (
-        "tradingagents/architecture-optimization-assessment/v1"
+        "tradingagents/architecture-optimization-assessment/v2"
     )
     assert assessment["automatic_mutation_allowed"] is False
     assert assessment["outcome_evidence"]["status"] == (
@@ -482,6 +513,12 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert assessment["recommended_action"] == "human_review_challenger"
     assert assessment["agent_hotspots"][0]["agent"] == "Market Analyst"
     assert assessment["agent_hotspots"][0]["mean_delta"] == -200.0
+    assert assessment["tool_context_hotspots"][0]["tool"] == "get_news"
+    assert assessment["tool_context_hotspots"][0]["mean_delta"] == -30000.0
+    assert assessment["tool_context_hotspots"][2]["tool"] == (
+        "get_verified_market_snapshot"
+    )
+    assert assessment["tool_context_hotspots"][2]["paired_sample_count"] == 0
 
     for row in evaluations:
         if row["architecture_version"] == "challenger":
@@ -755,6 +792,20 @@ def test_architecture_rollup_assesses_multi_day_distribution_and_overlap():
                     "tokens_out": 150,
                 },
             },
+            "tool_context": {
+                "get_financial_evidence": {
+                    "tool_calls": 1,
+                    "input_chars": 20,
+                    "output_chars": 42000 + index,
+                    "errors": 0,
+                },
+                "get_indicators": {
+                    "tool_calls": 1,
+                    "input_chars": 10,
+                    "output_chars": 12000,
+                    "errors": 0,
+                },
+            },
         })
 
     rollup = architecture_rollups(rows)[0]
@@ -794,7 +845,7 @@ def test_architecture_rollup_assesses_multi_day_distribution_and_overlap():
     assert nvda["windows"]["20"]["status"] == "insufficient_history"
     optimization = rollup["optimization_assessment"]
     assert optimization["schema"] == (
-        "tradingagents/single-architecture-optimization-assessment/v1"
+        "tradingagents/single-architecture-optimization-assessment/v2"
     )
     assert optimization["automatic_mutation_allowed"] is False
     assert optimization["paired_shadow_authorization_required"] is True
@@ -812,6 +863,12 @@ def test_architecture_rollup_assesses_multi_day_distribution_and_overlap():
         "mean_alpha_return_delta": pytest.approx(-0.03),
     }
     assert optimization["cost_hotspots"][0]["agent"] == "Research Manager"
+    assert optimization["tool_context_hotspots"][0]["tool"] == (
+        "get_financial_evidence"
+    )
+    assert rollup["tool_context"]["get_financial_evidence"][
+        "output_chars_sample_count"
+    ] == 20
     assert optimization["weakest_rating"]["rating"] == "hold"
     agent_context_rollup = architecture_rollups(
         rows,
@@ -819,6 +876,7 @@ def test_architecture_rollup_assesses_multi_day_distribution_and_overlap():
     )[0]
     assert "outcome_assessment" not in agent_context_rollup
     assert "optimization_assessment" not in agent_context_rollup
+    assert "tool_context" not in agent_context_rollup
 
     incomplete = [dict(row) for row in rows]
     incomplete[0].pop("exit_date")

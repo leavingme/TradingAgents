@@ -747,7 +747,20 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
     history_store.add_event("evaluated-run", AnalysisEvent(
         type="stats",
         run_id="evaluated-run",
-        content={"llm_calls": 9, "tool_calls": 18, "tokens_in": 900, "tokens_out": 180},
+        content={
+            "llm_calls": 9,
+            "tool_calls": 18,
+            "tokens_in": 900,
+            "tokens_out": 180,
+            "by_tool": {
+                "get_news": {
+                    "tool_calls": 2,
+                    "input_chars": 20,
+                    "output_chars": 80000,
+                    "errors": 0,
+                },
+            },
+        },
     ))
     history_store.add_event("evaluated-run", AnalysisEvent(
         type="run_completed",
@@ -830,6 +843,10 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
     }]
     assert response["evaluations"][0]["runtime_seconds"] == 120.0
     assert response["evaluations"][0]["tokens_in"] == 900
+    assert response["evaluations"][0]["tool_context_status"] == "observed"
+    assert response["evaluations"][0]["tool_context"]["get_news"][
+        "output_chars"
+    ] == 80000
     assert response["rollups"] == [{
         "architecture_version": "baseline",
         "architecture_fingerprint": "legacy-unspecified",
@@ -931,7 +948,7 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         "optimization_assessment": {
             "schema": (
                 "tradingagents/"
-                "single-architecture-optimization-assessment/v1"
+                    "single-architecture-optimization-assessment/v2"
             ),
             "automatic_mutation_allowed": False,
             "paired_shadow_authorization_required": True,
@@ -948,7 +965,15 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
                 "persistent_underperformance_supported": False,
             },
             "recent_deterioration_signals": [],
-            "cost_hotspots": [],
+                "cost_hotspots": [],
+                "tool_context_hotspots": [{
+                    "tool": "get_news",
+                    "mean_output_chars": 80000.0,
+                    "sample_count": 1,
+                    "mean_tool_calls": 2.0,
+                    "mean_input_chars": 20.0,
+                    "mean_errors": 0.0,
+                }],
             "weakest_rating": {
                 "rating": "buy",
                 "sample_count": 1,
@@ -964,8 +989,20 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
         "tokens_in_sample_count": 1,
         "mean_tokens_in": 900.0,
         "tokens_out_sample_count": 1,
-        "mean_tokens_out": 180.0,
-    }]
+            "mean_tokens_out": 180.0,
+            "tool_context": {
+                "get_news": {
+                    "tool_calls_sample_count": 1,
+                    "mean_tool_calls": 2.0,
+                    "input_chars_sample_count": 1,
+                    "mean_input_chars": 20.0,
+                    "output_chars_sample_count": 1,
+                    "mean_output_chars": 80000.0,
+                    "errors_sample_count": 1,
+                    "mean_errors": 0.0,
+                },
+            },
+        }]
 
     comparison = asyncio.run(main.get_decision_evaluations(
         ticker="nvda",

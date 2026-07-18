@@ -8,7 +8,7 @@ import { createEventStream } from './event-stream.js?v=20260718-architecture-eva
 import { createRouter } from './router.js';
 import { createSettingsController } from './components/settings-controller.js';
 import { createI18n } from './i18n.js';
-import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-single-architecture-diagnostic';
+import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-tool-context-rollups';
 
 /**
  * TradingAgents Web UI — Enhanced Application Script
@@ -303,6 +303,8 @@ const translations = {
     experimentReadiness: 'Experiment readiness',
     controlledExperimentReady: 'Controlled experiment ready',
     costHotspots: 'Input-token hotspots',
+    toolContextHotspots: 'Tool-output hotspots',
+    pairedToolContextHotspots: 'Paired tool-output change',
     weakestRating: 'Weakest rating cohort',
     yes: 'Yes',
     no: 'No',
@@ -615,6 +617,8 @@ const translations = {
     experimentReadiness: '实验就绪度',
     controlledExperimentReady: '受控实验是否就绪',
     costHotspots: '输入 Token 成本热点',
+    toolContextHotspots: '工具输出体积热点',
+    pairedToolContextHotspots: '配对工具输出变化',
     weakestRating: '最弱评级分组',
     yes: '是',
     no: '否',

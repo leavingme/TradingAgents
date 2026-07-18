@@ -46,6 +46,15 @@ export function buildEvaluationViewModel(payload = {}) {
           sampleCount: Number(item?.sample_count || 0),
         }))
         : [],
+      toolContextHotspots: Array.isArray(
+        row?.optimization_assessment?.tool_context_hotspots,
+      )
+        ? row.optimization_assessment.tool_context_hotspots.slice(0, 3).map(item => ({
+          tool: String(item?.tool || 'unknown'),
+          meanOutputChars: finiteNumber(item?.mean_output_chars),
+          sampleCount: Number(item?.sample_count || 0),
+        }))
+        : [],
       weakestRating: row?.optimization_assessment?.weakest_rating
         ? {
           rating: String(row.optimization_assessment.weakest_rating.rating || 'unknown'),
@@ -271,6 +280,14 @@ export function createEvaluationDashboard({
             .join(' · '),
         ));
       }
+      if (cohort.optimization.toolContextHotspots.length) {
+        diagnostic.append(comparisonRow(
+          t('toolContextHotspots'),
+          cohort.optimization.toolContextHotspots
+            .map(item => `${item.tool} (${number(item.meanOutputChars, 0)})`)
+            .join(' · '),
+        ));
+      }
       if (cohort.optimization.weakestRating) {
         const weakest = cohort.optimization.weakestRating;
         diagnostic.append(comparisonRow(
@@ -343,7 +360,7 @@ export function createEvaluationDashboard({
       return;
     }
     const assessment = comparison.optimization_assessment || {};
-    comparisonElement.replaceChildren(
+    const rows = [
       comparisonRow(t('assessmentStatus'), codeLabel(comparison.status)),
       comparisonRow(
         t('experimentIntegrity'),
@@ -365,8 +382,20 @@ export function createEvaluationDashboard({
         t('recommendedAction'),
         codeLabel(assessment.recommended_action || 'continue_sample_collection'),
       ),
-      element('p', 'evaluation-safety-note', t('automaticMutationDisabled')),
-    );
+    ];
+    const toolHotspots = Array.isArray(assessment.tool_context_hotspots)
+      ? assessment.tool_context_hotspots.slice(0, 3)
+      : [];
+    if (toolHotspots.length) {
+      rows.push(comparisonRow(
+        t('pairedToolContextHotspots'),
+        toolHotspots.map(item => (
+          `${String(item.tool || 'unknown')} (Δ${number(finiteNumber(item.mean_delta), 0)})`
+        )).join(' · '),
+      ));
+    }
+    rows.push(element('p', 'evaluation-safety-note', t('automaticMutationDisabled')));
+    comparisonElement.replaceChildren(...rows);
   }
 
   function render(payload) {

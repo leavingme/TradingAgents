@@ -227,6 +227,11 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
           mean_tokens_in: 1200,
           sample_count: 20,
         }],
+        tool_context_hotspots: [{
+          tool: 'get_financial_evidence',
+          mean_output_chars: 42000,
+          sample_count: 20,
+        }],
         weakest_rating: {
           rating: 'hold',
           mean_score: -0.01,
@@ -255,6 +260,11 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
     costHotspots: [{
       agent: 'Research Manager',
       meanTokensIn: 1200,
+      sampleCount: 20,
+    }],
+    toolContextHotspots: [{
+      tool: 'get_financial_evidence',
+      meanOutputChars: 42000,
       sampleCount: 20,
     }],
     weakestRating: {

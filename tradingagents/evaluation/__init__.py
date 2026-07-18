@@ -16,6 +16,7 @@ from .outcomes import (
     longitudinal_evaluation_policy,
     score_outcome,
 )
+from .operator_costs import attach_operator_cost_metrics
 
 __all__ = [
     "ARCHITECTURE_OPTIMIZATION_ASSESSMENT_SCHEMA",
@@ -29,6 +30,7 @@ __all__ = [
     "DEFAULT_HOLD_BAND",
     "DEFAULT_OUTCOME_HORIZON_SESSIONS",
     "architecture_rollups",
+    "attach_operator_cost_metrics",
     "compare_architectures",
     "longitudinal_evaluation_policy",
     "score_outcome",

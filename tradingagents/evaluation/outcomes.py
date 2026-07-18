@@ -9,6 +9,7 @@ from math import isfinite, sqrt
 from statistics import fmean, median, stdev
 from typing import Any
 
+from tradingagents.observability import CANONICAL_STATS_TOOLS, STATS_TOOL_FIELDS
 
 _EXPOSURE = {
     "buy": 1.0,
@@ -32,7 +33,7 @@ ROLLING_OUTCOME_MONITORING_SCHEMA = (
     "tradingagents/rolling-outcome-monitoring/v1"
 )
 SINGLE_ARCHITECTURE_OPTIMIZATION_SCHEMA = (
-    "tradingagents/single-architecture-optimization-assessment/v1"
+    "tradingagents/single-architecture-optimization-assessment/v2"
 )
 ROLLING_OUTCOME_WINDOW_SIZES = (5, 10, 20)
 
@@ -44,8 +45,9 @@ _RUNTIME_COST_FIELDS = (
     "tokens_out",
 )
 _AGENT_COST_FIELDS = ("llm_calls", "tool_calls", "tokens_in", "tokens_out")
+_TOOL_CONTEXT_FIELDS = STATS_TOOL_FIELDS
 ARCHITECTURE_OPTIMIZATION_ASSESSMENT_SCHEMA = (
-    "tradingagents/architecture-optimization-assessment/v1"
+    "tradingagents/architecture-optimization-assessment/v2"
 )
 
 _T_975_BY_DF = (
@@ -147,6 +149,17 @@ def _agent_cost_mapping(value: Any) -> dict[str, dict[str, Any]]:
         if isinstance(agent, str)
         and 0 < len(agent) <= 64
         and isinstance(fields, dict)
+    }
+
+
+def _tool_context_mapping(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict) or len(value) > len(CANONICAL_STATS_TOOLS) + 1:
+        return {}
+    allowed = CANONICAL_STATS_TOOLS | {"Unattributed"}
+    return {
+        tool: fields
+        for tool, fields in value.items()
+        if tool in allowed and isinstance(fields, dict)
     }
 
 
@@ -279,6 +292,47 @@ def _architecture_optimization_assessment(
             "upper_95_delta": token_pair.get("upper_95_delta"),
         })
 
+    baseline_tools = _tool_context_mapping(baseline.get("tool_context"))
+    challenger_tools = _tool_context_mapping(challenger.get("tool_context"))
+    paired_tools = comparison.get("paired_tool_context")
+    paired_tools = paired_tools if isinstance(paired_tools, dict) else {}
+    ranked_tools = sorted(
+        (
+            (
+                tool,
+                _runtime_cost_value(
+                    baseline_tools.get(tool, {}).get("mean_output_chars")
+                ),
+                _runtime_cost_value(
+                    challenger_tools.get(tool, {}).get("mean_output_chars")
+                ),
+            )
+            for tool in set(baseline_tools) | set(challenger_tools)
+        ),
+        key=lambda item: (
+            -max(
+                item[1] if item[1] is not None else -1.0,
+                item[2] if item[2] is not None else -1.0,
+            ),
+            item[0],
+        ),
+    )
+    tool_hotspots = []
+    for tool, baseline_chars, challenger_chars in ranked_tools[:3]:
+        tool_pair = paired_tools.get(tool)
+        tool_pair = tool_pair if isinstance(tool_pair, dict) else {}
+        output_pair = tool_pair.get("output_chars")
+        output_pair = output_pair if isinstance(output_pair, dict) else {}
+        tool_hotspots.append({
+            "tool": tool,
+            "baseline_mean_output_chars": baseline_chars,
+            "challenger_mean_output_chars": challenger_chars,
+            "paired_sample_count": int(output_pair.get("sample_count") or 0),
+            "mean_delta": output_pair.get("mean_delta"),
+            "lower_95_delta": output_pair.get("lower_95_delta"),
+            "upper_95_delta": output_pair.get("upper_95_delta"),
+        })
+
     if comparison_status == "invalid_comparison":
         recommended_action = "repair_comparison_definition"
     elif integrity_status in {"failing", "degraded"}:
@@ -325,6 +379,7 @@ def _architecture_optimization_assessment(
             "upper_95_delta": upper_cost,
         },
         "agent_hotspots": hotspots,
+        "tool_context_hotspots": tool_hotspots,
     }
 
 
@@ -614,6 +669,25 @@ def _single_architecture_optimization_assessment(
     cost_hotspots.sort(key=lambda item: (-item["mean_tokens_in"], item["agent"]))
     cost_hotspots = cost_hotspots[:3]
 
+    tools = _tool_context_mapping(rollup.get("tool_context"))
+    tool_context_hotspots = []
+    for tool, fields in sorted(tools.items()):
+        mean_output_chars = _runtime_cost_value(fields.get("mean_output_chars"))
+        if mean_output_chars is None:
+            continue
+        tool_context_hotspots.append({
+            "tool": tool,
+            "mean_output_chars": mean_output_chars,
+            "sample_count": int(fields.get("output_chars_sample_count") or 0),
+            "mean_tool_calls": _runtime_cost_value(fields.get("mean_tool_calls")),
+            "mean_input_chars": _runtime_cost_value(fields.get("mean_input_chars")),
+            "mean_errors": _runtime_cost_value(fields.get("mean_errors")),
+        })
+    tool_context_hotspots.sort(
+        key=lambda item: (-item["mean_output_chars"], item["tool"])
+    )
+    tool_context_hotspots = tool_context_hotspots[:3]
+
     rating_breakdown = outcome.get("rating_breakdown")
     rating_breakdown = rating_breakdown if isinstance(rating_breakdown, dict) else {}
     rating_rows = []
@@ -680,6 +754,7 @@ def _single_architecture_optimization_assessment(
         },
         "recent_deterioration_signals": recent_deterioration_signals,
         "cost_hotspots": cost_hotspots,
+        "tool_context_hotspots": tool_context_hotspots,
         "weakest_rating": weakest_rating,
     }
 
@@ -994,6 +1069,31 @@ def architecture_rollups(
                         if values:
                             agent_rollup[f"mean_{field}"] = fmean(values)
                     rollup["agent_costs"][agent] = agent_rollup
+            tool_names = sorted({
+                tool
+                for row in rows
+                for tool in _tool_context_mapping(row.get("tool_context"))
+            })
+            if tool_names:
+                rollup["tool_context"] = {}
+                for tool in tool_names:
+                    tool_rollup: dict[str, Any] = {}
+                    for field in _TOOL_CONTEXT_FIELDS:
+                        values = [
+                            value
+                            for row in rows
+                            if (
+                                value := _runtime_cost_value(
+                                    _tool_context_mapping(row.get("tool_context"))
+                                    .get(tool, {})
+                                    .get(field)
+                                )
+                            ) is not None
+                        ]
+                        tool_rollup[f"{field}_sample_count"] = len(values)
+                        if values:
+                            tool_rollup[f"mean_{field}"] = fmean(values)
+                    rollup["tool_context"][tool] = tool_rollup
             rollup["optimization_assessment"] = (
                 _single_architecture_optimization_assessment(rollup)
             )
@@ -1251,6 +1351,17 @@ def compare_architectures(
     paired_agent_cost_deltas: dict[str, dict[str, list[float]]] = defaultdict(
         lambda: {field: [] for field in _AGENT_COST_FIELDS}
     )
+    paired_tool_context_deltas: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: {field: [] for field in _TOOL_CONTEXT_FIELDS}
+    )
+    ordered_tool_context_deltas: dict[
+        str, dict[str, dict[str, list[float]]]
+    ] = {
+        order: defaultdict(
+            lambda: {field: [] for field in _TOOL_CONTEXT_FIELDS}
+        )
+        for order in ("baseline_first", "challenger_first")
+    }
     for variants in grouped.values():
         base_rows = variants.get(baseline, [])
         challenger_rows = variants.get(challenger, [])
@@ -1395,6 +1506,27 @@ def compare_architectures(
                 delta = challenger_value - base_value
                 if isfinite(delta):
                     paired_agent_cost_deltas[agent][field].append(delta)
+        base_tool_context = _tool_context_mapping(base_row.get("tool_context"))
+        challenger_tool_context = _tool_context_mapping(
+            challenger_row.get("tool_context")
+        )
+        for tool in sorted(set(base_tool_context) | set(challenger_tool_context)):
+            for field in _TOOL_CONTEXT_FIELDS:
+                base_value = _runtime_cost_value(
+                    base_tool_context.get(tool, {}).get(field)
+                )
+                challenger_value = _runtime_cost_value(
+                    challenger_tool_context.get(tool, {}).get(field)
+                )
+                if base_value is None or challenger_value is None:
+                    continue
+                delta = challenger_value - base_value
+                if isfinite(delta):
+                    paired_tool_context_deltas[tool][field].append(delta)
+                    if execution_order in ordered_tool_context_deltas:
+                        ordered_tool_context_deltas[execution_order][tool][field].append(
+                            delta
+                        )
 
     paired_count = len(paired_deltas)
     paired_summary: dict[str, Any] = {
@@ -1528,6 +1660,26 @@ def compare_architectures(
                 for field, values in fields.items()
             }
             for agent, fields in sorted(paired_agent_cost_deltas.items())
+        },
+        "paired_tool_context": {
+            tool: {
+                field: _paired_cost_summary(values, paired_count)
+                for field, values in fields.items()
+            }
+            for tool, fields in sorted(paired_tool_context_deltas.items())
+        },
+        "paired_tool_context_by_execution_order": {
+            order: {
+                tool: {
+                    field: _paired_cost_summary(
+                        values,
+                        execution_order_counts[order],
+                    )
+                    for field, values in fields.items()
+                }
+                for tool, fields in sorted(tools.items())
+            }
+            for order, tools in ordered_tool_context_deltas.items()
         },
         "paired_costs_by_execution_order": {
             order: {

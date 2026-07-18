@@ -364,7 +364,23 @@ def detect_findings(
                 key=lambda item: (-item[1], item[0]),
             )
             top_agents = [f"{agent}:{tokens}" for agent, tokens in ranked[:3]]
+        by_tool = stats.get("by_tool")
+        top_tools: list[str] = []
+        if isinstance(by_tool, dict):
+            ranked_tools = sorted(
+                (
+                    (str(tool), int(values.get("output_chars") or 0))
+                    for tool, values in by_tool.items()
+                    if isinstance(values, dict)
+                    and isinstance(values.get("output_chars"), int)
+                    and values.get("output_chars", 0) >= 0
+                ),
+                key=lambda item: (-item[1], item[0]),
+            )
+            top_tools = [f"{tool}:{chars}" for tool, chars in ranked_tools[:3]]
         attribution = f"; top_agents={','.join(top_agents)}" if top_agents else ""
+        if top_tools:
+            attribution += f"; top_tool_output_chars={','.join(top_tools)}"
         findings.append(_finding(
             "P1-HIGH-CONTEXT-COST", "P1", "输入 token 量过高",
             f"tokens_in={stats.get('tokens_in')}{attribution}",

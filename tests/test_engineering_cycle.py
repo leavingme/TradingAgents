@@ -177,6 +177,12 @@ def test_review_high_context_finding_reports_top_agent_costs(tmp_path):
             "Market Analyst": {"tokens_in": 70_000},
             "Portfolio Manager": {"tokens_in": 5_000},
         },
+        "by_tool": {
+            "get_news": {"output_chars": 80_000},
+            "get_financial_evidence": {"output_chars": 42_468},
+            "get_indicators": {"output_chars": 12_000},
+            "get_verified_market_snapshot": {"output_chars": 2_000},
+        },
     }
     build_review(
         "NVDA-cycle-test",
@@ -189,7 +195,9 @@ def test_review_high_context_finding_reports_top_agent_costs(tmp_path):
     finding = next(item for item in findings if item["id"] == "P1-HIGH-CONTEXT-COST")
     assert finding["evidence"] == (
         "tokens_in=200000; top_agents=News Analyst:90000,"
-        "Market Analyst:70000,Portfolio Manager:5000"
+        "Market Analyst:70000,Portfolio Manager:5000; "
+        "top_tool_output_chars=get_news:80000,"
+        "get_financial_evidence:42468,get_indicators:12000"
     )
 
 

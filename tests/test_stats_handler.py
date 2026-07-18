@@ -34,9 +34,12 @@ def test_stats_handler_attributes_llm_tokens_and_tools_to_langgraph_agent():
     # End out of order to prove run_id, rather than callback order, owns tokens.
     handler.on_llm_end(_response(200, 20), run_id=news_run)
     handler.on_llm_end(_response(100, 10), run_id=market_run)
+    tool_run = uuid4()
     handler.on_tool_start(
-        {}, "NVDA", metadata={"langgraph_node": "News Analyst"}
+        {"name": "get_news"}, "NVDA", run_id=tool_run,
+        metadata={"langgraph_node": "News Analyst"},
     )
+    handler.on_tool_end("validated evidence", run_id=tool_run)
 
     assert handler.get_stats() == {
         "llm_calls": 2,
@@ -52,6 +55,22 @@ def test_stats_handler_attributes_llm_tokens_and_tools_to_langgraph_agent():
                 "llm_calls": 1, "tool_calls": 1,
                 "tokens_in": 200, "tokens_out": 20,
             },
+        },
+        "by_tool": {
+            "get_news": {
+                "tool_calls": 1,
+                "input_chars": len("NVDA"),
+                "output_chars": len("validated evidence"),
+                "errors": 0,
+                "by_agent": {
+                    "News Analyst": {
+                        "tool_calls": 1,
+                        "input_chars": len("NVDA"),
+                        "output_chars": len("validated evidence"),
+                        "errors": 0,
+                    }
+                },
+            }
         },
     }
 
@@ -124,4 +143,79 @@ def test_stats_handler_cleans_run_mapping_when_usage_is_missing():
         "tool_calls": 0,
         "tokens_in": 0,
         "tokens_out": 0,
+    }
+
+
+def test_stats_handler_bounds_tool_names_and_never_persists_error_text():
+    handler = StatsCallbackHandler()
+    first = uuid4()
+    second = uuid4()
+    handler.on_tool_start(
+        {"name": "attacker-tool-one"}, "abc", run_id=first,
+        metadata={"langgraph_node": "News Analyst"},
+    )
+    handler.on_tool_error(
+        RuntimeError("credential=sentinel-secret"), run_id=first
+    )
+    handler.on_tool_start(
+        {"name": "attacker-tool-two"}, "defgh", run_id=second,
+        metadata={"langgraph_node": "attacker-agent"},
+    )
+    handler.on_tool_end("result", run_id=second)
+
+    stats = handler.get_stats()
+    assert set(stats["by_tool"]) == {"Unattributed"}
+    assert stats["by_tool"]["Unattributed"] == {
+        "tool_calls": 2,
+        "input_chars": 8,
+        "output_chars": 6,
+        "errors": 1,
+        "by_agent": {
+            "News Analyst": {
+                "tool_calls": 1,
+                "input_chars": 3,
+                "output_chars": 0,
+                "errors": 1,
+            },
+            "Unattributed": {
+                "tool_calls": 1,
+                "input_chars": 5,
+                "output_chars": 6,
+                "errors": 0,
+            },
+        },
+    }
+    assert "sentinel-secret" not in str(stats)
+    assert not handler._tool_runs
+
+
+def test_stats_handler_prefers_known_callback_name_and_caps_payload_sizes(monkeypatch):
+    monkeypatch.setattr(StatsCallbackHandler, "_MAX_PAYLOAD_CHARS", 10)
+    handler = StatsCallbackHandler()
+    run_id = uuid4()
+    handler.on_tool_start(
+        {"name": "RunnableLambda"},
+        "x" * 11,
+        run_id=run_id,
+        name="get_financial_evidence",
+        metadata={"langgraph_node": "Fundamentals Analyst"},
+    )
+    handler.on_tool_end(
+        "y" * 11,
+        run_id=run_id,
+    )
+
+    assert handler.get_stats()["by_tool"]["get_financial_evidence"] == {
+        "tool_calls": 1,
+        "input_chars": handler._MAX_PAYLOAD_CHARS,
+        "output_chars": handler._MAX_PAYLOAD_CHARS,
+        "errors": 0,
+        "by_agent": {
+            "Fundamentals Analyst": {
+                "tool_calls": 1,
+                "input_chars": handler._MAX_PAYLOAD_CHARS,
+                "output_chars": handler._MAX_PAYLOAD_CHARS,
+                "errors": 0,
+            }
+        },
     }

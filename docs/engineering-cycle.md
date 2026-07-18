@@ -99,7 +99,10 @@ Review 必须覆盖：
 3. fallback 的首选源失败原因、统一 validator 和最终选中源。
 4. 交易数字与 verified snapshot、服务端风险政策的一致性。
 5. `validated/review_required/unavailable` 是否正确传播。
-6. token、延迟、重复上下文和重复事件等非 P0 成本问题。
+6. token、延迟、重复上下文和重复事件等非 P0 成本问题。最终 stats 会按有界的
+   canonical Agent 和工具名记录调用数、输入/输出字符数与错误计数；复盘的高上下文
+   finding 会列出 input token 最高的三个 Agent 及输出体积最大的三个工具。这里只
+   持久化数值，不保存工具参数、结果正文、错误正文或其 hash。
 
 自动检测只负责可确定判断的异常。人工发现的问题追加到 `findings.json`，不得只写在聊天记录里。完成全量复盘后确认：
 

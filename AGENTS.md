@@ -89,6 +89,10 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 - LLM/tool/token stats 属于 runtime 能力，不要让 Web 后端直接依赖 CLI 实现。
   `StatsCallbackHandler` 的 canonical 位置是 `tradingagents.runtime`；
   `cli.stats_handler` 只是兼容 re-export。
+- tool context 体积统计只允许按有界的 canonical tool/Agent 名保存调用数、输入/输出
+  字符数和错误计数；未知名称统一归入 `Unattributed`。不得保存参数、结果正文、错误
+  正文或其 hash。它属于 operator 复盘证据，不得进入 Agent 纵向上下文或改变决策
+  architecture fingerprint。
 - 历史 run 和刷新语义必须从 SQLite + persisted events 恢复。刷新页面后，已完成
   agent 仍应显示完成状态；运行中的任务应通过 SSE replay + live queue 继续呈现。
 - 每个完成 Graph 的每日调度 live run 应在 canonical decision 已形成后追加

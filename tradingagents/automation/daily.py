@@ -52,6 +52,13 @@ ARCHITECTURE_EVALUATION_STATUS_SCHEMA = (
 )
 ARCHITECTURE_EVALUATION_SCAN_LIMIT = 5000
 CONTEXT_COST_DIAGNOSTIC_SCHEMA = "tradingagents/context-cost-diagnostic/v1"
+SCHEDULED_ARCHITECTURE_IDENTITY_SCHEMA = (
+    "tradingagents/scheduled-architecture-identity/v1"
+)
+SCHEDULED_ARCHITECTURE_INVENTORY_SCHEMA = (
+    "tradingagents/scheduled-architecture-inventory/v1"
+)
+MAX_SCHEDULED_ARCHITECTURES = 128
 _SETTING_KEYS = {
     "research_depth",
     "llm_provider",
@@ -477,6 +484,133 @@ def load_runtime_preferences(path: Path | None = None) -> dict[str, Any]:
     return result
 
 
+def _scheduled_analysis_request(
+    target: ScheduledTarget,
+    preferences: dict[str, Any] | None,
+    *,
+    analysis_date: str,
+    run_id: str,
+) -> AnalysisRequest:
+    settings = preferences if isinstance(preferences, dict) else {}
+    request_kwargs = {
+        key: value
+        for key, value in settings.items()
+        if key in _SETTING_KEYS | {"config_overrides"}
+    }
+    return AnalysisRequest(
+        ticker=target.symbol,
+        analysis_date=analysis_date,
+        asset_type=target.asset_type,
+        selected_analysts=target.selected_analysts,
+        run_id=run_id,
+        architecture_version=target.architecture_version,
+        longitudinal_context_mode=target.longitudinal_context_mode,
+        require_exact_market_data_date=True,
+        **request_kwargs,
+    )
+
+
+def _effective_architecture(
+    request: AnalysisRequest,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from tradingagents.runtime.config_builder import build_runtime_config
+
+    effective_config = build_runtime_config(request)
+    manifest = build_architecture_manifest(
+        version=request.architecture_version,
+        selected_analysts=request.selected_analysts,
+        research_depth=effective_config.get("max_debate_rounds"),
+        llm_provider=effective_config.get("llm_provider"),
+        quick_think_llm=effective_config.get("quick_think_llm"),
+        deep_think_llm=effective_config.get("deep_think_llm"),
+        longitudinal_context_mode=request.longitudinal_context_mode,
+        effective_config=effective_config,
+    )
+    return effective_config, manifest
+
+
+def scheduled_architecture_identity(
+    target: ScheduledTarget,
+    preferences: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the safe, canonical identity of one configured schedule target.
+
+    This performs the same request/config/manifest construction as a real daily
+    run without selecting market data, contacting a vendor, initializing an LLM,
+    or writing history.  It intentionally excludes backend URLs and all secret
+    material so operator surfaces can distinguish the active production
+    architecture from historical cohorts before the first natural run.
+    """
+    request = _scheduled_analysis_request(
+        target,
+        preferences,
+        analysis_date="2000-01-03",
+        run_id="scheduled-architecture-identity",
+    )
+    effective_config, manifest = _effective_architecture(request)
+    return {
+        "schema": SCHEDULED_ARCHITECTURE_IDENTITY_SCHEMA,
+        "ticker": target.symbol,
+        "asset_type": target.asset_type,
+        "architecture_version": request.architecture_version,
+        "architecture_fingerprint": architecture_fingerprint(manifest),
+        "architecture_manifest_schema": manifest["schema"],
+        "selected_analysts": list(request.selected_analysts),
+        "research_depth": effective_config.get("max_debate_rounds"),
+        "llm_provider": effective_config.get("llm_provider"),
+        "quick_think_llm": effective_config.get("quick_think_llm"),
+        "deep_think_llm": effective_config.get("deep_think_llm"),
+        "longitudinal_context_mode": request.longitudinal_context_mode,
+    }
+
+
+def load_scheduled_architecture_inventory(
+    schedule_path: Path | None = None,
+    preferences_path: Path | None = None,
+) -> dict[str, Any]:
+    """Load active schedule identities without exposing configuration errors.
+
+    The inventory is an operator control-plane view.  Invalid or unavailable
+    server-owned configuration fails closed to an empty identity set while
+    retaining only the local exception type for diagnosis.
+    """
+    try:
+        schedule = load_daily_schedule(schedule_path)
+        if not schedule.enabled:
+            return {
+                "schema": SCHEDULED_ARCHITECTURE_INVENTORY_SCHEMA,
+                "status": "schedule_disabled",
+                "schedule_enabled": False,
+                "paired_shadow_authorized": schedule.paired_shadow_authorized,
+                "architectures": [],
+            }
+        if len(schedule.targets) > MAX_SCHEDULED_ARCHITECTURES:
+            raise ValueError(
+                "scheduled architecture inventory exceeds its bounded limit"
+            )
+        preferences = load_runtime_preferences(preferences_path)
+        identities = [
+            scheduled_architecture_identity(target, preferences)
+            for target in schedule.targets
+        ]
+        return {
+            "schema": SCHEDULED_ARCHITECTURE_INVENTORY_SCHEMA,
+            "status": "loaded",
+            "schedule_enabled": True,
+            "paired_shadow_authorized": schedule.paired_shadow_authorized,
+            "architectures": identities,
+        }
+    except Exception as exc:
+        return {
+            "schema": SCHEDULED_ARCHITECTURE_INVENTORY_SCHEMA,
+            "status": "unavailable",
+            "schedule_enabled": None,
+            "paired_shadow_authorized": False,
+            "architectures": [],
+            "error_type": type(exc).__name__,
+        }
+
+
 def _runs_for_market_date(
     store: RunHistoryStore,
     symbol: str,
@@ -752,36 +886,14 @@ def run_due_analyses(
                 f"{safe_ticker_component(target.architecture_version)}-"
                 f"{analysis_date.replace('-', '')}-{uuid4().hex[:8]}"
             )
-            request_kwargs = {
-                key: value
-                for key, value in runtime_preferences.items()
-                if key in _SETTING_KEYS | {"config_overrides"}
-            }
-            request = AnalysisRequest(
-                ticker=target.symbol,
+            request = _scheduled_analysis_request(
+                target,
+                runtime_preferences,
                 analysis_date=analysis_date,
-                asset_type=target.asset_type,
-                selected_analysts=target.selected_analysts,
                 run_id=run_id,
-                architecture_version=target.architecture_version,
-                longitudinal_context_mode=target.longitudinal_context_mode,
-                require_exact_market_data_date=True,
-                **request_kwargs,
             )
             if dry_run:
-                from tradingagents.runtime.config_builder import build_runtime_config
-
-                effective_config = build_runtime_config(request)
-                manifest = build_architecture_manifest(
-                    version=request.architecture_version,
-                    selected_analysts=request.selected_analysts,
-                    research_depth=effective_config.get("max_debate_rounds"),
-                    llm_provider=effective_config.get("llm_provider"),
-                    quick_think_llm=effective_config.get("quick_think_llm"),
-                    deep_think_llm=effective_config.get("deep_think_llm"),
-                    longitudinal_context_mode=request.longitudinal_context_mode,
-                    effective_config=effective_config,
-                )
+                effective_config, manifest = _effective_architecture(request)
                 outcomes.append(
                     {
                         "symbol": target.symbol,

@@ -22,6 +22,10 @@ from .operator_costs import (
     attach_operator_cost_metrics,
     load_operator_run_costs,
 )
+from .active_architecture import (
+    active_architecture_inventory_payload,
+    observe_active_architectures,
+)
 
 __all__ = [
     "ARCHITECTURE_OPTIMIZATION_ASSESSMENT_SCHEMA",
@@ -36,10 +40,12 @@ __all__ = [
     "DEFAULT_HOLD_BAND",
     "DEFAULT_OUTCOME_HORIZON_SESSIONS",
     "architecture_rollups",
+    "active_architecture_inventory_payload",
     "architecture_run_cost_rollups",
     "attach_operator_cost_metrics",
     "compare_architectures",
     "longitudinal_evaluation_policy",
     "load_operator_run_costs",
+    "observe_active_architectures",
     "score_outcome",
 ]

@@ -727,9 +727,35 @@ def test_manual_vendor_verification_endpoint(monkeypatch):
     assert result == expected
 
 
-def test_evaluation_endpoint_returns_rows_and_rollups():
+def test_evaluation_endpoint_returns_rows_and_rollups(monkeypatch):
     from tradingagents.runtime import history_store
     from web.backend import main
+
+    monkeypatch.setattr(
+        "tradingagents.automation.load_scheduled_architecture_inventory",
+        lambda: {
+            "schema": "tradingagents/scheduled-architecture-inventory/v1",
+            "status": "loaded",
+            "schedule_enabled": True,
+            "paired_shadow_authorized": False,
+            "architectures": [{
+                "schema": "tradingagents/scheduled-architecture-identity/v1",
+                "ticker": "NVDA",
+                "asset_type": "stock",
+                "architecture_version": "production",
+                "architecture_fingerprint": "c" * 64,
+                "architecture_manifest_schema": (
+                    "tradingagents/agent-architecture-manifest/v4"
+                ),
+                "selected_analysts": ["market"],
+                "research_depth": 1,
+                "llm_provider": "minimax-cn",
+                "quick_think_llm": "MiniMax-M3",
+                "deep_think_llm": "MiniMax-M3",
+                "longitudinal_context_mode": "research_and_portfolio",
+            }],
+        },
+    )
 
     history_store.create_run(
         "evaluated-run",
@@ -827,6 +853,13 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
 
     response = asyncio.run(main.get_decision_evaluations(ticker="nvda", limit=50))
     assert response["ticker_scope"] == "NVDA"
+    active = response["active_architecture_inventory"]
+    assert active["status"] == "loaded"
+    assert active["ticker_scope"] == "NVDA"
+    assert active["architectures"][0]["observation_status"] == (
+        "awaiting_first_active_run"
+    )
+    assert active["architectures"][0]["terminal_run_count"] == 0
     assert len(response["evaluations"]) == 1
     assert response["pending_evaluation_count"] == 1
     assert response["pending_evaluations"] == [{

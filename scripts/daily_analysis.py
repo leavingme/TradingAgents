@@ -15,12 +15,14 @@ if str(WORKSPACE) not in sys.path:
 from tradingagents.automation.daily import (  # noqa: E402
     load_daily_schedule,
     load_runtime_preferences,
+    load_scheduled_architecture_inventory,
     run_due_analyses,
     scheduler_exit_code,
 )
 from tradingagents.evaluation import (  # noqa: E402
     DEFAULT_OUTCOME_HORIZON_SESSIONS,
     architecture_rollups,
+    active_architecture_inventory_payload,
     architecture_run_cost_rollups,
     attach_operator_cost_metrics,
     compare_architectures,
@@ -83,6 +85,15 @@ def main() -> int:
             "rollups": architecture_rollups(evaluations),
             "run_cost_sample_count": len(run_cost_rows),
             "run_cost_rollups": architecture_run_cost_rollups(run_cost_rows),
+            "active_architecture_inventory": active_architecture_inventory_payload(
+                load_scheduled_architecture_inventory(
+                    args.config,
+                    args.web_config,
+                ),
+                evaluations=evaluations,
+                terminal_runs=run_cost_rows,
+                ticker=args.ticker,
+            ),
         }
         if args.baseline and args.challenger:
             if args.baseline == args.challenger:

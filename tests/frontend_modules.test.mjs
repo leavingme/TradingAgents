@@ -189,6 +189,18 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   const { buildEvaluationViewModel } = await importSource('components/evaluation-dashboard.js');
   const view = buildEvaluationViewModel({
     ticker_scope: 'NVDA',
+    active_architecture_inventory: {
+      status: 'loaded',
+      architectures: [{
+        active: true,
+        ticker: 'NVDA',
+        architecture_version: 'candidate',
+        architecture_fingerprint: 'fingerprint',
+        observation_status: 'active_outcome_observed',
+        terminal_run_count: 20,
+        outcome_sample_count: 20,
+      }],
+    },
     evaluations: [{ run_id: 'evaluated' }],
     pending_evaluation_count: 1,
     pending_evaluations: [{ run_id: 'pending' }],
@@ -295,6 +307,10 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   assert.equal(view.evaluationCount, 1);
   assert.equal(view.pendingCount, 1);
   assert.equal(view.cohortCount, 2);
+  assert.equal(view.activeArchitectureCount, 1);
+  assert.equal(view.activeInventoryStatus, 'loaded');
+  assert.equal(view.cohorts[0].active, true);
+  assert.equal(view.cohorts[0].architectureStatus, 'active_outcome_observed');
   assert.equal(view.runCostSampleCount, 2);
   assert.equal(view.cohorts[0].costSampleCount, 1);
   assert.equal(view.cohorts[0].costStatsObservedCount, 1);
@@ -349,9 +365,89 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   });
 });
 
+test('evaluation view separates awaiting active architecture from historical cost cohort', { concurrency: false }, async () => {
+  const { buildEvaluationViewModel } = await importSource('components/evaluation-dashboard.js');
+  const view = buildEvaluationViewModel({
+    ticker_scope: 'NVDA',
+    active_architecture_inventory: {
+      status: 'loaded',
+      architectures: [{
+        active: true,
+        ticker: 'NVDA',
+        architecture_version: 'production',
+        architecture_fingerprint: 'current-fingerprint',
+        observation_status: 'awaiting_first_active_run',
+        terminal_run_count: 0,
+        outcome_sample_count: 0,
+      }],
+    },
+    run_cost_rollups: [{
+      ticker: 'NVDA',
+      architecture_version: 'production-old',
+      architecture_fingerprint: 'historical-fingerprint',
+      sample_count: 1,
+    }],
+  });
+
+  assert.equal(view.cohortCount, 2);
+  assert.deepEqual(
+    view.cohorts.map(row => ({
+      fingerprint: row.fingerprint,
+      active: row.active,
+      status: row.architectureStatus,
+      costSamples: row.costSampleCount,
+    })),
+    [{
+      fingerprint: 'current-fingerprint',
+      active: true,
+      status: 'awaiting_first_active_run',
+      costSamples: 0,
+    }, {
+      fingerprint: 'historical-fingerprint',
+      active: false,
+      status: 'historical_architecture',
+      costSamples: 1,
+    }],
+  );
+});
+
+test('evaluation view does not label cohorts historical when active inventory is unavailable', { concurrency: false }, async () => {
+  const { buildEvaluationViewModel } = await importSource('components/evaluation-dashboard.js');
+  const unavailable = buildEvaluationViewModel({
+    ticker_scope: 'NVDA',
+    active_architecture_inventory: { status: 'unavailable', architectures: [] },
+    run_cost_rollups: [{
+      ticker: 'NVDA',
+      architecture_version: 'production',
+      architecture_fingerprint: 'fingerprint',
+      sample_count: 1,
+    }],
+  });
+  const disabled = buildEvaluationViewModel({
+    ticker_scope: 'NVDA',
+    active_architecture_inventory: { status: 'schedule_disabled', architectures: [] },
+    run_cost_rollups: [{
+      ticker: 'NVDA',
+      architecture_version: 'production',
+      architecture_fingerprint: 'fingerprint',
+      sample_count: 1,
+    }],
+  });
+
+  assert.equal(
+    unavailable.cohorts[0].architectureStatus,
+    'active_architecture_inventory_unavailable',
+  );
+  assert.equal(
+    disabled.cohorts[0].architectureStatus,
+    'scheduled_architecture_disabled',
+  );
+});
+
 test('evaluation view model keeps same architecture costs isolated by ticker', { concurrency: false }, async () => {
   const { buildEvaluationViewModel } = await importSource('components/evaluation-dashboard.js');
   const view = buildEvaluationViewModel({
+    active_architecture_inventory: { status: 'loaded', architectures: [] },
     rollups: [{
       architecture_version: 'production',
       architecture_fingerprint: 'same',
@@ -376,6 +472,14 @@ test('evaluation view model keeps same architecture costs isolated by ticker', {
     [['', 4, 0], ['NVDA', 0, 2], ['AAPL', 0, 3]],
   );
   assert.equal(new Set(view.cohorts.map(row => row.key)).size, 3);
+  assert.deepEqual(
+    view.cohorts.map(row => row.architectureStatus),
+    [
+      'cross_ticker_outcome_aggregate',
+      'historical_architecture',
+      'historical_architecture',
+    ],
+  );
 });
 
 test('event log localizes architecture evaluation readiness', { concurrency: false }, async () => {

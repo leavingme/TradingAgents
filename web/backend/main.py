@@ -319,12 +319,14 @@ async def get_decision_evaluations(
     """Return immutable fixed-horizon outcomes and architecture rollups."""
     from tradingagents.evaluation import (
         DEFAULT_OUTCOME_HORIZON_SESSIONS,
+        active_architecture_inventory_payload,
         architecture_rollups,
         architecture_run_cost_rollups,
         attach_operator_cost_metrics,
         compare_architectures,
         load_operator_run_costs,
     )
+    from tradingagents.automation import load_scheduled_architecture_inventory
     from tradingagents.runtime import history_store
 
     if bool(baseline) != bool(challenger):
@@ -404,6 +406,12 @@ async def get_decision_evaluations(
         "rollups": architecture_rollups(evaluations),
         "run_cost_sample_count": len(run_cost_rows),
         "run_cost_rollups": architecture_run_cost_rollups(run_cost_rows),
+        "active_architecture_inventory": active_architecture_inventory_payload(
+            load_scheduled_architecture_inventory(),
+            evaluations=evaluations,
+            terminal_runs=run_cost_rows,
+            ticker=ticker_scope,
+        ),
     }
     if baseline and challenger:
         try:

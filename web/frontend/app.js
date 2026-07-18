@@ -8,7 +8,7 @@ import { createEventStream } from './event-stream.js?v=20260718-architecture-eva
 import { createRouter } from './router.js';
 import { createSettingsController } from './components/settings-controller.js';
 import { createI18n } from './i18n.js';
-import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-rolling-cost-monitoring';
+import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-active-architecture-lifecycle';
 
 /**
  * TradingAgents Web UI — Enhanced Application Script
@@ -243,6 +243,7 @@ const translations = {
     evaluatedResults: 'Evaluated results',
     pendingResults: 'Pending results',
     architectureCohorts: 'Architecture cohorts',
+    activeArchitectures: 'Active architectures',
     costRuns: 'Cost runs',
     statsCoverage: 'Stats coverage',
     runStatuses: 'Run statuses',
@@ -253,6 +254,8 @@ const translations = {
     currentDailyTokens: 'Current daily input tokens',
     previousDailyTokens: 'Previous daily input tokens',
     costWindowStatus: 'Window status',
+    architectureLifecycle: 'Architecture lifecycle',
+    outcomeStatus: 'Outcome status',
     noEvaluations: 'No mature fixed-horizon outcomes yet.',
     noPendingEvaluations: 'No validated decisions are awaiting settlement.',
     loadingEvaluations: 'Loading audited evaluations…',
@@ -319,6 +322,15 @@ const translations = {
     evaluationCodeInvestigateRunReliability: 'Investigate run reliability',
     evaluationCodeInvestigateCostIncrease: 'Investigate recent cost increase',
     evaluationCodeMonitorCost: 'Monitor cost and design a controlled challenger',
+    evaluationCodeAwaitingFirstActiveRun: 'Active · awaiting first natural run',
+    evaluationCodeActiveRunNeedsAttention: 'Active · run needs attention',
+    evaluationCodeAwaitingOutcomeMaturity: 'Active · awaiting outcome maturity',
+    evaluationCodeActiveOutcomeObserved: 'Active · mature outcome observed',
+    evaluationCodeHistoricalArchitecture: 'Historical architecture',
+    evaluationCodeArchitectureIdentityUnknown: 'Architecture identity not observed',
+    evaluationCodeArchitectureScheduleDisabled: 'Architecture schedule disabled',
+    evaluationCodeArchitectureInventoryUnavailable: 'Active architecture inventory unavailable',
+    evaluationCodeCrossTickerAggregate: 'Cross-ticker outcome aggregate',
     optimizationDiagnostic: 'Optimization diagnostic',
     experimentReadiness: 'Experiment readiness',
     controlledExperimentReady: 'Controlled experiment ready',
@@ -577,6 +589,7 @@ const translations = {
     evaluatedResults: '已结算结果',
     pendingResults: '待结算结果',
     architectureCohorts: '架构 Cohort',
+    activeArchitectures: '当前调度架构',
     costRuns: '成本运行样本',
     statsCoverage: '统计覆盖',
     runStatuses: '运行状态',
@@ -587,6 +600,8 @@ const translations = {
     currentDailyTokens: '当前日均输入 Token',
     previousDailyTokens: '前一窗口日均输入 Token',
     costWindowStatus: '窗口状态',
+    architectureLifecycle: '架构生命周期',
+    outcomeStatus: '结果状态',
     noEvaluations: '尚无成熟的固定期限结果。',
     noPendingEvaluations: '目前没有等待结算的有效决策。',
     loadingEvaluations: '正在加载经审计的评估…',
@@ -653,6 +668,15 @@ const translations = {
     evaluationCodeInvestigateRunReliability: '调查运行可靠性',
     evaluationCodeInvestigateCostIncrease: '调查近期成本上升',
     evaluationCodeMonitorCost: '持续监控成本并设计受控挑战者',
+    evaluationCodeAwaitingFirstActiveRun: '当前架构 · 等待首次自然运行',
+    evaluationCodeActiveRunNeedsAttention: '当前架构 · 运行需要处理',
+    evaluationCodeAwaitingOutcomeMaturity: '当前架构 · 等待结果成熟',
+    evaluationCodeActiveOutcomeObserved: '当前架构 · 已有成熟结果',
+    evaluationCodeHistoricalArchitecture: '历史架构',
+    evaluationCodeArchitectureIdentityUnknown: '尚未观察架构身份',
+    evaluationCodeArchitectureScheduleDisabled: '架构调度已关闭',
+    evaluationCodeArchitectureInventoryUnavailable: '当前架构清单不可用',
+    evaluationCodeCrossTickerAggregate: '跨标的结果聚合',
     optimizationDiagnostic: '优化诊断',
     experimentReadiness: '实验就绪度',
     controlledExperimentReady: '受控实验是否就绪',

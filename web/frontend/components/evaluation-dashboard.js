@@ -30,6 +30,13 @@ export function buildEvaluationViewModel(payload = {}) {
   const runCostRollups = Array.isArray(payload.run_cost_rollups)
     ? payload.run_cost_rollups
     : [];
+  const activeInventory = payload.active_architecture_inventory
+    && typeof payload.active_architecture_inventory === 'object'
+    ? payload.active_architecture_inventory
+    : {};
+  const activeArchitectures = Array.isArray(activeInventory.architectures)
+    ? activeInventory.architectures
+    : [];
   const outcomeByKey = new Map(rollups.map(row => [cohortKey(row), row]));
   const tickerScope = String(payload.ticker_scope || '').toUpperCase();
   const costRowsByKey = new Map();
@@ -51,8 +58,17 @@ export function buildEvaluationViewModel(payload = {}) {
       rows.forEach(row => costByKey.set(tickerCohortKey(row), row));
     }
   });
-  const cohortKeys = [...new Set([...outcomeByKey.keys(), ...costByKey.keys()])];
+  const activeByKey = new Map(activeArchitectures.map(row => [
+    tickerScope ? cohortKey(row) : tickerCohortKey(row),
+    row,
+  ]));
+  const cohortKeys = [...new Set([
+    ...activeByKey.keys(),
+    ...outcomeByKey.keys(),
+    ...costByKey.keys(),
+  ])];
   const cohorts = cohortKeys.map(key => {
+    const activeArchitecture = activeByKey.get(key) || {};
     const row = outcomeByKey.get(key) || {};
     const runCost = costByKey.get(key) || {};
     const agentHotspots = Array.isArray(runCost.agent_hotspots)
@@ -61,16 +77,42 @@ export function buildEvaluationViewModel(payload = {}) {
     const toolHotspots = Array.isArray(runCost.tool_context_hotspots)
       ? runCost.tool_context_hotspots
       : row?.optimization_assessment?.tool_context_hotspots;
+    let architectureStatus = activeArchitecture?.observation_status;
+    if (!architectureStatus && !tickerScope && Object.keys(row).length) {
+      architectureStatus = 'cross_ticker_outcome_aggregate';
+    } else if (!architectureStatus && activeInventory.status === 'loaded') {
+      architectureStatus = 'historical_architecture';
+    } else if (!architectureStatus && activeInventory.status === 'schedule_disabled') {
+      architectureStatus = 'scheduled_architecture_disabled';
+    } else if (!architectureStatus && activeInventory.status === 'unavailable') {
+      architectureStatus = 'active_architecture_inventory_unavailable';
+    } else if (!architectureStatus) {
+      architectureStatus = 'architecture_identity_not_observed';
+    }
     return {
       key,
-      ticker: String(runCost?.ticker || row?.ticker || ''),
+      active: Boolean(activeArchitecture?.active),
+      architectureStatus: String(architectureStatus),
+      ticker: String(
+        activeArchitecture?.ticker || runCost?.ticker || row?.ticker || '',
+      ),
       version: String(
-        row?.architecture_version || runCost?.architecture_version || 'unknown',
+        activeArchitecture?.architecture_version
+          || row?.architecture_version
+          || runCost?.architecture_version
+          || 'unknown',
       ),
       fingerprint: String(
-        row?.architecture_fingerprint
+        activeArchitecture?.architecture_fingerprint
+          || row?.architecture_fingerprint
           || runCost?.architecture_fingerprint
           || 'unknown',
+      ),
+      activeTerminalRunCount: Number(
+        activeArchitecture?.terminal_run_count || 0,
+      ),
+      activeOutcomeSampleCount: Number(
+        activeArchitecture?.outcome_sample_count || 0,
       ),
       sampleCount: Number(row?.sample_count || 0),
       costSampleCount: Number(runCost?.sample_count || 0),
@@ -171,6 +213,8 @@ export function buildEvaluationViewModel(payload = {}) {
     evaluationCount: evaluations.length,
     pendingCount: Number(payload.pending_evaluation_count ?? pending.length),
     cohortCount: cohorts.length,
+    activeArchitectureCount: activeArchitectures.length,
+    activeInventoryStatus: String(activeInventory.status || 'not_observed'),
     runCostSampleCount: Number(
       payload.run_cost_sample_count
         ?? runCostRollups.reduce(
@@ -254,6 +298,15 @@ export function createEvaluationDashboard({
     investigate_run_reliability: 'evaluationCodeInvestigateRunReliability',
     investigate_recent_cost_increase: 'evaluationCodeInvestigateCostIncrease',
     monitor_cost_and_design_challenger: 'evaluationCodeMonitorCost',
+    awaiting_first_active_run: 'evaluationCodeAwaitingFirstActiveRun',
+    active_run_requires_attention: 'evaluationCodeActiveRunNeedsAttention',
+    awaiting_outcome_maturity: 'evaluationCodeAwaitingOutcomeMaturity',
+    active_outcome_observed: 'evaluationCodeActiveOutcomeObserved',
+    historical_architecture: 'evaluationCodeHistoricalArchitecture',
+    architecture_identity_not_observed: 'evaluationCodeArchitectureIdentityUnknown',
+    scheduled_architecture_disabled: 'evaluationCodeArchitectureScheduleDisabled',
+    active_architecture_inventory_unavailable: 'evaluationCodeArchitectureInventoryUnavailable',
+    cross_ticker_outcome_aggregate: 'evaluationCodeCrossTickerAggregate',
   };
 
   function codeLabel(value) {
@@ -292,6 +345,7 @@ export function createEvaluationDashboard({
       metric(t('evaluatedResults'), view.evaluationCount),
       metric(t('pendingResults'), view.pendingCount),
       metric(t('architectureCohorts'), view.cohortCount),
+      metric(t('activeArchitectures'), view.activeArchitectureCount),
       metric(t('costRuns'), view.runCostSampleCount),
     );
   }
@@ -397,7 +451,11 @@ export function createEvaluationDashboard({
       );
       header.append(
         title,
-        element('span', 'evaluation-status-badge', codeLabel(cohort.outcomeStatus)),
+        element(
+          'span',
+          'evaluation-status-badge',
+          codeLabel(cohort.architectureStatus),
+        ),
       );
       const metrics = element('div', 'evaluation-metrics');
       metrics.append(
@@ -411,6 +469,14 @@ export function createEvaluationDashboard({
       const diagnostic = element('div', 'evaluation-diagnostic');
       diagnostic.append(
         element('h4', null, t('optimizationDiagnostic')),
+        comparisonRow(
+          t('architectureLifecycle'),
+          codeLabel(cohort.architectureStatus),
+        ),
+        comparisonRow(
+          t('outcomeStatus'),
+          codeLabel(cohort.outcomeStatus),
+        ),
         comparisonRow(
           t('experimentReadiness'),
           codeLabel(cohort.optimization.readinessStatus),

@@ -17,7 +17,9 @@ from tradingagents.automation.daily import (
     _context_cost_diagnostic,
     _record_architecture_evaluation_status,
     load_runtime_preferences,
+    load_scheduled_architecture_inventory,
     run_due_analyses,
+    scheduled_architecture_identity,
     scheduler_exit_code,
 )
 from tradingagents.runtime.history import RunHistoryStore
@@ -59,6 +61,69 @@ def test_target_due_uses_exchange_local_time():
     after = datetime(2026, 7, 17, 16, 30, tzinfo=ZoneInfo("America/New_York"))
     assert target.is_due(before) is False
     assert target.is_due(after) is True
+
+
+def test_scheduled_architecture_inventory_fails_closed_without_leaking_paths(tmp_path):
+    missing = tmp_path / "secret-schedule-name.json"
+
+    inventory = load_scheduled_architecture_inventory(missing)
+
+    assert inventory == {
+        "schema": "tradingagents/scheduled-architecture-inventory/v1",
+        "status": "unavailable",
+        "schedule_enabled": None,
+        "paired_shadow_authorized": False,
+        "architectures": [],
+        "error_type": "FileNotFoundError",
+    }
+    assert str(tmp_path) not in json.dumps(inventory)
+
+
+def test_scheduled_architecture_inventory_reports_disabled_schedule(tmp_path):
+    schedule_path = tmp_path / "schedule.json"
+    schedule_path.write_text(
+        json.dumps({"enabled": False, "targets": []}),
+        encoding="utf-8",
+    )
+
+    inventory = load_scheduled_architecture_inventory(schedule_path)
+
+    assert inventory["status"] == "schedule_disabled"
+    assert inventory["schedule_enabled"] is False
+    assert inventory["architectures"] == []
+
+
+def test_scheduled_architecture_inventory_drops_internal_error_text(
+    tmp_path,
+    monkeypatch,
+):
+    schedule_path = tmp_path / "schedule.json"
+    schedule_path.write_text(
+        json.dumps({
+            "enabled": True,
+            "targets": [{
+                "symbol": "NVDA",
+                "timezone": "America/New_York",
+                "run_after": "16:30",
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    def fail_identity(*args, **kwargs):
+        raise RuntimeError("sentinel-secret /private/schedule/path")
+
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.scheduled_architecture_identity",
+        fail_identity,
+    )
+
+    inventory = load_scheduled_architecture_inventory(schedule_path)
+
+    assert inventory["status"] == "unavailable"
+    assert inventory["error_type"] == "RuntimeError"
+    assert "sentinel-secret" not in json.dumps(inventory)
+    assert "/private" not in json.dumps(inventory)
 
 
 def test_schedule_rejects_duplicate_symbols():
@@ -681,6 +746,26 @@ def test_dry_run_does_not_create_history(tmp_path, monkeypatch):
     assert "credential" not in json.dumps(result)
     assert store.list_runs() == []
     assert not (tmp_path / "missing-parent").exists()
+    identity = scheduled_architecture_identity(
+        _schedule().targets[0],
+        {
+            "llm_provider": "minimax-cn",
+            "research_depth": 3,
+            "output_language": "French",
+            "backend_url": "https://user:credential@example.invalid/v1",
+            "config_overrides": {
+                "data_vendors": {"news_data": "longbridge_mcp, longbridge"}
+            },
+        },
+    )
+    assert identity["architecture_fingerprint"] == result[0][
+        "architecture_fingerprint"
+    ]
+    assert identity["architecture_version"] == result[0]["architecture_version"]
+    assert identity["selected_analysts"] == result[0]["selected_analysts"]
+    assert identity["research_depth"] == 3
+    assert "backend" not in json.dumps(identity).lower()
+    assert "credential" not in json.dumps(identity).lower()
 
 
 def test_failed_run_retries_only_after_delay_and_stops_at_bound(tmp_path, monkeypatch):

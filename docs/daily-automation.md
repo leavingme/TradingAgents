@@ -115,6 +115,10 @@ tool calls、input/output tokens；History/API 的单次结果公开 `agent_cost
 被限制在单一 `Unattributed` 桶，不能制造无界指标基数。历史 `point_in_time` 只允许看到
 `evaluated_at <= information_cutoff` 的结果；cutoff 与同/跨标的范围在 SQLite 排序和
 LIMIT 之前执行，避免未来结果或其他标的大量样本挤掉当时已经存在的同标的证据。
+Market Analyst 的模型工具面不再接收多年度原始日线表：底层仍以完整窗口计算并验证
+OHLCV/200 SMA 等指标，但只向模型渲染一次批量指标和紧凑 verified snapshot（最新行、
+指标、最近 30 个收盘）。这减少工具循环上下文，不改变 vendor fallback、缓存、validator
+或 ledger 证据；是否确实降低自然运行 token 仍以新 fingerprint 的 terminal stats 为准。
 新写入的 `evaluated_at` 统一规范为 UTC，旧偏移时间也按真实时刻而非字符串排序。
 operator-facing rollup 还返回 `architecture-outcome-assessment/v2`：score 的均值、中位数、
 标准差、负值比例与最差值，raw/alpha 中位数，按 rating 的样本数/命中率/均值，以及

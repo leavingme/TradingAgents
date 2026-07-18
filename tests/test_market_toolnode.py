@@ -1,10 +1,4 @@
-"""The market analyst is bound (and prompt-instructed) to call
-get_verified_market_snapshot; if the executor ToolNode doesn't register it, the
-call fails and the model reports the tool "unavailable" and skips verification.
-
-Regression guard for that wiring gap (snapshot bound to the LLM but missing from
-the market ToolNode).
-"""
+"""Market Analyst tool wiring and deterministic market-data boundaries."""
 from unittest import mock
 
 import pytest
@@ -15,6 +9,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.prebuilt.tool_node import ToolInvocationError
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.agents import MARKET_ANALYST_TOOL_NAMES
 from tradingagents.graph.tool_error_handling import recover_invalid_tool_arguments
 
 
@@ -31,12 +26,16 @@ def test_market_toolnode_can_execute_verified_snapshot():
     # _create_tool_nodes does not use self -> call unbound (avoids building LLMs).
     nodes = TradingAgentsGraph._create_tool_nodes(None)
     market_tools = set(nodes["market"].tools_by_name)
+    assert market_tools == set(MARKET_ANALYST_TOOL_NAMES)
     assert "get_verified_market_snapshot" in market_tools, (
         "get_verified_market_snapshot is bound to the market analyst but not "
         "registered in the market ToolNode, so the model's call fails."
     )
-    # the other core market tools must remain too
-    assert {"get_stock_data", "get_indicators"} <= market_tools
+    assert "get_indicators" in market_tools
+    assert "get_stock_data" not in market_tools, (
+        "raw multi-year OHLCV must not be copied into the LLM conversation; "
+        "the verified snapshot retains the trusted compact view"
+    )
 
 
 @pytest.mark.unit

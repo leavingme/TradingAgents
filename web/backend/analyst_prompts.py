@@ -11,6 +11,7 @@ from tradingagents.agents.analysts.prompts import (
     build_sentiment_analyst_system_message,
     render_full_prompt,
 )
+from tradingagents.agents import MARKET_ANALYST_TOOL_NAMES
 
 
 def analyst_prompt_payload() -> dict[str, list[dict[str, object]]]:
@@ -19,12 +20,12 @@ def analyst_prompt_payload() -> dict[str, list[dict[str, object]]]:
             {
                 "key": "market",
                 "title": "Market Analyst",
-                "description": "Technical market analysis using OHLCV data, indicators, and a verified market snapshot.",
-                "tools": ["get_stock_data", "get_indicators", "get_verified_market_snapshot"],
+                "description": "Technical market analysis using batch indicators and a compact verified market snapshot.",
+                "tools": list(MARKET_ANALYST_TOOL_NAMES),
                 "prompt": render_full_prompt(
                     TOOL_CALLING_COLLABORATION_PROMPT,
                     build_market_analyst_system_message(),
-                    ["get_stock_data", "get_indicators", "get_verified_market_snapshot"],
+                    MARKET_ANALYST_TOOL_NAMES,
                 ),
             },
             {

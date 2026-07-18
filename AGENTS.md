@@ -394,6 +394,11 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   8 个指标。默认 stockstats 引擎只加载一次 canonical OHLCV 并批量计算；部分失败
   由 router 将缺失集合批量交给 Longbridge MCP `quant_run`，不得恢复逐指标重复
   OHLCV 获取。每条指标仍必须保留独立 validator 结果、vendor 来源和 fallback 审计。
+- Market Analyst 的 LLM 工具面只暴露批量 `get_indicators` 与紧凑的
+  `get_verified_market_snapshot`；不得重新暴露原始 `get_stock_data`，避免多年度日线表在
+  工具循环中反复进入模型上下文。底层 snapshot/indicator 仍必须通过 canonical OHLCV
+  router、统一模型、validator、缓存和 run-scoped ledger 获取完整计算窗口，不得为了降
+  token 截断 200 SMA 等确定性计算输入。
 
 ## 开发最佳实践与文档维护约定
 

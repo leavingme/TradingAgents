@@ -9,6 +9,7 @@ from typing import Any
 
 from langgraph.prebuilt import ToolNode
 
+from tradingagents.agents import MARKET_ANALYST_TOOLS
 # Import the abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
@@ -17,13 +18,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_fundamentals,
     get_global_news,
     get_income_statement,
-    get_indicators,
     get_insider_transactions,
     get_macro_indicators,
     get_news,
     get_prediction_markets,
-    get_stock_data,
-    get_verified_market_snapshot,
     resolve_instrument_identity,
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
@@ -169,16 +167,7 @@ class TradingAgentsGraph:
         """Create tool nodes for different data sources using abstract methods."""
         return {
             "market": ToolNode(
-                [
-                    # Core stock data tools
-                    get_stock_data,
-                    # Technical indicators
-                    get_indicators,
-                    # Deterministic verification snapshot (bound to the analyst
-                    # LLM and required by its prompt; must be executable here or
-                    # the call fails and the model reports it "unavailable").
-                    get_verified_market_snapshot,
-                ],
+                list(MARKET_ANALYST_TOOLS),
                 handle_tool_errors=False,
                 wrap_tool_call=recover_invalid_tool_arguments,
             ),

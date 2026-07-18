@@ -134,7 +134,7 @@ def test_get_analyst_prompts_exposes_prompt_catalog():
     assert market["prompt"] == render_full_prompt(
         TOOL_CALLING_COLLABORATION_PROMPT,
         build_market_analyst_system_message(),
-        ["get_stock_data", "get_indicators", "get_verified_market_snapshot"],
+        ["get_indicators", "get_verified_market_snapshot"],
     )
 
 

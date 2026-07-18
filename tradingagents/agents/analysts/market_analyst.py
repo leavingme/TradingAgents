@@ -7,10 +7,15 @@ from tradingagents.agents.analysts.prompts import (
 from tradingagents.agents.utils.agent_utils import (
     get_indicators,
     get_instrument_context_from_state,
-    get_stock_data,
     get_verified_market_snapshot,
 )
 from tradingagents.dataflows.untrusted_content import isolate_untrusted_content
+
+MARKET_ANALYST_TOOLS = (
+    get_indicators,
+    get_verified_market_snapshot,
+)
+MARKET_ANALYST_TOOL_NAMES = tuple(tool.name for tool in MARKET_ANALYST_TOOLS)
 
 
 def create_market_analyst(llm):
@@ -19,11 +24,7 @@ def create_market_analyst(llm):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
 
-        tools = [
-            get_stock_data,
-            get_indicators,
-            get_verified_market_snapshot,
-        ]
+        tools = list(MARKET_ANALYST_TOOLS)
 
         system_message = build_market_analyst_system_message()
 

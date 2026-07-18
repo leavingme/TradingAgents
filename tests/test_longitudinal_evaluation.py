@@ -739,9 +739,26 @@ def test_architecture_rollup_assesses_multi_day_distribution_and_overlap():
             "raw_return": score + 0.01,
             "alpha_return": score,
             "score": score,
+            "analysis_evidence_complete": True,
+            "architecture_input_complete": True,
+            "agent_costs": {
+                "Research Manager": {
+                    "llm_calls": 1,
+                    "tool_calls": 0,
+                    "tokens_in": 1200 + index,
+                    "tokens_out": 200,
+                },
+                "Portfolio Manager": {
+                    "llm_calls": 1,
+                    "tool_calls": 0,
+                    "tokens_in": 800 + index,
+                    "tokens_out": 150,
+                },
+            },
         })
 
-    assessment = architecture_rollups(rows)[0]["outcome_assessment"]
+    rollup = architecture_rollups(rows)[0]
+    assessment = rollup["outcome_assessment"]
 
     assert assessment["status"] == "uncertainty_ready"
     assert assessment["score_sample_count"] == 20
@@ -775,21 +792,77 @@ def test_architecture_rollup_assesses_multi_day_distribution_and_overlap():
     )
     assert nvda["windows"]["10"]["status"] == "comparison_ready"
     assert nvda["windows"]["20"]["status"] == "insufficient_history"
+    optimization = rollup["optimization_assessment"]
+    assert optimization["schema"] == (
+        "tradingagents/single-architecture-optimization-assessment/v1"
+    )
+    assert optimization["automatic_mutation_allowed"] is False
+    assert optimization["paired_shadow_authorization_required"] is True
+    assert optimization["controlled_experiment_ready"] is True
+    assert optimization["readiness_status"] == (
+        "ready_for_controlled_experiment_design"
+    )
+    assert optimization["recommended_action"] == (
+        "investigate_recent_deterioration"
+    )
+    assert optimization["recent_deterioration_signals"][0] == {
+        "ticker": "NVDA",
+        "window_size": 5,
+        "mean_score_delta": pytest.approx(-0.03),
+        "mean_alpha_return_delta": pytest.approx(-0.03),
+    }
+    assert optimization["cost_hotspots"][0]["agent"] == "Research Manager"
+    assert optimization["weakest_rating"]["rating"] == "hold"
     agent_context_rollup = architecture_rollups(
         rows,
         include_runtime_costs=False,
     )[0]
     assert "outcome_assessment" not in agent_context_rollup
+    assert "optimization_assessment" not in agent_context_rollup
 
     incomplete = [dict(row) for row in rows]
     incomplete[0].pop("exit_date")
-    incomplete_assessment = architecture_rollups(incomplete)[0][
-        "outcome_assessment"
-    ]
+    incomplete_rollup = architecture_rollups(incomplete)[0]
+    incomplete_assessment = incomplete_rollup["outcome_assessment"]
     assert incomplete_assessment["status"] == "incomplete_temporal_evidence"
     assert incomplete_assessment["missing_temporal_windows"] == 1
     assert incomplete_assessment["lower_95_mean_score"] is None
     assert incomplete_assessment["upper_95_mean_score"] is None
+    assert incomplete_rollup["optimization_assessment"]["readiness_status"] == (
+        "outcome_uncertainty_not_ready"
+    )
+    assert incomplete_rollup["optimization_assessment"]["recommended_action"] == (
+        "repair_temporal_evidence"
+    )
+
+
+def test_single_architecture_diagnostic_flags_supported_underperformance():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "ticker": "NVDA",
+            "analysis_date": f"2026-04-{index + 1:02d}",
+            "entry_date": f"2026-04-{index + 1:02d}",
+            "exit_date": "2026-05-01",
+            "architecture_version": "candidate",
+            "architecture_fingerprint": "candidate-fp",
+            "horizon_sessions": 5,
+            "rating": "Buy",
+            "directional_hit": False,
+            "raw_return": -0.01,
+            "alpha_return": -0.02,
+            "score": -0.02,
+            "analysis_evidence_complete": True,
+            "architecture_input_complete": True,
+        })
+
+    diagnostic = architecture_rollups(rows)[0]["optimization_assessment"]
+
+    assert diagnostic["controlled_experiment_ready"] is True
+    assert diagnostic["evidence"]["persistent_underperformance_supported"] is True
+    assert diagnostic["recommended_action"] == (
+        "investigate_persistent_underperformance"
+    )
 
 
 def test_rolling_monitoring_excludes_ambiguous_same_day_retries():

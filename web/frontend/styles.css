@@ -394,6 +394,23 @@ h1 {
   overflow-x: auto;
 }
 
+.evaluation-diagnostic {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: var(--radius-md);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.evaluation-diagnostic h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
 .evaluation-table {
   width: 100%;
   min-width: 540px;

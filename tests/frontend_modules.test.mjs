@@ -197,6 +197,21 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
           },
         },
       },
+      optimization_assessment: {
+        readiness_status: 'ready_for_controlled_experiment_design',
+        recommended_action: 'investigate_recent_deterioration',
+        controlled_experiment_ready: true,
+        cost_hotspots: [{
+          agent: 'Research Manager',
+          mean_tokens_in: 1200,
+          sample_count: 20,
+        }],
+        weakest_rating: {
+          rating: 'hold',
+          mean_score: -0.01,
+          sample_count: 5,
+        },
+      },
     }],
   });
   assert.equal(view.evaluationCount, 1);
@@ -211,6 +226,21 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
     previousMeanScore: 0.02,
     scoreDelta: -0.03,
     alphaDelta: -0.02,
+  });
+  assert.deepEqual(view.cohorts[0].optimization, {
+    readinessStatus: 'ready_for_controlled_experiment_design',
+    recommendedAction: 'investigate_recent_deterioration',
+    controlledExperimentReady: true,
+    costHotspots: [{
+      agent: 'Research Manager',
+      meanTokensIn: 1200,
+      sampleCount: 20,
+    }],
+    weakestRating: {
+      rating: 'hold',
+      meanScore: -0.01,
+      sampleCount: 5,
+    },
   });
 });
 

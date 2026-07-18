@@ -8,7 +8,7 @@ import { createEventStream } from './event-stream.js';
 import { createRouter } from './router.js';
 import { createSettingsController } from './components/settings-controller.js';
 import { createI18n } from './i18n.js';
-import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-evaluation-dashboard';
+import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-single-architecture-diagnostic';
 
 /**
  * TradingAgents Web UI — Enhanced Application Script
@@ -288,6 +288,22 @@ const translations = {
     evaluationCodeRetainBaseline: 'Retain baseline',
     evaluationCodeReviewChallenger: 'Review challenger manually',
     evaluationCodeReviewCostTradeoff: 'Review outcome/cost trade-off',
+    evaluationCodeInsufficientOutcomeSamples: 'Insufficient outcome samples',
+    evaluationCodeOutcomeUncertaintyNotReady: 'Outcome uncertainty is not ready',
+    evaluationCodeIncompleteInputAudit: 'Input audit is incomplete',
+    evaluationCodeReadyForExperiment: 'Ready to design a controlled experiment',
+    evaluationCodeRepairTemporalEvidence: 'Repair temporal evidence',
+    evaluationCodeRepairInputAudit: 'Repair input audit coverage',
+    evaluationCodeInvestigatePersistent: 'Investigate persistent underperformance',
+    evaluationCodeInvestigateRecent: 'Investigate recent deterioration',
+    evaluationCodeDesignChallenger: 'Design a controlled challenger',
+    optimizationDiagnostic: 'Optimization diagnostic',
+    experimentReadiness: 'Experiment readiness',
+    controlledExperimentReady: 'Controlled experiment ready',
+    costHotspots: 'Input-token hotspots',
+    weakestRating: 'Weakest rating cohort',
+    yes: 'Yes',
+    no: 'No',
     providersTitle: 'Capability Providers',
     providersSubtitle: 'Select and prioritize data & capability providers for your analysis runs.',
     providersSummaryTitle: 'Provider Data Capability Summary',
@@ -582,6 +598,22 @@ const translations = {
     evaluationCodeRetainBaseline: '保留基线架构',
     evaluationCodeReviewChallenger: '人工复核挑战者',
     evaluationCodeReviewCostTradeoff: '人工复核收益与成本权衡',
+    evaluationCodeInsufficientOutcomeSamples: '结果样本不足',
+    evaluationCodeOutcomeUncertaintyNotReady: '结果不确定性尚未就绪',
+    evaluationCodeIncompleteInputAudit: '输入审计不完整',
+    evaluationCodeReadyForExperiment: '可以设计受控实验',
+    evaluationCodeRepairTemporalEvidence: '修复时间窗口证据',
+    evaluationCodeRepairInputAudit: '修复输入审计覆盖',
+    evaluationCodeInvestigatePersistent: '调查持续性表现不佳',
+    evaluationCodeInvestigateRecent: '调查近期退化',
+    evaluationCodeDesignChallenger: '设计受控挑战者',
+    optimizationDiagnostic: '优化诊断',
+    experimentReadiness: '实验就绪度',
+    controlledExperimentReady: '受控实验是否就绪',
+    costHotspots: '输入 Token 成本热点',
+    weakestRating: '最弱评级分组',
+    yes: '是',
+    no: '否',
     providersTitle: '服务商配置',
     providersSubtitle: '管理及排列各个底层能力的数服务商优先级及开关。',
     providersSummaryTitle: '数据能力实测摘要',

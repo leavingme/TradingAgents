@@ -28,6 +28,36 @@ export function buildEvaluationViewModel(payload = {}) {
     meanAlpha: finiteNumber(row?.mean_alpha_return),
     meanScore: finiteNumber(row?.mean_score),
     outcomeStatus: String(row?.outcome_assessment?.status || 'not_observed'),
+    optimization: {
+      readinessStatus: String(
+        row?.optimization_assessment?.readiness_status || 'not_observed',
+      ),
+      recommendedAction: String(
+        row?.optimization_assessment?.recommended_action
+          || 'continue_sample_collection',
+      ),
+      controlledExperimentReady: Boolean(
+        row?.optimization_assessment?.controlled_experiment_ready,
+      ),
+      costHotspots: Array.isArray(row?.optimization_assessment?.cost_hotspots)
+        ? row.optimization_assessment.cost_hotspots.slice(0, 3).map(item => ({
+          agent: String(item?.agent || 'unknown'),
+          meanTokensIn: finiteNumber(item?.mean_tokens_in),
+          sampleCount: Number(item?.sample_count || 0),
+        }))
+        : [],
+      weakestRating: row?.optimization_assessment?.weakest_rating
+        ? {
+          rating: String(row.optimization_assessment.weakest_rating.rating || 'unknown'),
+          meanScore: finiteNumber(
+            row.optimization_assessment.weakest_rating.mean_score,
+          ),
+          sampleCount: Number(
+            row.optimization_assessment.weakest_rating.sample_count || 0,
+          ),
+        }
+        : null,
+    },
     rolling: Object.entries(
       row?.outcome_assessment?.rolling_monitoring?.tickers || {},
     ).flatMap(([ticker, tickerData]) => Object.entries(tickerData?.windows || {}).map(
@@ -104,6 +134,15 @@ export function createEvaluationDashboard({
     retain_baseline: 'evaluationCodeRetainBaseline',
     human_review_challenger: 'evaluationCodeReviewChallenger',
     human_review_cost_tradeoff: 'evaluationCodeReviewCostTradeoff',
+    insufficient_outcome_samples: 'evaluationCodeInsufficientOutcomeSamples',
+    outcome_uncertainty_not_ready: 'evaluationCodeOutcomeUncertaintyNotReady',
+    incomplete_input_audit: 'evaluationCodeIncompleteInputAudit',
+    ready_for_controlled_experiment_design: 'evaluationCodeReadyForExperiment',
+    repair_temporal_evidence: 'evaluationCodeRepairTemporalEvidence',
+    repair_input_audit: 'evaluationCodeRepairInputAudit',
+    investigate_persistent_underperformance: 'evaluationCodeInvestigatePersistent',
+    investigate_recent_deterioration: 'evaluationCodeInvestigateRecent',
+    design_controlled_challenger: 'evaluationCodeDesignChallenger',
   };
 
   function codeLabel(value) {
@@ -208,6 +247,38 @@ export function createEvaluationDashboard({
         metric(t('meanScore'), number(cohort.meanScore)),
       );
       card.append(header, metrics);
+      const diagnostic = element('div', 'evaluation-diagnostic');
+      diagnostic.append(
+        element('h4', null, t('optimizationDiagnostic')),
+        comparisonRow(
+          t('experimentReadiness'),
+          codeLabel(cohort.optimization.readinessStatus),
+        ),
+        comparisonRow(
+          t('recommendedAction'),
+          codeLabel(cohort.optimization.recommendedAction),
+        ),
+        comparisonRow(
+          t('controlledExperimentReady'),
+          t(cohort.optimization.controlledExperimentReady ? 'yes' : 'no'),
+        ),
+      );
+      if (cohort.optimization.costHotspots.length) {
+        diagnostic.append(comparisonRow(
+          t('costHotspots'),
+          cohort.optimization.costHotspots
+            .map(item => `${item.agent} (${number(item.meanTokensIn, 0)})`)
+            .join(' · '),
+        ));
+      }
+      if (cohort.optimization.weakestRating) {
+        const weakest = cohort.optimization.weakestRating;
+        diagnostic.append(comparisonRow(
+          t('weakestRating'),
+          `${weakest.rating} · ${number(weakest.meanScore)} · n=${weakest.sampleCount}`,
+        ));
+      }
+      card.append(diagnostic);
       if (cohort.rolling.length) card.append(rollingTable(cohort.rolling));
       return card;
     }));

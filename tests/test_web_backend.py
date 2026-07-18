@@ -923,6 +923,33 @@ def test_evaluation_endpoint_returns_rows_and_rollups():
                 },
             },
         },
+        "optimization_assessment": {
+            "schema": (
+                "tradingagents/"
+                "single-architecture-optimization-assessment/v1"
+            ),
+            "automatic_mutation_allowed": False,
+            "paired_shadow_authorization_required": True,
+            "readiness_status": "insufficient_outcome_samples",
+            "recommended_action": "continue_sample_collection",
+            "controlled_experiment_ready": False,
+            "evidence": {
+                "sample_count": 1,
+                "minimum_samples": 20,
+                "outcome_status": "insufficient_samples",
+                "analysis_evidence_complete_count": 0,
+                "architecture_input_complete_count": 0,
+                "input_audit_complete": False,
+                "persistent_underperformance_supported": False,
+            },
+            "recent_deterioration_signals": [],
+            "cost_hotspots": [],
+            "weakest_rating": {
+                "rating": "buy",
+                "sample_count": 1,
+                "mean_score": 0.03,
+            },
+        },
         "runtime_seconds_sample_count": 1,
         "mean_runtime_seconds": 120.0,
         "llm_calls_sample_count": 1,

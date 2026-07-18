@@ -31,6 +31,9 @@ ARCHITECTURE_OUTCOME_ASSESSMENT_SCHEMA = (
 ROLLING_OUTCOME_MONITORING_SCHEMA = (
     "tradingagents/rolling-outcome-monitoring/v1"
 )
+SINGLE_ARCHITECTURE_OPTIMIZATION_SCHEMA = (
+    "tradingagents/single-architecture-optimization-assessment/v1"
+)
 ROLLING_OUTCOME_WINDOW_SIZES = (5, 10, 20)
 
 _RUNTIME_COST_FIELDS = (
@@ -543,6 +546,144 @@ def _rolling_outcome_monitoring(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _single_architecture_optimization_assessment(
+    rollup: dict[str, Any],
+) -> dict[str, Any]:
+    """Turn one production cohort into a conservative experiment-readiness view."""
+    sample_count = int(rollup.get("sample_count") or 0)
+    minimum_samples = DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES
+    outcome = rollup.get("outcome_assessment")
+    outcome = outcome if isinstance(outcome, dict) else {}
+    analysis_evidence_count = int(
+        rollup.get("analysis_evidence_complete_count") or 0
+    )
+    architecture_input_count = int(
+        rollup.get("architecture_input_complete_count") or 0
+    )
+    input_audit_complete = bool(
+        sample_count
+        and analysis_evidence_count == sample_count
+        and architecture_input_count == sample_count
+    )
+
+    recent_deterioration_signals = []
+    monitoring = outcome.get("rolling_monitoring")
+    monitoring = monitoring if isinstance(monitoring, dict) else {}
+    tickers = monitoring.get("tickers")
+    tickers = tickers if isinstance(tickers, dict) else {}
+    for ticker, ticker_payload in sorted(tickers.items()):
+        windows = (
+            ticker_payload.get("windows")
+            if isinstance(ticker_payload, dict)
+            else {}
+        )
+        windows = windows if isinstance(windows, dict) else {}
+        for window_size, window in sorted(
+            windows.items(), key=lambda item: int(item[0])
+        ):
+            if not isinstance(window, dict) or window.get("status") != "comparison_ready":
+                continue
+            delta = window.get("current_minus_previous")
+            delta = delta if isinstance(delta, dict) else {}
+            score_delta = _finite_number(delta.get("mean_score"))
+            if score_delta is None or score_delta >= 0:
+                continue
+            recent_deterioration_signals.append({
+                "ticker": str(ticker),
+                "window_size": int(window_size),
+                "mean_score_delta": score_delta,
+                "mean_alpha_return_delta": _finite_number(
+                    delta.get("mean_alpha_return")
+                ),
+            })
+
+    agents = rollup.get("agent_costs")
+    agents = agents if isinstance(agents, dict) else {}
+    cost_hotspots = []
+    for agent, fields in sorted(agents.items()):
+        if not isinstance(fields, dict):
+            continue
+        mean_tokens = _runtime_cost_value(fields.get("mean_tokens_in"))
+        if mean_tokens is None:
+            continue
+        cost_hotspots.append({
+            "agent": str(agent),
+            "mean_tokens_in": mean_tokens,
+            "sample_count": int(fields.get("tokens_in_sample_count") or 0),
+        })
+    cost_hotspots.sort(key=lambda item: (-item["mean_tokens_in"], item["agent"]))
+    cost_hotspots = cost_hotspots[:3]
+
+    rating_breakdown = outcome.get("rating_breakdown")
+    rating_breakdown = rating_breakdown if isinstance(rating_breakdown, dict) else {}
+    rating_rows = []
+    for rating, fields in rating_breakdown.items():
+        if not isinstance(fields, dict):
+            continue
+        mean_score = _finite_number(fields.get("mean_score"))
+        if mean_score is None:
+            continue
+        rating_rows.append({
+            "rating": str(rating),
+            "sample_count": int(fields.get("sample_count") or 0),
+            "mean_score": mean_score,
+        })
+    weakest_rating = (
+        min(rating_rows, key=lambda item: (item["mean_score"], item["rating"]))
+        if rating_rows
+        else None
+    )
+
+    upper_95 = _finite_number(outcome.get("upper_95_mean_score"))
+    persistent_underperformance_supported = bool(
+        outcome.get("status") == "uncertainty_ready"
+        and upper_95 is not None
+        and upper_95 < 0
+    )
+    if sample_count < minimum_samples:
+        readiness_status = "insufficient_outcome_samples"
+        recommended_action = "continue_sample_collection"
+    elif outcome.get("status") != "uncertainty_ready":
+        readiness_status = "outcome_uncertainty_not_ready"
+        recommended_action = "repair_temporal_evidence"
+    elif not input_audit_complete:
+        readiness_status = "incomplete_input_audit"
+        recommended_action = "repair_input_audit"
+    else:
+        readiness_status = "ready_for_controlled_experiment_design"
+        if persistent_underperformance_supported:
+            recommended_action = "investigate_persistent_underperformance"
+        elif recent_deterioration_signals:
+            recommended_action = "investigate_recent_deterioration"
+        else:
+            recommended_action = "design_controlled_challenger"
+
+    return {
+        "schema": SINGLE_ARCHITECTURE_OPTIMIZATION_SCHEMA,
+        "automatic_mutation_allowed": False,
+        "paired_shadow_authorization_required": True,
+        "readiness_status": readiness_status,
+        "recommended_action": recommended_action,
+        "controlled_experiment_ready": (
+            readiness_status == "ready_for_controlled_experiment_design"
+        ),
+        "evidence": {
+            "sample_count": sample_count,
+            "minimum_samples": minimum_samples,
+            "outcome_status": outcome.get("status") or "not_observed",
+            "analysis_evidence_complete_count": analysis_evidence_count,
+            "architecture_input_complete_count": architecture_input_count,
+            "input_audit_complete": input_audit_complete,
+            "persistent_underperformance_supported": (
+                persistent_underperformance_supported
+            ),
+        },
+        "recent_deterioration_signals": recent_deterioration_signals,
+        "cost_hotspots": cost_hotspots,
+        "weakest_rating": weakest_rating,
+    }
+
+
 def _architecture_outcome_assessment(
     rows: list[dict[str, Any]],
     *,
@@ -853,6 +994,9 @@ def architecture_rollups(
                         if values:
                             agent_rollup[f"mean_{field}"] = fmean(values)
                     rollup["agent_costs"][agent] = agent_rollup
+            rollup["optimization_assessment"] = (
+                _single_architecture_optimization_assessment(rollup)
+            )
         output.append(rollup)
     return output
 

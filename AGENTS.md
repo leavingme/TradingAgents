@@ -94,7 +94,7 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
 - 分段报告应在每个 `report_section` 事件到达时立即可见，并能通过 report
   selector 切换，不要等最终 `run_completed` 才渲染全部报告。
 - 服务商与底层能力配置页面使用 `#providers` 路由。前端应提供各个底层能力（OHLCV、技术指标、基本面、新闻舆情、宏观数据、预测市场）的优先级重排（生成以逗号分隔的优先级字符串，例如 `"longbridge_mcp, longbridge"`）和开关，且通过 `config_overrides.data_vendors` 将修改后的服务商优先级传递给后端运行。后端 `build_runtime_config` 应当对 `config_overrides` 进行嵌套深度合并以防止局部键覆盖整个 data_vendors 字典。
-- 连续结果与架构优化页面使用 `#evaluations` 路由。页面只读取 `/api/evaluations` 的 SQLite 权威结果，展示已结算/待结算数量、fingerprint-scoped cohort、5/10/20 结果滚动窗口及配对收益/成本/完整性门禁；不得从 Markdown 报告重建绩效，不得在浏览器端自行计算晋级结论或自动修改 prompt、模型和 Agent 拓扑。
+- 连续结果与架构优化页面使用 `#evaluations` 路由。页面只读取 `/api/evaluations` 的 SQLite 权威结果，展示已结算/待结算数量、fingerprint-scoped cohort、5/10/20 结果滚动窗口、单架构实验就绪诊断及配对收益/成本/完整性门禁；不得从 Markdown 报告重建绩效，不得在浏览器端自行计算晋级结论或自动修改 prompt、模型和 Agent 拓扑。
 - 服务端 API 密钥及证书状态查询（`/api/config/env-status`）已拓展以兼容底层能力数据源（如 FRED, Alpha Vantage, Longbridge MCP 等）的状态展示。前端无需保存或输入 API Key，通过后端环境变量和本地文件存在性推断其可用性。
 - Web API 非 loopback 绑定必须设置 `TRADINGAGENTS_WEB_AUTH_TOKEN`；正式入口会同时启用全 API bearer 认证。浏览器请求不得提交 `results_dir`/`report_dir`，backend URL 只能来自内置服务商端点或服务端 `TRADINGAGENTS_ALLOWED_BACKEND_URLS` 白名单。并发与每分钟启动上限分别由 `TRADINGAGENTS_WEB_MAX_ACTIVE_RUNS`（默认 2）和 `TRADINGAGENTS_WEB_RUN_RATE_LIMIT`（默认 10）控制。
 

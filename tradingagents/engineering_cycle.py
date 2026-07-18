@@ -350,9 +350,24 @@ def detect_findings(
             "review 能展示非零调用量和 token 统计。",
         ))
     elif int(stats.get("tokens_in") or 0) > 150_000:
+        by_agent = stats.get("by_agent")
+        top_agents: list[str] = []
+        if isinstance(by_agent, dict):
+            ranked = sorted(
+                (
+                    (str(agent), int(values.get("tokens_in") or 0))
+                    for agent, values in by_agent.items()
+                    if isinstance(values, dict)
+                    and isinstance(values.get("tokens_in"), int)
+                    and values.get("tokens_in", 0) >= 0
+                ),
+                key=lambda item: (-item[1], item[0]),
+            )
+            top_agents = [f"{agent}:{tokens}" for agent, tokens in ranked[:3]]
+        attribution = f"; top_agents={','.join(top_agents)}" if top_agents else ""
         findings.append(_finding(
             "P1-HIGH-CONTEXT-COST", "P1", "输入 token 量过高",
-            f"tokens_in={stats.get('tokens_in')}",
+            f"tokens_in={stats.get('tokens_in')}{attribution}",
             "分析重复报告、工具结果和辩论上下文，制定有证据的压缩方案。",
             "同配置重跑 tokens_in 降低且结论证据未丢失。",
         ))

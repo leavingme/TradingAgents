@@ -61,7 +61,26 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     store.add_event("run-1", AnalysisEvent(
         type="stats",
         run_id="run-1",
-        content={"llm_calls": 12, "tool_calls": 24, "tokens_in": 1200, "tokens_out": 240},
+        content={
+            "llm_calls": 12,
+            "tool_calls": 24,
+            "tokens_in": 1200,
+            "tokens_out": 240,
+            "by_agent": {
+                "Market Analyst": {
+                    "llm_calls": 3,
+                    "tool_calls": 8,
+                    "tokens_in": 500,
+                    "tokens_out": 100,
+                },
+                "Portfolio Manager": {
+                    "llm_calls": 1,
+                    "tool_calls": 0,
+                    "tokens_in": 100,
+                    "tokens_out": 40,
+                },
+            },
+        },
     ))
     store.add_event("run-1", AnalysisEvent(
         type="run_completed",
@@ -124,6 +143,8 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     assert rows[0]["tool_calls"] == 24
     assert rows[0]["tokens_in"] == 1200
     assert rows[0]["tokens_out"] == 240
+    assert rows[0]["agent_costs"]["Market Analyst"]["tokens_in"] == 500
+    assert rows[0]["agent_costs"]["Portfolio Manager"]["llm_calls"] == 1
     assert rows[0]["scoring_version"] == "alpha-exposure-v1"
     assert rows[0]["measurement_version"] == "post-decision-day-close-v1"
     assert rows[0]["market_data_date"] == "2026-06-30"
@@ -142,6 +163,7 @@ def test_history_persists_idempotent_architecture_evaluation(tmp_path):
     )
     assert "runtime_seconds" not in lightweight[0]
     assert "tokens_in" not in lightweight[0]
+    assert "agent_costs" not in lightweight[0]
 
     store.create_run(
         "run-future", "NVDA", "2026-07-02", "stock", ["market"],
@@ -390,6 +412,20 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
                 "tool_calls": 20 if version == "baseline" else 18,
                 "tokens_in": 1000 if version == "baseline" else 800,
                 "tokens_out": 200 if version == "baseline" else 180,
+                "agent_costs": {
+                    "Market Analyst": {
+                        "llm_calls": 3,
+                        "tool_calls": 8,
+                        "tokens_in": 700 if version == "baseline" else 500,
+                        "tokens_out": 100 if version == "baseline" else 90,
+                    },
+                    "Portfolio Manager": {
+                        "llm_calls": 1,
+                        "tool_calls": 0,
+                        "tokens_in": 100,
+                        "tokens_out": 40,
+                    },
+                },
                 "score": score,
                 **_comparable_input_evidence(index),
             })
@@ -403,10 +439,25 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert comparison["paired"]["critical_value"] == 2.093
     assert comparison["baseline"]["mean_tokens_in"] == 1000.0
     assert comparison["challenger"]["mean_tokens_in"] == 800.0
+    assert comparison["baseline"]["agent_costs"]["Market Analyst"][
+        "mean_tokens_in"
+    ] == 700.0
+    assert comparison["challenger"]["agent_costs"]["Market Analyst"][
+        "mean_tokens_in"
+    ] == 500.0
     assert comparison["paired_costs"]["tokens_in"]["sample_count"] == 20
     assert comparison["paired_costs"]["tokens_in"]["mean_delta"] == -200.0
     assert comparison["paired_costs"]["tokens_in"]["mean_reduction"] == 200.0
     assert comparison["paired_costs"]["runtime_seconds"]["mean_reduction"] == 20.0
+    assert comparison["paired_agent_costs"]["Market Analyst"]["tokens_in"][
+        "sample_count"
+    ] == 20
+    assert comparison["paired_agent_costs"]["Market Analyst"]["tokens_in"][
+        "mean_reduction"
+    ] == 200.0
+    assert comparison["paired_agent_costs"]["Portfolio Manager"]["tokens_in"][
+        "mean_delta"
+    ] == 0.0
     assert comparison["execution_order"]["baseline_first"] == 10
     assert comparison["execution_order"]["challenger_first"] == 10
     assert comparison["execution_order"]["cost_comparison_status"] == "counterbalanced"

@@ -32,6 +32,7 @@ _RUNTIME_COST_FIELDS = (
     "tokens_in",
     "tokens_out",
 )
+_AGENT_COST_FIELDS = ("llm_calls", "tool_calls", "tokens_in", "tokens_out")
 
 _T_975_BY_DF = (
     0.0,
@@ -111,6 +112,18 @@ def _runtime_cost_value(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return numeric if isfinite(numeric) and numeric >= 0 else None
+
+
+def _agent_cost_mapping(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict) or len(value) > 13:
+        return {}
+    return {
+        agent: fields
+        for agent, fields in value.items()
+        if isinstance(agent, str)
+        and 0 < len(agent) <= 64
+        and isinstance(fields, dict)
+    }
 
 
 def _utc_timestamp(value: Any) -> datetime | None:
@@ -352,6 +365,31 @@ def architecture_rollups(
                 rollup[f"{field}_sample_count"] = len(values)
                 if values:
                     rollup[f"mean_{field}"] = fmean(values)
+            agent_names = sorted({
+                agent
+                for row in rows
+                for agent in _agent_cost_mapping(row.get("agent_costs"))
+            })
+            if agent_names:
+                rollup["agent_costs"] = {}
+                for agent in agent_names:
+                    agent_rollup: dict[str, Any] = {}
+                    for field in _AGENT_COST_FIELDS:
+                        values = [
+                            value
+                            for row in rows
+                            if (
+                                value := _runtime_cost_value(
+                                    _agent_cost_mapping(row.get("agent_costs"))
+                                    .get(agent, {})
+                                    .get(field)
+                                )
+                            ) is not None
+                        ]
+                        agent_rollup[f"{field}_sample_count"] = len(values)
+                        if values:
+                            agent_rollup[f"mean_{field}"] = fmean(values)
+                    rollup["agent_costs"][agent] = agent_rollup
         output.append(rollup)
     return output
 
@@ -521,6 +559,9 @@ def compare_architectures(
         order: {field: [] for field in _RUNTIME_COST_FIELDS}
         for order in ("baseline_first", "challenger_first")
     }
+    paired_agent_cost_deltas: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: {field: [] for field in _AGENT_COST_FIELDS}
+    )
     for variants in grouped.values():
         base_rows = variants.get(baseline, [])
         challenger_rows = variants.get(challenger, [])
@@ -648,6 +689,23 @@ def compare_architectures(
                 paired_cost_deltas[field].append(delta)
                 if execution_order in ordered_cost_deltas:
                     ordered_cost_deltas[execution_order][field].append(delta)
+        base_agent_costs = _agent_cost_mapping(base_row.get("agent_costs"))
+        challenger_agent_costs = _agent_cost_mapping(
+            challenger_row.get("agent_costs")
+        )
+        for agent in sorted(set(base_agent_costs) | set(challenger_agent_costs)):
+            for field in _AGENT_COST_FIELDS:
+                base_value = _runtime_cost_value(
+                    base_agent_costs.get(agent, {}).get(field)
+                )
+                challenger_value = _runtime_cost_value(
+                    challenger_agent_costs.get(agent, {}).get(field)
+                )
+                if base_value is None or challenger_value is None:
+                    continue
+                delta = challenger_value - base_value
+                if isfinite(delta):
+                    paired_agent_cost_deltas[agent][field].append(delta)
 
     paired_count = len(paired_deltas)
     paired_summary: dict[str, Any] = {
@@ -767,6 +825,13 @@ def compare_architectures(
         "paired_costs": {
             field: _paired_cost_summary(values, paired_count)
             for field, values in paired_cost_deltas.items()
+        },
+        "paired_agent_costs": {
+            agent: {
+                field: _paired_cost_summary(values, paired_count)
+                for field, values in fields.items()
+            }
+            for agent, fields in sorted(paired_agent_cost_deltas.items())
         },
         "paired_costs_by_execution_order": {
             order: {

@@ -26,6 +26,26 @@ def _nonnegative_number(value: Any) -> int | float | None:
     return int(value) if isinstance(value, int) else numeric
 
 
+def _normalized_agent_costs(value: Any) -> dict[str, dict[str, int | float]] | None:
+    """Validate the bounded per-Agent cost payload stored in a stats event."""
+    if not isinstance(value, dict) or len(value) > 13:
+        return None
+    normalized: dict[str, dict[str, int | float]] = {}
+    for agent, raw_fields in sorted(value.items(), key=lambda item: str(item[0])):
+        if not isinstance(agent, str) or not agent or len(agent) > 64:
+            continue
+        if not isinstance(raw_fields, dict):
+            continue
+        fields = {
+            field: metric
+            for field in ("llm_calls", "tool_calls", "tokens_in", "tokens_out")
+            if (metric := _nonnegative_number(raw_fields.get(field))) is not None
+        }
+        if fields:
+            normalized[agent] = fields
+    return normalized or None
+
+
 def _elapsed_seconds(started_at: Any, finished_at: Any) -> float | None:
     if not isinstance(started_at, str) or not isinstance(finished_at, str):
         return None
@@ -843,6 +863,9 @@ class RunHistoryStore:
             stats = final_stats.get(str(row["run_id"]), {})
             for field in ("llm_calls", "tool_calls", "tokens_in", "tokens_out"):
                 row[field] = _nonnegative_number(stats.get(field))
+            agent_costs = _normalized_agent_costs(stats.get("by_agent"))
+            if agent_costs is not None:
+                row["agent_costs"] = agent_costs
         return rows
 
     def get_longitudinal_context(

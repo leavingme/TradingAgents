@@ -165,6 +165,35 @@ def test_review_detects_executable_numbers_in_validated_underweight(tmp_path):
 
 
 @pytest.mark.unit
+def test_review_high_context_finding_reports_top_agent_costs(tmp_path):
+    run = _run()
+    run["events"][0]["content"] = {
+        "llm_calls": 12,
+        "tool_calls": 20,
+        "tokens_in": 200_000,
+        "tokens_out": 20_000,
+        "by_agent": {
+            "News Analyst": {"tokens_in": 90_000},
+            "Market Analyst": {"tokens_in": 70_000},
+            "Portfolio Manager": {"tokens_in": 5_000},
+        },
+    }
+    build_review(
+        "NVDA-cycle-test",
+        root=tmp_path,
+        store=FakeStore(run, _calls()),
+    )
+    findings = json.loads(
+        (tmp_path / "NVDA-cycle-test" / "findings.json").read_text(encoding="utf-8")
+    )["findings"]
+    finding = next(item for item in findings if item["id"] == "P1-HIGH-CONTEXT-COST")
+    assert finding["evidence"] == (
+        "tokens_in=200000; top_agents=News Analyst:90000,"
+        "Market Analyst:70000,Portfolio Manager:5000"
+    )
+
+
+@pytest.mark.unit
 def test_review_detects_currency_unit_drift_in_final_decision(tmp_path):
     run = _run()
     run["events"].insert(0, {

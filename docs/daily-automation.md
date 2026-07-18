@@ -108,7 +108,11 @@ JSON schema 注入 Research Manager 和 Portfolio Manager；不会把 LLM 生成
 分析数据状态、input-evidence 完整性、研究经理分叉前输入完整性及明确的扫描/截断计数，
 但架构 rollup 只使用截止时点前扫描到的完整同标的 cohort，不再把跨标的结果或最近
 样本截断混入同一均值。token、调用数和耗时仅用于 operator-facing 架构优化查询，
-不会注入投资决策上下文。历史 `point_in_time` 只允许看到
+不会注入投资决策上下文。terminal stats 还会按 canonical Agent 名称归因 LLM calls、
+tool calls、input/output tokens；History/API 的单次结果公开 `agent_costs`，架构 rollup
+按 Agent 分别公开覆盖数与均值，严格配对比较公开 challenger-minus-baseline 的覆盖数、
+均值和区间。缺失的某一臂 Agent 成本只计为缺失，不会按零成本参与比较；未知回调元数据
+被限制在单一 `Unattributed` 桶，不能制造无界指标基数。历史 `point_in_time` 只允许看到
 `evaluated_at <= information_cutoff` 的结果；cutoff 与同/跨标的范围在 SQLite 排序和
 LIMIT 之前执行，避免未来结果或其他标的大量样本挤掉当时已经存在的同标的证据。
 新写入的 `evaluated_at` 统一规范为 UTC，旧偏移时间也按真实时刻而非字符串排序。

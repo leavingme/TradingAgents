@@ -10,6 +10,7 @@ from tradingagents.agents.utils.core_stock_tools import get_stock_data
 from tradingagents.agents.utils.fundamental_data_tools import (
     get_balance_sheet,
     get_cashflow,
+    get_financial_evidence,
     get_fundamentals,
     get_income_statement,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "get_stock_data",
     "get_indicators",
     "get_fundamentals",
+    "get_financial_evidence",
     "get_balance_sheet",
     "get_cashflow",
     "get_income_statement",
@@ -278,4 +280,3 @@ def create_msg_delete():
         return {"messages": removal_operations + [placeholder]}
 
     return delete_messages
-

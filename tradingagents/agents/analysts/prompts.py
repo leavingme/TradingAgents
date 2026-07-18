@@ -91,9 +91,8 @@ def build_news_analyst_system_message(asset_label: str) -> str:
 
 def build_fundamentals_analyst_system_message() -> tuple[str]:
     return (
-        "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+        "You are a researcher tasked with analyzing fundamental information about a company. Call `get_financial_evidence` exactly once for the requested ticker, reporting frequency, and current date. It returns reconciled income-statement, balance-sheet, and cash-flow series in a lossless compact JSON schema: `series_columns` describes each series row and `observation_columns` describes every period/value observation. Use all decision-material verified evidence, distinguish deterministic derived metrics from source metrics, and disclose unverified fact counts without treating quarantined facts as evidence. Provide specific, actionable insights supported by the supplied periods and values."
         + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
-        + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
         + get_language_instruction()
         + get_no_preamble_instruction(),
     )

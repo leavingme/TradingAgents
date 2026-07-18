@@ -6,6 +6,21 @@ from tradingagents.dataflows.interface import route_to_vendor
 
 
 @tool
+def get_financial_evidence(
+    ticker: Annotated[str, "ticker symbol"],
+    curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],
+    freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
+    **kwargs,
+) -> str:
+    """Retrieve one compact, reconciled IS/BS/CF evidence payload.
+
+    Vendor adapters still fetch and validate complete source statements. The
+    returned JSON groups repeated metadata without dropping verified metrics.
+    """
+    return route_to_vendor("get_financial_evidence", ticker, freq, curr_date)
+
+
+@tool
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"],

@@ -1,4 +1,8 @@
-from .analysts.fundamentals_analyst import create_fundamentals_analyst
+from .analysts.fundamentals_analyst import (
+    FUNDAMENTALS_ANALYST_TOOLS,
+    FUNDAMENTALS_ANALYST_TOOL_NAMES,
+    create_fundamentals_analyst,
+)
 from .analysts.market_analyst import (
     MARKET_ANALYST_TOOLS,
     MARKET_ANALYST_TOOL_NAMES,
@@ -29,6 +33,8 @@ __all__ = [
     "create_bull_researcher",
     "create_research_manager",
     "create_fundamentals_analyst",
+    "FUNDAMENTALS_ANALYST_TOOLS",
+    "FUNDAMENTALS_ANALYST_TOOL_NAMES",
     "create_market_analyst",
     "MARKET_ANALYST_TOOLS",
     "MARKET_ANALYST_TOOL_NAMES",

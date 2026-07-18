@@ -12,6 +12,9 @@ from typing import Any
 from .data_validation import ValidationResult, ValidationStatus
 
 
+FINANCIAL_EVIDENCE_SCHEMA = "tradingagents/reconciled-financial-evidence/v1"
+
+
 @dataclass(frozen=True)
 class FinancialMetric:
     metric: str
@@ -239,6 +242,89 @@ def render_financial_data(
             "metrics": [asdict(metric) for metric in data.metrics],
             "derived_metrics": [asdict(metric) for metric in derived],
             "unverified_fact_count": len(data.unverified_facts),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _compact_financial_statement(data: NormalizedFinancialData) -> dict[str, Any]:
+    """Group a validated statement without dropping any verified metric value."""
+    grouped: dict[
+        tuple[str, str | None, str, str, str | None, str | None],
+        list[list[object]],
+    ] = {}
+    for metric in data.metrics:
+        identity = (
+            metric.metric,
+            metric.currency,
+            metric.unit,
+            metric.source,
+            metric.context_type,
+            metric.source_field,
+        )
+        grouped.setdefault(identity, []).append([
+            metric.period,
+            metric.period_type,
+            metric.period_start,
+            metric.period_end,
+            metric.value,
+        ])
+    series = []
+    for identity, observations in sorted(
+        grouped.items(),
+        key=lambda item: tuple(str(value or "") for value in item[0]),
+    ):
+        observations.sort(key=lambda row: (str(row[3] or ""), str(row[0])))
+        series.append([*identity, observations])
+    return {
+        "series_columns": [
+            "metric",
+            "currency",
+            "unit",
+            "source",
+            "context_type",
+            "source_field",
+            "observations",
+        ],
+        "observation_columns": [
+            "period",
+            "period_type",
+            "period_start",
+            "period_end",
+            "value",
+        ],
+        "verified_metric_count": len(data.metrics),
+        "excluded_metric_count": len(data.excluded_metrics),
+        "unverified_fact_count": len(data.unverified_facts),
+        "series": series,
+    }
+
+
+def render_financial_evidence(
+    *,
+    income_statement: NormalizedFinancialData,
+    balance_sheet: NormalizedFinancialData,
+    cashflow: NormalizedFinancialData,
+    fundamentals: NormalizedFinancialData | None,
+    derived_metrics: list[DerivedFinancialMetric]
+    | tuple[DerivedFinancialMetric, ...],
+) -> str:
+    """Render one lossless compact LLM view after validation/reconciliation."""
+    return json.dumps(
+        {
+            "schema": FINANCIAL_EVIDENCE_SCHEMA,
+            "status": "verified_and_reconciled",
+            "entity": fundamentals.entity_metadata if fundamentals else None,
+            "entity_unverified_fact_count": (
+                len(fundamentals.unverified_facts) if fundamentals else 0
+            ),
+            "statements": {
+                "income_statement": _compact_financial_statement(income_statement),
+                "balance_sheet": _compact_financial_statement(balance_sheet),
+                "cashflow": _compact_financial_statement(cashflow),
+            },
+            "derived_metrics": [asdict(metric) for metric in derived_metrics],
         },
         ensure_ascii=False,
         separators=(",", ":"),

@@ -9,7 +9,10 @@ from langgraph.prebuilt import ToolNode
 from langgraph.prebuilt.tool_node import ToolInvocationError
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.agents import MARKET_ANALYST_TOOL_NAMES
+from tradingagents.agents import (
+    FUNDAMENTALS_ANALYST_TOOL_NAMES,
+    MARKET_ANALYST_TOOL_NAMES,
+)
 from tradingagents.graph.tool_error_handling import recover_invalid_tool_arguments
 
 
@@ -36,6 +39,18 @@ def test_market_toolnode_can_execute_verified_snapshot():
         "raw multi-year OHLCV must not be copied into the LLM conversation; "
         "the verified snapshot retains the trusted compact view"
     )
+
+
+@pytest.mark.unit
+def test_fundamentals_toolnode_only_exposes_reconciled_compact_evidence():
+    nodes = TradingAgentsGraph._create_tool_nodes(None)
+    tools = set(nodes["fundamentals"].tools_by_name)
+    assert tools == set(FUNDAMENTALS_ANALYST_TOOL_NAMES)
+    assert tools == {"get_financial_evidence"}
+    schema = nodes["fundamentals"].tools_by_name[
+        "get_financial_evidence"
+    ].args_schema.model_json_schema()
+    assert "curr_date" in schema["required"]
 
 
 @pytest.mark.unit

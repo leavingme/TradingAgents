@@ -399,6 +399,11 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   工具循环中反复进入模型上下文。底层 snapshot/indicator 仍必须通过 canonical OHLCV
   router、统一模型、validator、缓存和 run-scoped ledger 获取完整计算窗口，不得为了降
   token 截断 200 SMA 等确定性计算输入。
+- Fundamentals Analyst 的 LLM 工具面只暴露 `get_financial_evidence`，一次返回通过
+  validator 与跨表 reconciliation 的 IS/BS/CF 组合证据。紧凑 schema 只能把重复元数据
+  提升为 columns/series/observations，必须保留每条 verified metric/value/period/context；
+  禁止以摘要、Top-N 或最新期截断替代完整统一模型。四类原始 vendor subcall、fallback、
+  unverified fact count、确定性 derived metrics 与 run-scoped ledger 仍必须保留。
 
 ## 开发最佳实践与文档维护约定
 

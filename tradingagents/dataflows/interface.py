@@ -41,6 +41,7 @@ from .financial_validation import (
     NormalizedFinancialData,
     normalize_financial_result,
     render_financial_data,
+    render_financial_evidence,
     validate_financial_result,
     reconcile_financials,
     compute_derived_metrics,
@@ -116,11 +117,13 @@ from .westock_news import get_global_news_westock, get_news_westock
 logger = logging.getLogger(__name__)
 
 FINANCIAL_METHODS = {
+    "get_financial_evidence",
     "get_fundamentals",
     "get_balance_sheet",
     "get_cashflow",
     "get_income_statement",
 }
+FINANCIAL_SOURCE_METHODS = FINANCIAL_METHODS - {"get_financial_evidence"}
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
@@ -140,6 +143,7 @@ TOOLS_CATEGORIES = {
     "fundamental_data": {
         "description": "Company fundamentals",
         "tools": [
+            "get_financial_evidence",
             "get_fundamentals",
             "get_balance_sheet",
             "get_cashflow",
@@ -376,14 +380,17 @@ def route_to_vendor(method: str, *args, **kwargs):
     vendor_config = get_vendor(category, method)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]
 
-    if method not in VENDOR_METHODS:
+    routing_method = (
+        "get_fundamentals" if method == "get_financial_evidence" else method
+    )
+    if routing_method not in VENDOR_METHODS:
         raise ValueError(f"Method '{method}' not supported")
 
-    all_available_vendors = list(VENDOR_METHODS[method].keys())
+    all_available_vendors = list(VENDOR_METHODS[routing_method].keys())
 
     explicit = [v for v in primary_vendors if v and v != "default"]
     if explicit:
-        vendor_chain = [v for v in explicit if v in VENDOR_METHODS[method]]
+        vendor_chain = [v for v in explicit if v in VENDOR_METHODS[routing_method]]
         if not vendor_chain:
             raise ValueError(
                 f"Configured vendor(s) {explicit} not available for '{method}'. "
@@ -404,7 +411,7 @@ def route_to_vendor(method: str, *args, **kwargs):
             last_no_data = None
             first_error = None
             for attempt, vendor in enumerate(vendor_chain, start=1):
-                vendor_impl = VENDOR_METHODS[method][vendor]
+                vendor_impl = VENDOR_METHODS[routing_method][vendor]
                 impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
                 started = time.monotonic()
                 try:
@@ -455,7 +462,7 @@ def route_to_vendor(method: str, *args, **kwargs):
 
         impl_ids = tuple(
             id(VENDOR_METHODS[m][v])
-            for m in FINANCIAL_METHODS
+            for m in FINANCIAL_SOURCE_METHODS
             for v in vendor_chain
             if m in VENDOR_METHODS and v in VENDOR_METHODS[m]
         )
@@ -648,6 +655,24 @@ def route_to_vendor(method: str, *args, **kwargs):
                             else:
                                 fd_data = None
 
+                    if method == "get_financial_evidence":
+                        missing_statements = [
+                            name
+                            for name, data in (
+                                ("income_statement", is_data),
+                                ("balance_sheet", bs_data),
+                                ("cashflow", cf_data),
+                            )
+                            if data is None
+                        ]
+                        if missing_statements:
+                            raise NoUsableFinancialDataError(
+                                ticker,
+                                "financial_evidence",
+                                "missing reconciled statements: "
+                                + ", ".join(missing_statements),
+                            )
+
                     # Determine period and reconcile
                     is_periods = {m.period for m in is_data.metrics} if is_data else set()
                     bs_periods = {m.period for m in bs_data.metrics} if bs_data else set()
@@ -724,6 +749,14 @@ def route_to_vendor(method: str, *args, **kwargs):
                     if fd_data:
                         data_dict["get_fundamentals"] = render_financial_data(fd_data, [])
                         log_financial_audit(ticker, vendor, "get_fundamentals", "verified", fd_data)
+                    if is_data and bs_data and cf_data:
+                        data_dict["get_financial_evidence"] = render_financial_evidence(
+                            income_statement=is_data,
+                            balance_sheet=bs_data,
+                            cashflow=cf_data,
+                            fundamentals=fd_data,
+                            derived_metrics=derived,
+                        )
 
                     completed_result = (vendor, data_dict)
                     if shared_cache_key is not None:

@@ -5,13 +5,15 @@ from tradingagents.agents.analysts.prompts import (
     build_fundamentals_analyst_system_message,
 )
 from tradingagents.agents.utils.agent_utils import (
-    get_balance_sheet,
-    get_cashflow,
-    get_fundamentals,
-    get_income_statement,
+    get_financial_evidence,
     get_instrument_context_from_state,
 )
 from tradingagents.dataflows.untrusted_content import isolate_untrusted_content
+
+FUNDAMENTALS_ANALYST_TOOLS = (get_financial_evidence,)
+FUNDAMENTALS_ANALYST_TOOL_NAMES = tuple(
+    tool.name for tool in FUNDAMENTALS_ANALYST_TOOLS
+)
 
 
 def create_fundamentals_analyst(llm):
@@ -19,12 +21,7 @@ def create_fundamentals_analyst(llm):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
 
-        tools = [
-            get_fundamentals,
-            get_balance_sheet,
-            get_cashflow,
-            get_income_statement,
-        ]
+        tools = list(FUNDAMENTALS_ANALYST_TOOLS)
 
         system_message = build_fundamentals_analyst_system_message()
 

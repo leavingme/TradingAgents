@@ -10,9 +10,14 @@ from tradingagents.dataflows import interface, longbridge_mcp
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.errors import NoUsableFinancialDataError
 from tradingagents.dataflows.financial_validation import (
+    FINANCIAL_EVIDENCE_SCHEMA,
+    DerivedFinancialMetric,
+    FinancialMetric,
+    NormalizedFinancialData,
     derive_financial_metrics,
     normalize_financial_result,
     render_financial_data,
+    render_financial_evidence,
     validate_financial_result,
 )
 from tradingagents.dataflows.longbridge_financial_adapter import (
@@ -48,6 +53,76 @@ def test_legacy_text_metrics_without_full_context_are_invalid():
     result = validate_financial_result(data)
     assert not result.is_valid
     assert "XBRL-style context" in result.detail
+
+
+@pytest.mark.unit
+def test_compact_financial_evidence_preserves_every_verified_observation():
+    def statement(kind: str, context_type: str) -> NormalizedFinancialData:
+        metrics = []
+        for metric_index in range(12):
+            for quarter in range(1, 5):
+                metrics.append(FinancialMetric(
+                    metric=f"{kind} metric {metric_index}",
+                    value=float(metric_index * 100 + quarter),
+                    currency="USD",
+                    unit="USD",
+                    period=f"Q{quarter} 2026",
+                    period_type="quarterly",
+                    source="mock_vendor",
+                    period_start=(
+                        f"2026-0{quarter}-01" if context_type == "duration" else None
+                    ),
+                    period_end=f"2026-0{quarter}-28",
+                    context_type=context_type,
+                    source_field=f"field_{metric_index}",
+                ))
+        return NormalizedFinancialData(metrics=tuple(metrics), source_text="")
+
+    income = statement("income", "duration")
+    balance = statement("balance", "instant")
+    cashflow = statement("cashflow", "duration")
+    derived = [DerivedFinancialMetric(
+        metric="net_margin",
+        value=20.0,
+        unit="percent",
+        period="Q1 2026",
+        period_type="quarterly",
+        formula="net_income / revenue * 100",
+        inputs={"net_income": 20.0, "revenue": 100.0},
+    )]
+
+    rendered = render_financial_evidence(
+        income_statement=income,
+        balance_sheet=balance,
+        cashflow=cashflow,
+        fundamentals=None,
+        derived_metrics=derived,
+    )
+    payload = json.loads(rendered)
+
+    assert payload["schema"] == FINANCIAL_EVIDENCE_SCHEMA
+    assert payload["status"] == "verified_and_reconciled"
+    for name, source in (
+        ("income_statement", income),
+        ("balance_sheet", balance),
+        ("cashflow", cashflow),
+    ):
+        compact = payload["statements"][name]
+        assert compact["verified_metric_count"] == len(source.metrics)
+        observations = [
+            observation
+            for series in compact["series"]
+            for observation in series[-1]
+        ]
+        assert len(observations) == len(source.metrics)
+        assert sorted(float(row[-1]) for row in observations) == sorted(
+            metric.value for metric in source.metrics
+        )
+    verbose_size = sum(
+        len(render_financial_data(source, []))
+        for source in (income, balance, cashflow)
+    )
+    assert len(rendered) < verbose_size * 0.6
 
 
 @pytest.mark.unit

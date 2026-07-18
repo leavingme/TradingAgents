@@ -10,6 +10,7 @@ from unittest import mock
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.errors import NoUsableFinancialDataError
 from tradingagents.dataflows.financial_validation import (
+    FINANCIAL_EVIDENCE_SCHEMA,
     FinancialMetric,
     NormalizedFinancialData,
     UnverifiedFinancialFact,
@@ -216,6 +217,118 @@ def test_run_scoped_financial_reconciliation_is_singleflight_across_tool_threads
     ]
     assert len(cache_hits) == 3
     assert all(kwargs.get("selected") is True for _, kwargs in cache_hits)
+
+
+@pytest.mark.unit
+def test_aggregate_financial_evidence_requires_and_reconciles_all_statements(
+    mock_financial_data,
+):
+    is_data = mock_financial_data({
+        "Q1 2026": {"Revenue": 1000, "Net Income": 200, "Operating Profit": 300}
+    })
+    bs_data = mock_financial_data({
+        "Q1 2026": {
+            "Total Assets": 5000,
+            "Total Liabilities": 3000,
+            "Total Equity": 2000,
+            "Cash and Equivalents": 1000,
+        }
+    })
+    cf_data = mock_financial_data({
+        "Q1 2026": {
+            "Operating Cash Flow": 300,
+            "Net Income": 200,
+            "Cash and Equivalents": 1000,
+        }
+    })
+    fd_data = mock_financial_data(
+        {}, entity_metadata={"symbol": "MOCK", "name": "Mock Company"}
+    )
+    vendor_methods = {
+        "get_income_statement": {"mock_vendor": lambda *a, **kw: is_data},
+        "get_balance_sheet": {"mock_vendor": lambda *a, **kw: bs_data},
+        "get_cashflow": {"mock_vendor": lambda *a, **kw: cf_data},
+        "get_fundamentals": {"mock_vendor": lambda *a, **kw: fd_data},
+    }
+
+    with interface._financial_cache_condition:
+        interface._shared_financial_cache.clear()
+        interface._shared_financial_inflight.clear()
+    with mock.patch.dict(interface.VENDOR_METHODS, vendor_methods, clear=False), \
+         mock.patch(
+             "tradingagents.dataflows.interface.get_vendor",
+             return_value="mock_vendor",
+         ):
+        rendered = interface.route_to_vendor(
+            "get_financial_evidence", "MOCK", "quarterly", "2026-07-10"
+        )
+
+    payload = json.loads(rendered)
+    assert payload["schema"] == FINANCIAL_EVIDENCE_SCHEMA
+    assert payload["status"] == "verified_and_reconciled"
+    assert payload["entity"]["name"] == "Mock Company"
+    assert set(payload["statements"]) == {
+        "income_statement", "balance_sheet", "cashflow"
+    }
+    assert payload["statements"]["income_statement"][
+        "verified_metric_count"
+    ] == len(is_data.metrics)
+    assert payload["derived_metrics"]
+
+
+@pytest.mark.unit
+def test_aggregate_financial_evidence_falls_back_as_one_atomic_capability(
+    mock_financial_data,
+):
+    is_data = mock_financial_data({
+        "Q1 2026": {"Revenue": 1000, "Net Income": 200}
+    })
+    bs_data = mock_financial_data({
+        "Q1 2026": {
+            "Total Assets": 5000,
+            "Total Liabilities": 3000,
+            "Total Equity": 2000,
+            "Cash and Equivalents": 1000,
+        }
+    })
+    cf_data = mock_financial_data({
+        "Q1 2026": {"Net Income": 200, "Cash and Equivalents": 1000}
+    })
+    first_fd = mock_financial_data({}, entity_metadata={"symbol": "FIRST"})
+    second_fd = mock_financial_data({}, entity_metadata={"symbol": "SECOND"})
+
+    def unavailable_cashflow(*args, **kwargs):
+        raise NoUsableFinancialDataError("MOCK", "cashflow", "missing")
+
+    vendor_methods = {
+        "get_income_statement": {
+            "first": lambda *a, **kw: is_data,
+            "second": lambda *a, **kw: is_data,
+        },
+        "get_balance_sheet": {
+            "first": lambda *a, **kw: bs_data,
+            "second": lambda *a, **kw: bs_data,
+        },
+        "get_cashflow": {
+            "first": unavailable_cashflow,
+            "second": lambda *a, **kw: cf_data,
+        },
+        "get_fundamentals": {
+            "first": lambda *a, **kw: first_fd,
+            "second": lambda *a, **kw: second_fd,
+        },
+    }
+
+    with mock.patch.dict(interface.VENDOR_METHODS, vendor_methods, clear=False), \
+         mock.patch(
+             "tradingagents.dataflows.interface.get_vendor",
+             return_value="first, second",
+         ):
+        rendered = interface.route_to_vendor(
+            "get_financial_evidence", "MOCK", "quarterly", "2026-07-10"
+        )
+
+    assert json.loads(rendered)["entity"]["symbol"] == "SECOND"
 
 
 @pytest.mark.unit

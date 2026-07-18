@@ -11,7 +11,10 @@ from tradingagents.agents.analysts.prompts import (
     build_sentiment_analyst_system_message,
     render_full_prompt,
 )
-from tradingagents.agents import MARKET_ANALYST_TOOL_NAMES
+from tradingagents.agents import (
+    FUNDAMENTALS_ANALYST_TOOL_NAMES,
+    MARKET_ANALYST_TOOL_NAMES,
+)
 
 
 def analyst_prompt_payload() -> dict[str, list[dict[str, object]]]:
@@ -57,12 +60,12 @@ def analyst_prompt_payload() -> dict[str, list[dict[str, object]]]:
             {
                 "key": "fundamentals",
                 "title": "Fundamentals Analyst",
-                "description": "Company fundamentals, profile, financial statements, and historical financial context.",
-                "tools": ["get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"],
+                "description": "Reconciled company statements and derived metrics in one compact verified evidence payload.",
+                "tools": list(FUNDAMENTALS_ANALYST_TOOL_NAMES),
                 "prompt": render_full_prompt(
                     TOOL_CALLING_COLLABORATION_PROMPT,
                     build_fundamentals_analyst_system_message(),
-                    ["get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"],
+                    FUNDAMENTALS_ANALYST_TOOL_NAMES,
                 ),
             },
         ]

@@ -136,6 +136,11 @@ def test_get_analyst_prompts_exposes_prompt_catalog():
         build_market_analyst_system_message(),
         ["get_indicators", "get_verified_market_snapshot"],
     )
+    fundamentals = next(
+        item for item in payload["analysts"] if item["key"] == "fundamentals"
+    )
+    assert fundamentals["tools"] == ["get_financial_evidence"]
+    assert "Call `get_financial_evidence` exactly once" in fundamentals["prompt"]
 
 
 def test_get_env_status_reports_provider_key_presence(monkeypatch):

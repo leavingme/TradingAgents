@@ -9,15 +9,11 @@ from typing import Any
 
 from langgraph.prebuilt import ToolNode
 
-from tradingagents.agents import MARKET_ANALYST_TOOLS
+from tradingagents.agents import FUNDAMENTALS_ANALYST_TOOLS, MARKET_ANALYST_TOOLS
 # Import the abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
-    get_balance_sheet,
-    get_cashflow,
-    get_fundamentals,
     get_global_news,
-    get_income_statement,
     get_insider_transactions,
     get_macro_indicators,
     get_news,
@@ -192,13 +188,7 @@ class TradingAgentsGraph:
                 wrap_tool_call=recover_invalid_tool_arguments,
             ),
             "fundamentals": ToolNode(
-                [
-                    # Fundamental analysis tools
-                    get_fundamentals,
-                    get_balance_sheet,
-                    get_cashflow,
-                    get_income_statement,
-                ],
+                list(FUNDAMENTALS_ANALYST_TOOLS),
                 handle_tool_errors=False,
                 wrap_tool_call=recover_invalid_tool_arguments,
             ),

@@ -82,6 +82,16 @@ venv/bin/python3.12 scripts/engineering_cycle.py run \
 venv/bin/python3.12 scripts/engineering_cycle.py review <run_id>
 ```
 
+定时器、CLI 或 Web 写入正式 `TRADINGAGENTS_DB` 的 run 使用：
+
+```bash
+venv/bin/python3.12 scripts/engineering_cycle.py review <run_id> --canonical
+```
+
+`--canonical` 只读取服务端权威历史并把原始 ticker/date/mode/cutoff/
+analysts/depth 保存到 cycle manifest；后续 `rerun` 仍写入隔离的工程数据库，
+既能证明同输入，也不会污染正式评估 cohort。
+
 Review 必须覆盖：
 
 1. 每个 Analyst/Researcher/Manager 的输入、工具调用、输出和交接。

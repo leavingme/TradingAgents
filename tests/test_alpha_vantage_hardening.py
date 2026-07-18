@@ -33,6 +33,29 @@ def test_request_passes_timeout(monkeypatch):
 
 
 @pytest.mark.unit
+def test_transport_error_never_exposes_api_key_or_request_url(monkeypatch):
+    secret = "super-secret-alpha-key"
+    monkeypatch.setenv("ALPHA_VANTAGE_API_KEY", secret)
+
+    def fail_with_prepared_url(*args, **kwargs):
+        request = av.requests.Request(
+            "GET",
+            av.API_BASE_URL,
+            params={"apikey": secret, "function": "NEWS_SENTIMENT"},
+        ).prepare()
+        raise av.requests.ConnectionError("dns failure", request=request)
+
+    monkeypatch.setattr(av.requests, "get", fail_with_prepared_url)
+    with pytest.raises(av.VendorUnavailableError) as caught:
+        av._make_api_request("NEWS_SENTIMENT", {"tickers": "NVDA"})
+    message = str(caught.value)
+    assert secret not in message
+    assert "apikey" not in message
+    assert "https://" not in message
+    assert message == "Alpha Vantage request failed at /query: ConnectionError"
+
+
+@pytest.mark.unit
 def test_rate_limit_detected(monkeypatch):
     body = '{"Information": "Our standard API rate limit is 25 requests per day. ... your API key ..."}'
     monkeypatch.setattr(av.requests, "get", _patched_get(body))

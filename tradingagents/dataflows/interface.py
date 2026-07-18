@@ -1231,7 +1231,10 @@ def _record_vendor_verification(
         logger.debug("Could not update latest vendor health status: %s", exc)
 
     if source == "analysis" and call_id:
-        from tradingagents.runtime.audit_context import current_run_id
+        from tradingagents.runtime.audit_context import (
+            current_run_id,
+            current_vendor_call_purpose,
+        )
         from tradingagents.runtime.history import history_store
 
         run_id = current_run_id()
@@ -1248,6 +1251,7 @@ def _record_vendor_verification(
             # provenance ledger must not continue to an executable report.
             record = {
                 "run_id": run_id,
+                "purpose": current_vendor_call_purpose(),
                 "call_id": call_id,
                 "attempt": attempt,
                 "category": category,

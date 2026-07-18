@@ -115,6 +115,69 @@ def test_analysis_evidence_identity_ignores_execution_noise_but_binds_results():
     assert analysis_evidence_identity([])["complete"] is False
 
 
+def test_outcome_evaluation_vendor_calls_do_not_pollute_analysis_identity_or_summary(tmp_path):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    store.create_run(
+        "purpose-run", "NVDA", "2026-07-10", "stock", ["market"], "test", 1
+    )
+    base = {
+        "run_id": "purpose-run",
+        "attempt": 1,
+        "category": "core_stock_apis",
+        "method": "get_stock_data",
+        "vendor": "longbridge_mcp",
+        "agent": "Market Analyst",
+        "status": "available",
+        "selected": True,
+        "arguments_json": '{"symbol":"NVDA"}',
+        "result_hash": "analysis-result",
+        "started_at": "2026-07-10T20:00:00+00:00",
+        "finished_at": "2026-07-10T20:00:01+00:00",
+    }
+    store.add_vendor_call({**base, "call_id": "analysis-call", "purpose": "analysis"})
+    store.add_vendor_call({
+        **base,
+        "call_id": "evaluation-call",
+        "purpose": "outcome_evaluation",
+        "symbol": "SPY",
+        "result_hash": "evaluation-result",
+    })
+    calls = store.get_vendor_calls("purpose-run")
+    assert [call["purpose"] for call in calls] == ["analysis", "outcome_evaluation"]
+    summary = store.get_vendor_summary("purpose-run")
+    assert summary["call_count"] == 1
+    identity = analysis_evidence_identity(calls)
+    assert identity["attempt_count"] == 1
+    assert identity["fingerprint"] == analysis_evidence_identity([calls[0]])["fingerprint"]
+
+
+def test_vendor_purpose_column_migrates_with_analysis_default(tmp_path):
+    db_path = tmp_path / "legacy-vendor.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE run_vendor_calls (
+                id INTEGER PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                call_id TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                method TEXT NOT NULL,
+                vendor TEXT NOT NULL,
+                status TEXT NOT NULL,
+                selected INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL,
+                UNIQUE (run_id, call_id, attempt)
+            )
+        """)
+    store = RunHistoryStore(db_path)
+    with store._conn() as conn:
+        columns = {
+            row["name"]: row for row in conn.execute("PRAGMA table_info(run_vendor_calls)")
+        }
+    assert columns["purpose"]["dflt_value"] == "'analysis'"
+
+
 def test_history_persists_only_verified_market_dates_on_or_before_request(tmp_path):
     store = RunHistoryStore(tmp_path / "runs.db")
     store.create_run(

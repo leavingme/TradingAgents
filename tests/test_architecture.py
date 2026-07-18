@@ -61,6 +61,7 @@ def test_manifest_fingerprint_changes_with_effective_implementation(monkeypatch)
         "scoring_version": "alpha-exposure-v1",
         "hold_band": 0.02,
         "horizon_sessions": 5,
+        "context_schema": "tradingagents/audited-longitudinal-outcomes/v8",
     }
     changed_policy = {
         **first,

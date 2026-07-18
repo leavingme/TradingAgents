@@ -23,6 +23,7 @@ OUTCOME_MEASUREMENT_VERSION = "post-decision-day-close-v1"
 LEGACY_OUTCOME_MEASUREMENT_VERSION = "decision-close-v1"
 DEFAULT_HOLD_BAND = 0.02
 DEFAULT_OUTCOME_HORIZON_SESSIONS = 5
+LONGITUDINAL_CONTEXT_SCHEMA = "tradingagents/audited-longitudinal-outcomes/v8"
 
 _RUNTIME_COST_FIELDS = (
     "runtime_seconds",
@@ -48,6 +49,7 @@ def longitudinal_evaluation_policy() -> dict[str, Any]:
         "scoring_version": OUTCOME_SCORING_VERSION,
         "hold_band": DEFAULT_HOLD_BAND,
         "horizon_sessions": DEFAULT_OUTCOME_HORIZON_SESSIONS,
+        "context_schema": LONGITUDINAL_CONTEXT_SCHEMA,
     }
 
 

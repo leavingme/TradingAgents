@@ -20,6 +20,9 @@ _information_cutoff: ContextVar[str | None] = ContextVar(
 _vendor_attempt_sink: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
     "tradingagents_vendor_attempt_sink", default=None
 )
+_vendor_call_purpose: ContextVar[str] = ContextVar(
+    "tradingagents_vendor_call_purpose", default="analysis"
+)
 
 
 def current_run_id() -> str | None:
@@ -85,6 +88,20 @@ def bind_vendor_attempt_sink(
 
 def reset_vendor_attempt_sink(token: Token) -> None:
     _vendor_attempt_sink.reset(token)
+
+
+def current_vendor_call_purpose() -> str:
+    return _vendor_call_purpose.get()
+
+
+def bind_vendor_call_purpose(purpose: str) -> Token:
+    if purpose not in {"analysis", "outcome_evaluation"}:
+        raise ValueError("unsupported vendor call purpose")
+    return _vendor_call_purpose.set(purpose)
+
+
+def reset_vendor_call_purpose(token: Token) -> None:
+    _vendor_call_purpose.reset(token)
 
 
 def validate_temporal_context(

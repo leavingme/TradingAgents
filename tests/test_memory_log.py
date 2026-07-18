@@ -749,6 +749,7 @@ class TestDeferredReflection:
 
     def test_resolve_marks_entry_completed(self, tmp_path, monkeypatch):
         """After resolve, get_pending_entries() is empty and the entry has a REFLECTION."""
+        from tradingagents.runtime.audit_context import current_vendor_call_purpose
         from tradingagents.runtime.history import history_store
 
         log = make_log(tmp_path)
@@ -758,7 +759,13 @@ class TestDeferredReflection:
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.memory_log = log
         mock_graph.reflector = mock_reflector
-        mock_graph._fetch_returns = MagicMock(return_value=_outcome_measurement())
+        observed_purposes = []
+
+        def fetch_returns(*args, **kwargs):
+            observed_purposes.append(current_vendor_call_purpose())
+            return _outcome_measurement()
+
+        mock_graph._fetch_returns = MagicMock(side_effect=fetch_returns)
         monkeypatch.setattr(
             history_store,
             "list_unevaluated_validated_runs",
@@ -790,6 +797,8 @@ class TestDeferredReflection:
         assert entries[0]["reflection"] == "Momentum confirmed."
         assert "+5.0%" in entries[0]["raw"]
         assert "+2.0%" in entries[0]["alpha"]
+        assert observed_purposes == ["outcome_evaluation"]
+        assert current_vendor_call_purpose() == "analysis"
 
     def test_resolve_keeps_markdown_pending_if_canonical_evaluation_write_fails(
         self, tmp_path, monkeypatch
@@ -971,6 +980,34 @@ class TestPortfolioManagerInjection:
         assert "**Investment Thesis**: AI capex cycle" in md
         assert "**Price Target**: 215.0" in md
         assert "**Time Horizon**: 3-6 months" in md
+        assert "**Prose Safety Normalization**" not in md
+
+    def test_pm_normalizes_redundant_execution_prose_without_retry(self):
+        captured = {}
+        decision = PortfolioDecision(
+            rating=PortfolioRating.OVERWEIGHT,
+            executive_summary=(
+                "Start with a 1.5% position near $200. Build exposure gradually."
+            ),
+            investment_thesis=(
+                "Use a $190 stop and a $215 target. Fundamentals remain constructive."
+            ),
+            entry_price=200.0,
+            stop_loss=190.0,
+            price_target=215.0,
+            target_position_pct=4.0,
+            initial_position_pct=1.5,
+        )
+        llm = _structured_pm_llm(captured, decision)
+        result = create_portfolio_manager(llm)(_make_pm_state())
+        md = result["final_trade_decision"]
+        assert result["decision_status"] == "validated"
+        assert "Start with" not in md
+        assert "Use a $190 stop" not in md
+        assert "Build exposure gradually" in md
+        assert "Fundamentals remain constructive" in md
+        assert "**Prose Safety Normalization**" in md
+        assert llm.with_structured_output.return_value.invoke.call_count == 1
 
     def test_pm_structured_unavailable_returns_review_required_hold(self):
         """If a provider does not support with_structured_output, the agent

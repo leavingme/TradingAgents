@@ -6,7 +6,11 @@ from io import StringIO
 import pandas as pd
 import requests
 
-from .errors import VendorNotConfiguredError, VendorRateLimitError
+from .errors import (
+    VendorNotConfiguredError,
+    VendorRateLimitError,
+    VendorUnavailableError,
+)
 
 API_BASE_URL = "https://www.alphavantage.co/query"
 
@@ -83,8 +87,16 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
         # Remove entitlement if it's None or empty
         api_params.pop("entitlement", None)
 
-    response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
+    try:
+        response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        status = f" HTTP {status_code}" if status_code is not None else ""
+        raise VendorUnavailableError(
+            "Alpha Vantage request failed at /query"
+            f"{status}: {type(exc).__name__}"
+        ) from None
 
     response_text = response.text
 

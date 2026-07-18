@@ -383,6 +383,10 @@ class TradingAgentsGraph:
         from tradingagents.agents.utils.rating import parse_rating
         from tradingagents.evaluation import OutcomeMeasurement, score_outcome
         from tradingagents.runtime.audit_context import current_run_id
+        from tradingagents.runtime.audit_context import (
+            bind_vendor_call_purpose,
+            reset_vendor_call_purpose,
+        )
         from tradingagents.runtime.history import history_store
 
         prior_runs = history_store.list_unevaluated_validated_runs(ticker=ticker)
@@ -415,14 +419,18 @@ class TradingAgentsGraph:
                     "validated historical run lacks decision_as_of: "
                     f"{prior_run['run_id']}"
                 )
-            measurement = self._fetch_returns(
-                ticker,
-                prior_run["analysis_date"],
-                benchmark=benchmark,
-                as_of_date=as_of_date,
-                return_details=True,
-                decision_as_of=decision_as_of,
-            )
+            purpose_token = bind_vendor_call_purpose("outcome_evaluation")
+            try:
+                measurement = self._fetch_returns(
+                    ticker,
+                    prior_run["analysis_date"],
+                    benchmark=benchmark,
+                    as_of_date=as_of_date,
+                    return_details=True,
+                    decision_as_of=decision_as_of,
+                )
+            finally:
+                reset_vendor_call_purpose(purpose_token)
             if measurement is None:
                 continue
             if not isinstance(measurement, OutcomeMeasurement):

@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ENGINEERING_DB = REPO_ROOT / ".tradingagents" / "engineering-cycle-runs.db"
 
 from tradingagents.runtime import AnalysisRequest, history_store, run_analysis_stream
+from tradingagents.runtime.history import RunHistoryStore
 from tradingagents.runtime.stats_handler import StatsCallbackHandler
 
 
@@ -369,9 +370,12 @@ def build_review(run_id: str, *, root: Path = DEFAULT_ROOT, store=history_store)
     directory = cycle_dir(run_id, root)
     findings_path = directory / "findings.json"
     existing_findings: list[dict[str, Any]] = []
+    existing_acknowledgement: dict[str, Any] | None = None
     if findings_path.exists():
         existing = json.loads(findings_path.read_text(encoding="utf-8"))
         existing_findings = list(existing.get("findings") or [])
+        if isinstance(existing.get("review_acknowledgement"), dict):
+            existing_acknowledgement = dict(existing["review_acknowledgement"])
     detected = detect_findings(run, vendor_calls)
     existing_by_id = {item["id"]: item for item in existing_findings}
     findings = [existing_by_id.get(item["id"], item) for item in detected]
@@ -383,12 +387,15 @@ def build_review(run_id: str, *, root: Path = DEFAULT_ROOT, store=history_store)
             or item.get("status") == P0_RESOLVED
         )
     )
-    _write_json(findings_path, {
+    findings_payload = {
         "schema": SCHEMA_VERSION,
         "run_id": run_id,
         "reviewed_at": _now(),
         "findings": findings,
-    })
+    }
+    if existing_acknowledgement:
+        findings_payload["review_acknowledgement"] = existing_acknowledgement
+    _write_json(findings_path, findings_payload)
     _write_json(directory / "execution-evidence.json", {
         "schema": SCHEMA_VERSION,
         "run": run,
@@ -432,9 +439,46 @@ def build_review(run_id: str, *, root: Path = DEFAULT_ROOT, store=history_store)
     manifest = json.loads(cycle_path.read_text(encoding="utf-8")) if cycle_path.exists() else {
         "schema": SCHEMA_VERSION, "run_id": run_id, "created_at": _now()
     }
+    run_started = next(
+        (event.get("content") or {} for event in events if event.get("type") == "run_started"),
+        {},
+    )
+    selected_analysts = run.get("selected_analysts")
+    if isinstance(selected_analysts, str):
+        try:
+            selected_analysts = json.loads(selected_analysts)
+        except json.JSONDecodeError:
+            selected_analysts = [
+                item.strip() for item in selected_analysts.split(",") if item.strip()
+            ]
+    manifest.setdefault("request", {
+        "ticker": run.get("ticker"),
+        "analysis_date": run.get("analysis_date"),
+        "analysis_mode": run_started.get("analysis_mode", "live"),
+        "information_cutoff": (
+            None
+            if run_started.get("information_cutoff") == "live_at_call_time"
+            else run_started.get("information_cutoff")
+        ),
+        "selected_analysts": list(selected_analysts or ()),
+        "research_depth": int(run.get("research_depth") or 1),
+    })
     manifest.update({"phase": "reviewed", "reviewed_at": _now()})
     _write_json(cycle_path, manifest)
     return review_path
+
+
+def canonical_review_store() -> RunHistoryStore:
+    """Open the server-owned history universe for reviewing scheduled/Web runs."""
+    configured = os.environ.get("TRADINGAGENTS_CANONICAL_DB")
+    path = (
+        Path(configured).expanduser()
+        if configured
+        else Path.home() / ".tradingagents" / "runs.db"
+    )
+    if path.resolve() == ENGINEERING_DB.resolve():
+        raise ValueError("canonical review database cannot be the engineering database")
+    return RunHistoryStore(path)
 
 
 def build_p0_plan(run_id: str, *, root: Path = DEFAULT_ROOT) -> Path:
@@ -662,6 +706,11 @@ def _parser() -> argparse.ArgumentParser:
     rerun.add_argument("parent_run_id")
     review = commands.add_parser("review", help="export and review a terminal run")
     review.add_argument("run_id")
+    review.add_argument(
+        "--canonical",
+        action="store_true",
+        help="read the run from the server-owned CLI/Web/timer history database",
+    )
     plan = commands.add_parser("plan", help="record P0 root cause and acceptance plan")
     plan.add_argument("run_id")
     plan.add_argument("finding_id")
@@ -696,7 +745,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "rerun":
         print(rerun_baseline(args.parent_run_id, root=args.root))
     elif args.command == "review":
-        print(build_review(args.run_id, root=args.root))
+        store = canonical_review_store() if args.canonical else history_store
+        print(build_review(args.run_id, root=args.root, store=store))
     elif args.command == "plan":
         plan_finding(
             args.run_id, args.finding_id,

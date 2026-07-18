@@ -16,6 +16,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from tradingagents.dataflows.utils import safe_ticker_component
+from tradingagents.evaluation import LONGITUDINAL_CONTEXT_SCHEMA
 from tradingagents.graph.checkpointer import get_checkpointer, thread_id
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import write_report_tree
@@ -43,9 +44,6 @@ ANALYST_REPORT_MAP = {
     "news": "news_report",
     "fundamentals": "fundamentals_report",
 }
-LONGITUDINAL_CONTEXT_SCHEMA = "tradingagents/audited-longitudinal-outcomes/v8"
-
-
 def _longitudinal_context_status(
     context: str,
     *,
@@ -222,7 +220,7 @@ def _vendor_attempt_event(run_id: str, record: dict[str, Any]) -> AnalysisEvent:
         key: record.get(key)
         for key in (
             "call_id", "attempt", "category", "method", "vendor", "agent",
-            "symbol", "status", "selected", "latency_ms", "error_type",
+            "symbol", "purpose", "status", "selected", "latency_ms", "error_type",
             "error_detail", "result_hash", "calculation_start", "requested_end",
             "data_latest_date", "started_at", "finished_at",
         )

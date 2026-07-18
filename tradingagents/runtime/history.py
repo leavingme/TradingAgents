@@ -114,6 +114,7 @@ class RunHistoryStore:
                     CREATE TABLE IF NOT EXISTS run_vendor_calls (
                         id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                         run_id              TEXT NOT NULL,
+                        purpose             TEXT NOT NULL DEFAULT 'analysis',
                         call_id             TEXT NOT NULL,
                         attempt             INTEGER NOT NULL,
                         category            TEXT NOT NULL,
@@ -297,6 +298,7 @@ class RunHistoryStore:
                             f"ALTER TABLE decision_evaluations ADD COLUMN {column}"
                         )
                 for column in (
+                    "purpose TEXT NOT NULL DEFAULT 'analysis'",
                     "symbol TEXT",
                     "agent TEXT",
                     "calculation_start TEXT",
@@ -858,7 +860,10 @@ class RunHistoryStore:
         point-in-time callers may provide a cutoff so outcomes evaluated later
         cannot leak into the reconstructed run.
         """
-        from tradingagents.evaluation import architecture_rollups
+        from tradingagents.evaluation import (
+            LONGITUDINAL_CONTEXT_SCHEMA,
+            architecture_rollups,
+        )
 
         scan_limit = 5000
         cutoff_value = (
@@ -923,7 +928,7 @@ class RunHistoryStore:
             "evaluated_at",
         )
         payload = {
-            "schema": "tradingagents/audited-longitudinal-outcomes/v8",
+            "schema": LONGITUDINAL_CONTEXT_SCHEMA,
             "interpretation": (
                 "Historical calibration evidence only. Outcomes do not prove causality, "
                 "may come from a different market regime, and cannot authorize trade levels."
@@ -1083,15 +1088,16 @@ class RunHistoryStore:
                 conn.execute(
                     """
                     INSERT INTO run_vendor_calls (
-                        run_id, call_id, attempt, category, method, vendor, agent, symbol,
+                        run_id, purpose, call_id, attempt, category, method, vendor, agent, symbol,
                         status, selected, arguments_json, latency_ms,
                         error_type, error_detail, result_summary, result_hash,
                         calculation_start, requested_end, data_latest_date,
                         started_at, finished_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        record["run_id"], record["call_id"], record["attempt"],
+                        record["run_id"], record.get("purpose", "analysis"),
+                        record["call_id"], record["attempt"],
                         record["category"], record["method"], record["vendor"],
                         record.get("agent"),
                         record.get("symbol"),
@@ -1116,7 +1122,10 @@ class RunHistoryStore:
 
     def get_vendor_summary(self, run_id: str) -> dict[str, Any]:
         """Build a deterministic, replay-safe summary of a run's vendor paths."""
-        return summarize_vendor_calls(self.get_vendor_calls(run_id))
+        return summarize_vendor_calls([
+            call for call in self.get_vendor_calls(run_id)
+            if call.get("purpose", "analysis") == "analysis"
+        ])
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -1320,6 +1329,10 @@ def analysis_evidence_identity(calls: list[dict[str, Any]]) -> dict[str, Any]:
     semantically identical rows remain repeated, while arguments are parsed and
     canonicalized so JSON key order cannot split an otherwise identical pair.
     """
+    calls = [
+        call for call in calls
+        if call.get("purpose", "analysis") == "analysis"
+    ]
     normalized: list[dict[str, Any]] = []
     successful_statuses = {"available", "cache_hit"}
     evidence_complete = bool(calls)

@@ -11,6 +11,7 @@ import pytest
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
+from tradingagents.dataflows import alpha_vantage_common as av_common
 from tradingagents.dataflows.alpha_vantage_common import (
     AlphaVantageNotConfiguredError,
     AlphaVantageRateLimitError,
@@ -24,6 +25,7 @@ from tradingagents.dataflows.errors import (
     VendorError,
     VendorNotConfiguredError,
     VendorRateLimitError,
+    VendorUnavailableError,
 )
 from tradingagents.dataflows.fred import FredNotConfiguredError
 
@@ -31,7 +33,12 @@ from tradingagents.dataflows.fred import FredNotConfiguredError
 @pytest.mark.unit
 class HierarchyTests(unittest.TestCase):
     def test_all_conditions_derive_from_vendor_error(self):
-        for cls in (NoMarketDataError, VendorRateLimitError, VendorNotConfiguredError):
+        for cls in (
+            NoMarketDataError,
+            VendorRateLimitError,
+            VendorNotConfiguredError,
+            VendorUnavailableError,
+        ):
             self.assertTrue(issubclass(cls, VendorError))
 
     def test_not_configured_is_still_a_value_error(self):
@@ -88,6 +95,42 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
         ):
             out = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         self.assertEqual(out, VALID_OHLCV)
+
+    def test_alpha_transport_error_is_safe_and_falls_through(self):
+        set_config({"data_vendors": {"core_stock_apis": "alpha_vantage,westock"}})
+        secret = "sentinel-alpha-secret"
+
+        def _transport_failure(*args, **kwargs):
+            request = av_common.requests.Request(
+                "GET",
+                av_common.API_BASE_URL,
+                params={"apikey": secret},
+            ).prepare()
+            raise av_common.requests.ConnectionError("dns failure", request=request)
+
+        def _alpha(*args, **kwargs):
+            return av_common._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
+
+        with mock.patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": secret}), \
+             mock.patch.object(av_common.requests, "get", _transport_failure), \
+             mock.patch.dict(
+                 interface.VENDOR_METHODS,
+                 {
+                     "get_stock_data": {
+                         "alpha_vantage": _alpha,
+                         "westock": lambda *a, **k: VALID_OHLCV,
+                     }
+                 },
+                 clear=False,
+             ), self.assertLogs(interface.logger.name, level="WARNING") as captured:
+            out = interface.route_to_vendor(
+                "get_stock_data", "AAPL", "2026-01-01", "2026-01-10"
+            )
+        self.assertEqual(out, VALID_OHLCV)
+        logs = "\n".join(captured.output)
+        self.assertNotIn(secret, logs)
+        self.assertNotIn("apikey", logs.lower())
+        self.assertNotIn("https://", logs)
 
     def test_sole_unconfigured_vendor_surfaces_the_error(self):
         # With no fallback, the not-configured condition must surface (not vanish).

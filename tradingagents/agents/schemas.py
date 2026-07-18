@@ -225,14 +225,8 @@ def _reject_calculated_trade_math(value: str) -> str:
     return value
 
 
-def _sanitize_non_executable_prose(value: str) -> str:
-    """Remove executable-number sentences from non-authoritative prose.
-
-    Research plans and non-long ratings may retain qualitative conclusions,
-    but copied entry/stop/target/position math must not survive into the next
-    decision boundary. Long decisions stay strict and fail instead of being
-    silently rewritten because their structured fields are executable.
-    """
+def _remove_executable_prose_chunks(value: str) -> tuple[str, bool]:
+    """Return safe prose plus whether executable-number chunks were removed."""
     # Keep ordered-list markers attached to their item while splitting prose.
     # Otherwise removing an unsafe item leaves orphaned ``1. 2. 3.`` markers
     # in the rendered report.
@@ -246,17 +240,41 @@ def _sanitize_non_executable_prose(value: str) -> str:
     # preserves decimal values (214.11) inside the unsafe chunk so the whole
     # guidance is removed instead of leaking fragments such as "11 + ...".
     chunks = re.split(r"(?<=[!?。！？;；])|(?<=\.)(?=\s|$)|\n+", value)
+    nonempty_chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
     safe = [
-        chunk.strip()
-        for chunk in chunks
-        if chunk.strip()
-        and not _PROSE_TRADE_MATH.search(_execution_scan_text(chunk))
+        chunk
+        for chunk in nonempty_chunks
+        if not _PROSE_TRADE_MATH.search(_execution_scan_text(chunk))
         and not _PROSE_EXECUTABLE_NUMBER.search(_execution_scan_text(chunk))
         and not _PROSE_EXECUTABLE_CHINESE_NUMBER.search(_execution_scan_text(chunk))
     ]
-    if safe:
-        return " ".join(safe).replace(list_dot, ".")
+    sanitized = " ".join(safe).replace(list_dot, ".")
+    return sanitized, len(safe) != len(nonempty_chunks)
+
+
+def _sanitize_non_executable_prose(value: str) -> str:
+    """Remove executable-number sentences from non-authoritative prose."""
+    sanitized, _ = _remove_executable_prose_chunks(value)
+    if sanitized:
+        return sanitized
     return "Executable numeric guidance was removed; no transaction is authorized."
+
+
+def _sanitize_authoritative_long_prose(value: str, *, field_name: str) -> tuple[str, bool]:
+    """Remove redundant execution prose without weakening long-plan validation.
+
+    The structured numeric fields remain the only executable source of truth.
+    We never recover or modify a number from prose.  If removing unsafe chunks
+    leaves no qualitative thesis, fail closed instead of authorizing an opaque
+    transaction.
+    """
+    sanitized, removed = _remove_executable_prose_chunks(value)
+    if not sanitized.strip():
+        raise ValueError(
+            f"{field_name} contains no qualitative evidence after executable prose removal"
+        )
+    _reject_calculated_trade_math(sanitized)
+    return sanitized, removed
 
 
 def contains_unverified_non_long_execution(value: str) -> bool:
@@ -588,14 +606,22 @@ def render_pm_decision(
     metrics = None
     executive_summary = decision.executive_summary
     investment_thesis = decision.investment_thesis
+    prose_normalized = False
     if decision.rating in {PortfolioRating.BUY, PortfolioRating.OVERWEIGHT}:
         from .trade_plan import validate_long_trade_plan
 
         if not verified_market or not risk_policy:
             raise ValueError("trusted market snapshot and server risk policy are required")
 
-        executive_summary = _reject_calculated_trade_math(executive_summary)
-        investment_thesis = _reject_calculated_trade_math(investment_thesis)
+        executive_summary, summary_normalized = _sanitize_authoritative_long_prose(
+            executive_summary,
+            field_name="executive_summary",
+        )
+        investment_thesis, thesis_normalized = _sanitize_authoritative_long_prose(
+            investment_thesis,
+            field_name="investment_thesis",
+        )
+        prose_normalized = summary_normalized or thesis_normalized
 
         metrics = validate_long_trade_plan(
             entry_price=decision.entry_price,
@@ -635,6 +661,12 @@ def render_pm_decision(
         "",
         f"**Investment Thesis**: {investment_thesis}",
     ]
+    if prose_normalized:
+        parts.extend([
+            "",
+            "**Prose Safety Normalization**: Redundant executable-number prose was "
+            "removed; validated structured fields remain authoritative.",
+        ])
     if decision.price_target is not None:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])
     if metrics is not None:

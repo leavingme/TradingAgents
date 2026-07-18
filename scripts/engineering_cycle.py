@@ -9,8 +9,14 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault(
-    "TRADINGAGENTS_DB",
-    str(ROOT / ".tradingagents" / "engineering-cycle-runs.db"),
+    "TRADINGAGENTS_CANONICAL_DB",
+    os.environ.get(
+        "TRADINGAGENTS_DB",
+        str(Path.home() / ".tradingagents" / "runs.db"),
+    ),
+)
+os.environ["TRADINGAGENTS_DB"] = str(
+    ROOT / ".tradingagents" / "engineering-cycle-runs.db"
 )
 
 from tradingagents.engineering_cycle import main

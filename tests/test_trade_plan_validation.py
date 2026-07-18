@@ -496,15 +496,44 @@ def test_explicit_trigger_price_remains_executable_guidance():
 
 
 @pytest.mark.unit
-def test_long_executable_math_in_prose_remains_a_hard_failure():
+def test_long_redundant_execution_prose_is_removed_and_audited():
     decision = PortfolioDecision(
         rating=PortfolioRating.BUY,
-        executive_summary="Start with a 4% position near $210.",
-        investment_thesis="Fundamentals support the long.",
+        executive_summary="Start with a 4% position near $210. Build exposure gradually.",
+        investment_thesis=(
+            "The reward/risk is 2:1 and the stop is $200. "
+            "Fundamentals support the long."
+        ),
         entry_price=210, stop_loss=200, price_target=230,
         target_position_pct=4, initial_position_pct=1,
     )
-    with pytest.raises(ValueError, match="must use structured fields"):
+    rendered = render_pm_decision(
+        decision,
+        verified_market=VERIFIED,
+        risk_policy=POLICY,
+    )
+    assert "Start with" not in rendered
+    assert "reward/risk is 2:1" not in rendered
+    assert "Build exposure gradually" in rendered
+    assert "Fundamentals support the long" in rendered
+    assert "**Entry Price**: 210.0" in rendered
+    assert "**Stop Loss**: 200.0" in rendered
+    assert "**Price Target**: 230.0" in rendered
+    assert "**Initial Position**: 1.00%" in rendered
+    assert "**Target Position**: 4.00%" in rendered
+    assert "**Prose Safety Normalization**" in rendered
+
+
+@pytest.mark.unit
+def test_long_all_executable_prose_still_fails_closed():
+    decision = PortfolioDecision(
+        rating=PortfolioRating.BUY,
+        executive_summary="Start with a 1% position near $210.",
+        investment_thesis="Use a $200 stop and a $230 target.",
+        entry_price=210, stop_loss=200, price_target=230,
+        target_position_pct=4, initial_position_pct=1,
+    )
+    with pytest.raises(ValueError, match="no qualitative evidence"):
         render_pm_decision(decision, verified_market=VERIFIED, risk_policy=POLICY)
 
 

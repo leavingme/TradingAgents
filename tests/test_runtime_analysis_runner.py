@@ -229,6 +229,9 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert "tradingagents/automation/**/*.py" not in manifest["implementation_digest_scope"]
     assert manifest["longitudinal_evaluation_policy"]["horizon_sessions"] == 5
     assert manifest["longitudinal_evaluation_policy"]["hold_band"] == 0.02
+    assert manifest["longitudinal_evaluation_policy"]["context_schema"] == (
+        "tradingagents/audited-longitudinal-outcomes/v8"
+    )
     assert manifest["decision_config"]["output_language"] == "Chinese"
     assert manifest["decision_config"]["max_debate_rounds"] == 1
     assert "news_data" in manifest["decision_config"]["data_vendors"]

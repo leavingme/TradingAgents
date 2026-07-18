@@ -7,6 +7,7 @@ import pytest
 from tradingagents.engineering_cycle import (
     acknowledge_review,
     build_review,
+    canonical_review_store,
     cycle_dir,
     default_analysis_date,
     gate_cycle,
@@ -69,6 +70,15 @@ def test_cycle_dir_rejects_path_traversal(tmp_path):
 
 
 @pytest.mark.unit
+def test_canonical_review_store_rejects_engineering_database(monkeypatch):
+    from tradingagents.engineering_cycle import ENGINEERING_DB
+
+    monkeypatch.setenv("TRADINGAGENTS_CANONICAL_DB", str(ENGINEERING_DB))
+    with pytest.raises(ValueError, match="cannot be the engineering database"):
+        canonical_review_store()
+
+
+@pytest.mark.unit
 def test_review_exports_evidence_and_p0_plan(tmp_path):
     store = FakeStore(_run(), _calls())
     review = build_review("NVDA-cycle-test", root=tmp_path, store=store)
@@ -78,6 +88,55 @@ def test_review_exports_evidence_and_p0_plan(tmp_path):
     assert (directory / "p0-plan.md").exists()
     findings = json.loads((directory / "findings.json").read_text(encoding="utf-8"))
     assert findings["findings"] == []
+
+
+@pytest.mark.unit
+def test_review_reconstructs_exact_rerun_request_for_imported_run(tmp_path):
+    run = _run()
+    run.update({
+        "selected_analysts": '["market", "news"]',
+        "research_depth": 3,
+    })
+    run["events"].insert(0, {
+        "type": "run_started",
+        "content": {
+            "analysis_mode": "point_in_time",
+            "information_cutoff": "2026-07-10T15:00:00-04:00",
+        },
+    })
+    review = build_review(
+        "NVDA-cycle-test",
+        root=tmp_path,
+        store=FakeStore(run, _calls()),
+    )
+    request = json.loads(
+        (review.parent / "cycle.json").read_text(encoding="utf-8")
+    )["request"]
+    assert request == {
+        "ticker": "NVDA",
+        "analysis_date": "2026-07-10",
+        "analysis_mode": "point_in_time",
+        "information_cutoff": "2026-07-10T15:00:00-04:00",
+        "selected_analysts": ["market", "news"],
+        "research_depth": 3,
+    }
+
+
+@pytest.mark.unit
+def test_re_review_preserves_full_review_acknowledgement(tmp_path):
+    store = FakeStore(_run(), _calls())
+    build_review("NVDA-cycle-test", root=tmp_path, store=store)
+    acknowledge_review(
+        "NVDA-cycle-test",
+        reviewer="tester",
+        summary="已逐 Agent、vendor、证据和最终决策完成完整复盘。",
+        root=tmp_path,
+    )
+    build_review("NVDA-cycle-test", root=tmp_path, store=store)
+    payload = json.loads(
+        (tmp_path / "NVDA-cycle-test" / "findings.json").read_text(encoding="utf-8")
+    )
+    assert payload["review_acknowledgement"]["reviewer"] == "tester"
 
 
 @pytest.mark.unit

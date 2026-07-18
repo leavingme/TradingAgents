@@ -310,6 +310,8 @@ async def get_decision_evaluations(
     limit: int = 1000,
     baseline: str | None = None,
     challenger: str | None = None,
+    baseline_fingerprint: str | None = None,
+    challenger_fingerprint: str | None = None,
 ):
     """Return immutable fixed-horizon outcomes and architecture rollups."""
     from tradingagents.evaluation import (
@@ -323,6 +325,37 @@ async def get_decision_evaluations(
         raise HTTPException(
             status_code=422,
             detail="baseline and challenger must be provided together",
+        )
+    if bool(baseline_fingerprint) != bool(challenger_fingerprint):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "baseline_fingerprint and challenger_fingerprint must be "
+                "provided together"
+            ),
+        )
+    if (baseline_fingerprint or challenger_fingerprint) and not baseline:
+        raise HTTPException(
+            status_code=422,
+            detail="fingerprint selection requires baseline and challenger",
+        )
+    if baseline and challenger and baseline == challenger:
+        raise HTTPException(
+            status_code=422,
+            detail="baseline and challenger must be distinct",
+        )
+    if any(
+        value is not None and len(value) > 128
+        for value in (
+            baseline,
+            challenger,
+            baseline_fingerprint,
+            challenger_fingerprint,
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="architecture selectors are too long",
         )
     bounded_limit = max(1, min(limit, 5000))
     evaluations = history_store.list_decision_evaluations(
@@ -353,11 +386,16 @@ async def get_decision_evaluations(
         "rollups": architecture_rollups(evaluations),
     }
     if baseline and challenger:
-        payload["comparison"] = compare_architectures(
-            evaluations,
-            baseline=baseline,
-            challenger=challenger,
-        )
+        try:
+            payload["comparison"] = compare_architectures(
+                evaluations,
+                baseline=baseline,
+                challenger=challenger,
+                baseline_fingerprint=baseline_fingerprint,
+                challenger_fingerprint=challenger_fingerprint,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
     return payload
 
 

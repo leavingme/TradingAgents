@@ -141,7 +141,16 @@ instrument context 与完整 investment debate history，刻意排除 `past_cont
 venv/bin/python3.12 scripts/daily_analysis.py evaluate --ticker NVDA
 curl -s 'http://127.0.0.1:8765/api/evaluations?ticker=NVDA'
 curl -s 'http://127.0.0.1:8765/api/evaluations?ticker=NVDA&baseline=baseline&challenger=challenger'
+venv/bin/python3.12 scripts/daily_analysis.py evaluate --ticker NVDA \
+  --baseline baseline --challenger challenger \
+  --baseline-fingerprint BASELINE_SHA256 \
+  --challenger-fingerprint CHALLENGER_SHA256
 ```
+
+同一 architecture version 如果包含多个实际 fingerprint，未指定 fingerprint 的比较会
+继续 fail closed 为 `invalid_comparison`。CLI/API 必须同时提供两臂 fingerprint 才会筛选
+对应 cohort；不得只固定一臂而让另一臂继续混合配置。这样 implementation digest 变化后
+仍能查询历史 cohort，又不会把变更前后的 Agent 实现合并成同一实验。
 
 CLI 与 API 同时返回 `pending_evaluation_count` / `pending_evaluations`。每条 pending
 记录只来自 SQLite 中 validated 且尚无对应 5-session evaluation 的 run，并显示
@@ -176,6 +185,13 @@ evaluation 起返回完整的 paired exclusion 诊断，即使每个架构尚未
 这样可以尽早发现半对失败、vendor evidence、
 pre-treatment agent state、时间窗口或 outcome provenance 漂移，停止无效实验；
 未达到样本门槛时状态仍为 `insufficient_data`，且 `passes_paired_gate=false`。
+每次 comparison 还返回固定 schema 的 `optimization_assessment`，把三类证据分开：
+`experiment_integrity` 汇总有效与被排除 pair，`outcome_evidence` 使用重叠校正后的
+score delta 区间，`cost_evidence` 仅在执行顺序 counterbalanced 且 paired token 样本
+充足时判断成本下降或上升。`agent_hotspots` 展示 baseline input-token 最高的三个 Agent
+及配对差值。建议动作只能是继续收集、修复 pair、保留 baseline 或进入人工复核；
+`automatic_mutation_allowed` 永远为 false。即使收益下界通过，只要被排除 pair 多于
+有效 pair，仍要求先修复实验完整性，禁止从选择偏差中“优化”架构。
 每个 run 还保存包含 analyst 集合、研究深度、模型和
 纵向上下文拓扑的 canonical manifest 与 SHA-256 fingerprint。manifest v4 还包含
 路径无关的决策实现摘要，以及非密钥的有效 vendor、风险策略、

@@ -377,6 +377,10 @@ def test_architecture_comparison_reports_pair_drift_before_sample_minimum():
     assert comparison["paired"]["sample_count"] == 0
     assert comparison["paired"]["evidence_mismatches_excluded"] == 1
     assert comparison["passes_paired_gate"] is False
+    assessment = comparison["optimization_assessment"]
+    assert assessment["automatic_mutation_allowed"] is False
+    assert assessment["experiment_integrity"]["status"] == "failing"
+    assert assessment["recommended_action"] == "repair_pair_integrity"
 
 
 def test_architecture_comparison_uses_same_day_shadow_pairs():
@@ -464,6 +468,54 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert comparison["paired_costs_by_execution_order"]["baseline_first"][
         "tokens_in"
     ]["sample_count"] == 10
+    assessment = comparison["optimization_assessment"]
+    assert assessment["schema"] == (
+        "tradingagents/architecture-optimization-assessment/v1"
+    )
+    assert assessment["automatic_mutation_allowed"] is False
+    assert assessment["outcome_evidence"]["status"] == (
+        "paired_improvement_supported"
+    )
+    assert assessment["cost_evidence"]["status"] == (
+        "input_token_reduction_supported"
+    )
+    assert assessment["recommended_action"] == "human_review_challenger"
+    assert assessment["agent_hotspots"][0]["agent"] == "Market Analyst"
+    assert assessment["agent_hotspots"][0]["mean_delta"] == -200.0
+
+    for row in evaluations:
+        if row["architecture_version"] == "challenger":
+            row["tokens_in"] = 1200
+            row["agent_costs"]["Market Analyst"]["tokens_in"] = 900
+    cost_tradeoff = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert cost_tradeoff["passes_paired_gate"] is True
+    assert cost_tradeoff["optimization_assessment"]["cost_evidence"]["status"] == (
+        "input_token_increase_supported"
+    )
+    assert cost_tradeoff["optimization_assessment"]["recommended_action"] == (
+        "human_review_cost_tradeoff"
+    )
+    for row in evaluations:
+        if row["architecture_version"] == "challenger":
+            row["tokens_in"] = 800
+            row["agent_costs"]["Market Analyst"]["tokens_in"] = 500
+            row["score"] = -0.01
+            row["directional_hit"] = False
+    unsupported = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert unsupported["optimization_assessment"]["outcome_evidence"]["status"] == (
+        "minimum_improvement_not_supported"
+    )
+    assert unsupported["optimization_assessment"]["recommended_action"] == (
+        "retain_baseline"
+    )
+    for row in evaluations:
+        if row["architecture_version"] == "challenger":
+            row["score"] = 0.01
+            row["directional_hit"] = True
 
     original_started_at = evaluations[-1]["run_started_at"]
     evaluations[-1]["run_started_at"] = "2026-01-20T22:00:00+00:00"
@@ -482,6 +534,35 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert different_market_bar["paired"]["sample_count"] == 19
     assert different_market_bar["paired"]["outcome_mismatches_excluded"] == 1
     assert different_market_bar["passes_paired_gate"] is False
+
+    evaluations[-1]["market_data_date"] = _comparable_input_evidence(19)[
+        "market_data_date"
+    ]
+    for index in range(21):
+        analysis_date = f"2027-01-{index + 1:02d}"
+        for template, evidence in (
+            (evaluations[0], f"bad-base-{index}"),
+            (evaluations[1], f"bad-challenger-{index}"),
+        ):
+            evaluations.append({
+                **template,
+                "run_id": f"excluded-{template['architecture_version']}-{index}",
+                "analysis_date": analysis_date,
+                "market_data_date": analysis_date,
+                "analysis_evidence_fingerprint": evidence,
+            })
+    selection_biased = compare_architectures(
+        evaluations, baseline="baseline", challenger="challenger"
+    )
+    assert selection_biased["passes_paired_gate"] is True
+    assert selection_biased["paired"]["sample_count"] == 20
+    assert selection_biased["paired"]["evidence_mismatches_excluded"] == 21
+    assert selection_biased["optimization_assessment"]["experiment_integrity"][
+        "status"
+    ] == "degraded"
+    assert selection_biased["optimization_assessment"]["recommended_action"] == (
+        "repair_pair_integrity"
+    )
 
 
 def test_architecture_comparison_rejects_mixed_configuration_fingerprints():
@@ -506,6 +587,29 @@ def test_architecture_comparison_rejects_mixed_configuration_fingerprints():
         evaluations, baseline="baseline", challenger="challenger"
     )
     assert comparison["status"] == "invalid_comparison"
+    assert comparison["optimization_assessment"]["recommended_action"] == (
+        "repair_comparison_definition"
+    )
+    selected = compare_architectures(
+        evaluations,
+        baseline="baseline",
+        challenger="challenger",
+        baseline_fingerprint="baseline-stable",
+        challenger_fingerprint="challenger-stable",
+        minimum_samples=19,
+        minimum_paired_samples=2,
+    )
+    assert selected["status"] != "invalid_comparison"
+    assert selected["sample_progress"]["baseline"] == 19
+    assert selected["sample_progress"]["challenger"] == 20
+    assert selected["selected_architecture_fingerprints"] == {
+        "baseline": "baseline-stable",
+        "challenger": "challenger-stable",
+    }
+    assert selected["architecture_fingerprints"] == {
+        "baseline": ["baseline-stable"],
+        "challenger": ["challenger-stable"],
+    }
 
 
 def test_architecture_comparison_rejects_mixed_scoring_policies():
@@ -553,6 +657,51 @@ def test_architecture_comparison_rejects_mixed_measurement_policies():
     )
     assert comparison["status"] == "invalid_comparison"
     assert "measurement policy" in comparison["reason"]
+
+
+def test_architecture_comparison_rejects_invalid_gate_parameters():
+    with pytest.raises(ValueError, match="distinct nonempty"):
+        compare_architectures([], baseline="same", challenger="same")
+    with pytest.raises(ValueError, match="distinct nonempty"):
+        compare_architectures([], baseline=" baseline", challenger="challenger")
+    with pytest.raises(ValueError, match="provided together"):
+        compare_architectures(
+            [], baseline="a", challenger="b", baseline_fingerprint="a-fp"
+        )
+    with pytest.raises(ValueError, match="baseline_fingerprint"):
+        compare_architectures(
+            [],
+            baseline="a",
+            challenger="b",
+            baseline_fingerprint=" a-fp",
+            challenger_fingerprint="b-fp",
+        )
+    with pytest.raises(ValueError, match="minimum_samples"):
+        compare_architectures([], baseline="a", challenger="b", minimum_samples=0)
+    with pytest.raises(ValueError, match="minimum_paired_samples"):
+        compare_architectures(
+            [], baseline="a", challenger="b", minimum_paired_samples=1
+        )
+    with pytest.raises(ValueError, match="minimum_score_improvement"):
+        compare_architectures(
+            [], baseline="a", challenger="b", minimum_score_improvement=-0.1
+        )
+
+
+def test_architecture_optimization_assessment_preserves_policy_before_samples():
+    comparison = compare_architectures(
+        [],
+        baseline="baseline",
+        challenger="challenger",
+        baseline_fingerprint="baseline-fp",
+        challenger_fingerprint="challenger-fp",
+    )
+    assert comparison["comparison_policy"]["minimum_paired_samples"] == 20
+    assessment = comparison["optimization_assessment"]
+    assert assessment["experiment_integrity"]["status"] == "not_observed"
+    assert assessment["outcome_evidence"]["minimum_required"] == 20
+    assert assessment["outcome_evidence"]["minimum_score_improvement"] == 0.002
+    assert assessment["recommended_action"] == "continue_sample_collection"
 
 
 def test_architecture_rollups_do_not_merge_mixed_fingerprints():

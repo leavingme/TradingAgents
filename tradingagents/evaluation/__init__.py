@@ -1,6 +1,7 @@
 """Deterministic longitudinal outcome evaluation."""
 
 from .outcomes import (
+    ARCHITECTURE_OPTIMIZATION_ASSESSMENT_SCHEMA,
     DEFAULT_HOLD_BAND,
     DEFAULT_OUTCOME_HORIZON_SESSIONS,
     LEGACY_OUTCOME_MEASUREMENT_VERSION,
@@ -15,6 +16,7 @@ from .outcomes import (
 )
 
 __all__ = [
+    "ARCHITECTURE_OPTIMIZATION_ASSESSMENT_SCHEMA",
     "OutcomeMeasurement",
     "OUTCOME_SCORING_VERSION",
     "OUTCOME_MEASUREMENT_VERSION",

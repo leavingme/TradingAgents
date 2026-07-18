@@ -33,6 +33,9 @@ _RUNTIME_COST_FIELDS = (
     "tokens_out",
 )
 _AGENT_COST_FIELDS = ("llm_calls", "tool_calls", "tokens_in", "tokens_out")
+ARCHITECTURE_OPTIMIZATION_ASSESSMENT_SCHEMA = (
+    "tradingagents/architecture-optimization-assessment/v1"
+)
 
 _T_975_BY_DF = (
     0.0,
@@ -124,6 +127,189 @@ def _agent_cost_mapping(value: Any) -> dict[str, dict[str, Any]]:
         and 0 < len(agent) <= 64
         and isinstance(fields, dict)
     }
+
+
+def _architecture_optimization_assessment(
+    comparison: dict[str, Any],
+) -> dict[str, Any]:
+    """Translate comparison statistics into a conservative operator action.
+
+    This layer is deliberately deterministic and advisory.  It keeps outcome,
+    experiment-integrity, and cost evidence separate so a cheaper challenger
+    cannot be mistaken for a better investment architecture.
+    """
+    paired = comparison.get("paired")
+    paired = paired if isinstance(paired, dict) else {}
+    comparison_policy = comparison.get("comparison_policy")
+    comparison_policy = (
+        comparison_policy if isinstance(comparison_policy, dict) else {}
+    )
+    sample_progress = comparison.get("sample_progress")
+    sample_progress = sample_progress if isinstance(sample_progress, dict) else {}
+    paired_count = int(paired.get("sample_count") or 0)
+    paired_minimum = int(
+        paired.get("minimum_required")
+        or comparison_policy.get("minimum_paired_samples")
+        or 0
+    )
+    minimum_score_improvement = _runtime_cost_value(
+        paired.get("minimum_score_improvement")
+        if paired.get("minimum_score_improvement") is not None
+        else comparison_policy.get("minimum_score_improvement")
+    )
+    exclusion_fields = (
+        "ambiguous_pairs_excluded",
+        "outcome_mismatches_excluded",
+        "provenance_mismatches_excluded",
+        "evidence_mismatches_excluded",
+        "architecture_input_mismatches_excluded",
+        "temporal_mismatches_excluded",
+    )
+    exclusions = {
+        field: max(int(paired.get(field) or 0), 0)
+        for field in exclusion_fields
+    }
+    excluded_count = sum(exclusions.values())
+    comparison_status = str(comparison.get("status") or "invalid_comparison")
+
+    if comparison_status == "invalid_comparison":
+        integrity_status = "invalid_comparison"
+    elif paired_count == 0 and excluded_count == 0:
+        integrity_status = "not_observed"
+    elif excluded_count and paired_count == 0:
+        integrity_status = "failing"
+    elif excluded_count > paired_count:
+        integrity_status = "degraded"
+    else:
+        integrity_status = "usable"
+
+    lower_score = paired.get("lower_95_score_delta")
+    upper_score = paired.get("upper_95_score_delta")
+    if comparison_status == "invalid_comparison":
+        outcome_status = "invalid_comparison"
+    elif not bool(sample_progress.get("sufficient")) or paired_count < paired_minimum:
+        outcome_status = "insufficient_paired_samples"
+    elif bool(comparison.get("passes_paired_gate")):
+        outcome_status = "paired_improvement_supported"
+    elif (
+        upper_score is not None
+        and minimum_score_improvement is not None
+        and float(upper_score) < minimum_score_improvement
+    ):
+        outcome_status = "minimum_improvement_not_supported"
+    else:
+        outcome_status = "inconclusive"
+
+    paired_costs = comparison.get("paired_costs")
+    paired_costs = paired_costs if isinstance(paired_costs, dict) else {}
+    token_cost = paired_costs.get("tokens_in")
+    token_cost = token_cost if isinstance(token_cost, dict) else {}
+    token_cost_count = int(token_cost.get("sample_count") or 0)
+    execution_order = comparison.get("execution_order")
+    execution_order = execution_order if isinstance(execution_order, dict) else {}
+    order_status = str(execution_order.get("cost_comparison_status") or "not_observed")
+    lower_cost = token_cost.get("lower_95_delta")
+    upper_cost = token_cost.get("upper_95_delta")
+    if token_cost_count < paired_minimum or paired_minimum <= 0:
+        cost_status = "insufficient_paired_cost_samples"
+    elif order_status != "counterbalanced":
+        cost_status = "execution_order_confounded"
+    elif upper_cost is not None and float(upper_cost) < 0:
+        cost_status = "input_token_reduction_supported"
+    elif lower_cost is not None and float(lower_cost) > 0:
+        cost_status = "input_token_increase_supported"
+    else:
+        cost_status = "inconclusive"
+
+    baseline = comparison.get("baseline")
+    challenger = comparison.get("challenger")
+    baseline = baseline if isinstance(baseline, dict) else {}
+    challenger = challenger if isinstance(challenger, dict) else {}
+    baseline_agents = _agent_cost_mapping(baseline.get("agent_costs"))
+    challenger_agents = _agent_cost_mapping(challenger.get("agent_costs"))
+    paired_agents = comparison.get("paired_agent_costs")
+    paired_agents = paired_agents if isinstance(paired_agents, dict) else {}
+    ranked_agents = sorted(
+        (
+            (agent, _runtime_cost_value(fields.get("mean_tokens_in")))
+            for agent, fields in baseline_agents.items()
+        ),
+        key=lambda item: (
+            -(item[1] if item[1] is not None else -1.0),
+            item[0],
+        ),
+    )
+    hotspots = []
+    for agent, baseline_tokens in ranked_agents[:3]:
+        challenger_tokens = _runtime_cost_value(
+            challenger_agents.get(agent, {}).get("mean_tokens_in")
+        )
+        agent_pair = paired_agents.get(agent)
+        agent_pair = agent_pair if isinstance(agent_pair, dict) else {}
+        token_pair = agent_pair.get("tokens_in")
+        token_pair = token_pair if isinstance(token_pair, dict) else {}
+        hotspots.append({
+            "agent": agent,
+            "baseline_mean_tokens_in": baseline_tokens,
+            "challenger_mean_tokens_in": challenger_tokens,
+            "paired_sample_count": int(token_pair.get("sample_count") or 0),
+            "mean_delta": token_pair.get("mean_delta"),
+            "lower_95_delta": token_pair.get("lower_95_delta"),
+            "upper_95_delta": token_pair.get("upper_95_delta"),
+        })
+
+    if comparison_status == "invalid_comparison":
+        recommended_action = "repair_comparison_definition"
+    elif integrity_status in {"failing", "degraded"}:
+        recommended_action = "repair_pair_integrity"
+    elif outcome_status == "insufficient_paired_samples":
+        recommended_action = "continue_sample_collection"
+    elif outcome_status == "minimum_improvement_not_supported":
+        recommended_action = "retain_baseline"
+    elif outcome_status == "paired_improvement_supported":
+        recommended_action = (
+            "human_review_cost_tradeoff"
+            if cost_status == "input_token_increase_supported"
+            else "human_review_challenger"
+        )
+    else:
+        recommended_action = "continue_sample_collection"
+
+    return {
+        "schema": ARCHITECTURE_OPTIMIZATION_ASSESSMENT_SCHEMA,
+        "automatic_mutation_allowed": False,
+        "recommended_action": recommended_action,
+        "experiment_integrity": {
+            "status": integrity_status,
+            "valid_pair_count": paired_count,
+            "excluded_pair_count": excluded_count,
+            "exclusions": exclusions,
+        },
+        "outcome_evidence": {
+            "status": outcome_status,
+            "paired_sample_count": paired_count,
+            "minimum_required": paired_minimum,
+            "minimum_score_improvement": minimum_score_improvement,
+            "mean_score_delta": paired.get("mean_score_delta"),
+            "lower_95_score_delta": lower_score,
+            "upper_95_score_delta": upper_score,
+        },
+        "cost_evidence": {
+            "status": cost_status,
+            "primary_metric": "tokens_in",
+            "paired_sample_count": token_cost_count,
+            "execution_order_status": order_status,
+            "mean_delta": token_cost.get("mean_delta"),
+            "lower_95_delta": lower_cost,
+            "upper_95_delta": upper_cost,
+        },
+        "agent_hotspots": hotspots,
+    }
+
+
+def _with_optimization_assessment(result: dict[str, Any]) -> dict[str, Any]:
+    result["optimization_assessment"] = _architecture_optimization_assessment(result)
+    return result
 
 
 def _utc_timestamp(value: Any) -> datetime | None:
@@ -399,6 +585,8 @@ def compare_architectures(
     *,
     baseline: str,
     challenger: str,
+    baseline_fingerprint: str | None = None,
+    challenger_fingerprint: str | None = None,
     horizon_sessions: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
     minimum_samples: int = 20,
     minimum_paired_samples: int = 20,
@@ -414,10 +602,86 @@ def compare_architectures(
     can never mutate or promote the production architecture.
     """
     if (
+        not isinstance(baseline, str)
+        or not baseline.strip()
+        or not isinstance(challenger, str)
+        or not challenger.strip()
+        or baseline != baseline.strip()
+        or challenger != challenger.strip()
+        or len(baseline) > 128
+        or len(challenger) > 128
+        or baseline == challenger
+    ):
+        raise ValueError("baseline and challenger must be distinct nonempty labels")
+    if bool(baseline_fingerprint) != bool(challenger_fingerprint):
+        raise ValueError(
+            "baseline_fingerprint and challenger_fingerprint must be provided together"
+        )
+    for label, fingerprint in (
+        ("baseline_fingerprint", baseline_fingerprint),
+        ("challenger_fingerprint", challenger_fingerprint),
+    ):
+        if fingerprint is not None and (
+            not isinstance(fingerprint, str)
+            or not fingerprint.strip()
+            or fingerprint != fingerprint.strip()
+            or len(fingerprint) > 128
+        ):
+            raise ValueError(
+                f"{label} must be a nonempty string of at most 128 characters"
+            )
+    if (
+        isinstance(minimum_samples, bool)
+        or not isinstance(minimum_samples, int)
+        or minimum_samples < 1
+    ):
+        raise ValueError("minimum_samples must be a positive integer")
+    if (
+        isinstance(minimum_paired_samples, bool)
+        or not isinstance(minimum_paired_samples, int)
+        or minimum_paired_samples < 2
+    ):
+        raise ValueError("minimum_paired_samples must be an integer of at least two")
+    if (
+        not isfinite(float(minimum_score_improvement))
+        or float(minimum_score_improvement) < 0
+    ):
+        raise ValueError("minimum_score_improvement must be finite and nonnegative")
+    if (
         not isfinite(float(maximum_pair_start_gap_seconds))
         or float(maximum_pair_start_gap_seconds) <= 0
     ):
         raise ValueError("maximum_pair_start_gap_seconds must be finite and positive")
+    selected_fingerprints = (
+        {
+            baseline: str(baseline_fingerprint),
+            challenger: str(challenger_fingerprint),
+        }
+        if baseline_fingerprint and challenger_fingerprint
+        else None
+    )
+    evaluations = [
+        row
+        for row in evaluations
+        if str(row.get("architecture_version")) in {baseline, challenger}
+        and (
+            selected_fingerprints is None
+            or str(row.get("architecture_fingerprint", "legacy-unspecified"))
+            == selected_fingerprints[str(row.get("architecture_version"))]
+        )
+    ]
+    selection_payload = {
+        "selected_architecture_fingerprints": selected_fingerprints,
+        "comparison_policy": {
+            "horizon_sessions": horizon_sessions,
+            "minimum_samples": minimum_samples,
+            "minimum_paired_samples": minimum_paired_samples,
+            "minimum_score_improvement": float(minimum_score_improvement),
+            "maximum_pair_start_gap_seconds": float(
+                maximum_pair_start_gap_seconds
+            ),
+        },
+    }
     rollups = {
         row["architecture_version"]: row
         for row in architecture_rollups(evaluations)
@@ -428,7 +692,8 @@ def compare_architectures(
     if not base or not challenge:
         baseline_count = int(base["sample_count"]) if base else 0
         challenger_count = int(challenge["sample_count"]) if challenge else 0
-        return {
+        return _with_optimization_assessment({
+            **selection_payload,
             "status": "insufficient_data",
             "reason": "both baseline and challenger require evaluated samples",
             "sample_progress": {
@@ -444,7 +709,7 @@ def compare_architectures(
             ],
             "baseline": base,
             "challenger": challenge,
-        }
+        })
     fingerprints = {
         version: sorted({
             str(row.get("architecture_fingerprint", "legacy-unspecified"))
@@ -473,7 +738,8 @@ def compare_architectures(
         for version in (baseline, challenger)
     }
     if any(len(values) != 1 for values in fingerprints.values()):
-        return {
+        return _with_optimization_assessment({
+            **selection_payload,
             "status": "invalid_comparison",
             "reason": (
                 "an architecture label contains multiple configuration fingerprints; "
@@ -484,12 +750,13 @@ def compare_architectures(
             "scoring_policies": scoring_policies,
             "baseline": base,
             "challenger": challenge,
-        }
+        })
     if (
         any(len(values) != 1 for values in measurement_policies.values())
         or measurement_policies[baseline] != measurement_policies[challenger]
     ):
-        return {
+        return _with_optimization_assessment({
+            **selection_payload,
             "status": "invalid_comparison",
             "reason": (
                 "baseline and challenger must each use one identical measurement policy"
@@ -499,12 +766,13 @@ def compare_architectures(
             "scoring_policies": scoring_policies,
             "baseline": base,
             "challenger": challenge,
-        }
+        })
     if (
         any(len(values) != 1 for values in scoring_policies.values())
         or scoring_policies[baseline] != scoring_policies[challenger]
     ):
-        return {
+        return _with_optimization_assessment({
+            **selection_payload,
             "status": "invalid_comparison",
             "reason": (
                 "baseline and challenger must each use one identical scoring policy"
@@ -514,7 +782,7 @@ def compare_architectures(
             "scoring_policies": scoring_policies,
             "baseline": base,
             "challenger": challenge,
-        }
+        })
     sequential_sample_sufficient = (
         min(base["sample_count"], challenge["sample_count"]) >= minimum_samples
     )
@@ -746,12 +1014,18 @@ def compare_architectures(
             if standard_error is not None and critical_value is not None
             else None
         )
+        upper_95 = (
+            mean_delta + critical_value * standard_error
+            if standard_error is not None and critical_value is not None
+            else None
+        )
         paired_summary.update({
             "mean_score_delta": mean_delta,
             "mean_hit_rate_delta": fmean(paired_hit_deltas),
             "critical_value": critical_value,
             "critical_effective_sample_count": effective_sample_count,
             "lower_95_score_delta": lower_95,
+            "upper_95_score_delta": upper_95,
             **uncertainty,
         })
         passes_paired_gate = (
@@ -797,7 +1071,8 @@ def compare_architectures(
             "regime-confounded"
         )
 
-    return {
+    return _with_optimization_assessment({
+        **selection_payload,
         "status": status,
         "reason": reason,
         "sample_progress": {
@@ -845,4 +1120,4 @@ def compare_architectures(
         },
         "baseline": base,
         "challenger": challenge,
-    }
+    })

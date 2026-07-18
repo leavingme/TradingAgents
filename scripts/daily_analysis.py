@@ -54,6 +54,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ticker")
     parser.add_argument("--baseline")
     parser.add_argument("--challenger")
+    parser.add_argument("--baseline-fingerprint")
+    parser.add_argument("--challenger-fingerprint")
     return parser.parse_args()
 
 
@@ -71,13 +73,29 @@ def main() -> int:
             "rollups": architecture_rollups(evaluations),
         }
         if args.baseline and args.challenger:
-            payload["comparison"] = compare_architectures(
-                evaluations,
-                baseline=args.baseline,
-                challenger=args.challenger,
-            )
+            if args.baseline == args.challenger:
+                raise SystemExit("--baseline and --challenger must be distinct")
+            if bool(args.baseline_fingerprint) != bool(args.challenger_fingerprint):
+                raise SystemExit(
+                    "--baseline-fingerprint and --challenger-fingerprint "
+                    "must be provided together"
+                )
+            try:
+                payload["comparison"] = compare_architectures(
+                    evaluations,
+                    baseline=args.baseline,
+                    challenger=args.challenger,
+                    baseline_fingerprint=args.baseline_fingerprint,
+                    challenger_fingerprint=args.challenger_fingerprint,
+                )
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from None
         elif args.baseline or args.challenger:
             raise SystemExit("--baseline and --challenger must be provided together")
+        elif args.baseline_fingerprint or args.challenger_fingerprint:
+            raise SystemExit(
+                "fingerprint selection requires --baseline and --challenger"
+            )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 

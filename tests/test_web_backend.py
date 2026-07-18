@@ -1,6 +1,7 @@
 import asyncio
 import httpx
 import pytest
+from fastapi import HTTPException
 
 from tradingagents.runtime import AnalysisEvent
 
@@ -52,6 +53,43 @@ def test_create_run_and_get_status(monkeypatch):
     assert created["report_path"] == "/tmp/report.md"
     assert status["market_data_date"] == "2026-07-03"
     assert status["event_count"] == 3
+
+
+def test_evaluation_api_requires_complete_distinct_architecture_selectors():
+    from web.backend import main
+
+    with pytest.raises(HTTPException) as missing_arm:
+        asyncio.run(main.get_decision_evaluations(baseline="baseline"))
+    assert missing_arm.value.status_code == 422
+
+    with pytest.raises(HTTPException) as same_arm:
+        asyncio.run(main.get_decision_evaluations(
+            baseline="same",
+            challenger="same",
+        ))
+    assert same_arm.value.status_code == 422
+
+    with pytest.raises(HTTPException) as missing_fingerprint:
+        asyncio.run(main.get_decision_evaluations(
+            baseline="baseline",
+            challenger="challenger",
+            baseline_fingerprint="baseline-fp",
+        ))
+    assert missing_fingerprint.value.status_code == 422
+
+    with pytest.raises(HTTPException) as fingerprints_without_arms:
+        asyncio.run(main.get_decision_evaluations(
+            baseline_fingerprint="baseline-fp",
+            challenger_fingerprint="challenger-fp",
+        ))
+    assert fingerprints_without_arms.value.status_code == 422
+
+    with pytest.raises(HTTPException) as whitespace_selector:
+        asyncio.run(main.get_decision_evaluations(
+            baseline=" baseline",
+            challenger="challenger",
+        ))
+    assert whitespace_selector.value.status_code == 422
 
 
 def test_run_create_request_uses_webui_defaults():

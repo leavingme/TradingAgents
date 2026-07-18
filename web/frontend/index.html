@@ -8,7 +8,7 @@
     <!-- Vendored so a local refresh never waits for an external CDN. -->
     <script src="/static/vendor/marked-15.0.12.min.js"></script>
 
-    <link rel="stylesheet" href="/static/styles.css?v=20260716-data-quality-details" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260718-evaluation-dashboard" />
   </head>
   <body>
     <!-- Ambient background orbs -->
@@ -38,6 +38,7 @@
               <button id="runViewButton" type="button" class="view-tab active" data-i18n="navRun">Run</button>
               <button id="settingsViewButton" type="button" class="view-tab" data-i18n="navSettings">Settings</button>
               <button id="providersViewButton" type="button" class="view-tab" data-i18n="navProviders">Providers</button>
+              <button id="evaluationsViewButton" type="button" class="view-tab" data-i18n="navEvaluations">Evaluations</button>
             </nav>
             <div class="status-pill">
               <span class="status-dot" id="statusDot"></span>
@@ -826,6 +827,61 @@
           </div>
         </section>
 
+        <section id="evaluationsView" class="evaluation-view hidden" aria-label="Outcome evaluations" hidden>
+          <div class="evaluation-header">
+            <div>
+              <h2 data-i18n="evaluationsTitle">Outcome &amp; Architecture Evaluation</h2>
+              <p data-i18n="evaluationsSubtitle">Audited fixed-horizon results, rolling monitoring, and conservative architecture gates.</p>
+            </div>
+            <form id="evaluationFilters" class="evaluation-filters">
+              <label class="form-field evaluation-ticker-field">
+                <span class="field-label" data-i18n="evaluationTicker">Ticker</span>
+                <input id="evaluationTicker" name="evaluationTicker" type="text" value="NVDA" maxlength="32" autocomplete="off" />
+              </label>
+              <button id="refreshEvaluations" type="submit" class="btn-secondary" data-i18n="refreshEvaluations">Refresh</button>
+            </form>
+          </div>
+
+          <p id="evaluationStatus" class="evaluation-load-status" role="status"></p>
+          <div id="evaluationSummary" class="evaluation-summary" aria-live="polite"></div>
+
+          <div class="evaluation-layout">
+            <section class="evaluation-section" aria-labelledby="evaluationRollupsTitle">
+              <div class="evaluation-section-header">
+                <h2 id="evaluationRollupsTitle" data-i18n="architectureOutcomes">Architecture outcomes</h2>
+              </div>
+              <div id="evaluationRollups" class="evaluation-rollups"></div>
+            </section>
+
+            <aside class="evaluation-sidebar">
+              <section class="evaluation-section" aria-labelledby="pendingEvaluationsTitle">
+                <div class="evaluation-section-header">
+                  <h2 id="pendingEvaluationsTitle" data-i18n="pendingEvaluations">Pending outcomes</h2>
+                </div>
+                <div id="pendingEvaluations"></div>
+              </section>
+
+              <section class="evaluation-section" aria-labelledby="architectureComparisonTitle">
+                <div class="evaluation-section-header">
+                  <h2 id="architectureComparisonTitle" data-i18n="architectureComparison">Architecture comparison</h2>
+                </div>
+                <div class="evaluation-comparison-controls">
+                  <label class="form-field">
+                    <span class="field-label" data-i18n="baseline">Baseline</span>
+                    <select id="evaluationBaseline"></select>
+                  </label>
+                  <label class="form-field">
+                    <span class="field-label" data-i18n="challenger">Challenger</span>
+                    <select id="evaluationChallenger"></select>
+                  </label>
+                  <button id="compareArchitectures" type="button" class="btn-secondary" data-i18n="compare" disabled>Compare</button>
+                </div>
+                <div id="evaluationComparison" class="evaluation-comparison"></div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
         <!-- Main dashboard -->
         <section id="runView" class="dashboard">
 
@@ -923,6 +979,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260717-longitudinal-context-status" type="module"></script>
+    <script src="/static/app.js?v=20260718-evaluation-dashboard" type="module"></script>
   </body>
 </html>

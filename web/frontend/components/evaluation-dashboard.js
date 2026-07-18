@@ -1,0 +1,357 @@
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function cohortKey(row) {
+  return JSON.stringify([
+    String(row?.architecture_version || ''),
+    String(row?.architecture_fingerprint || ''),
+  ]);
+}
+
+export function buildEvaluationViewModel(payload = {}) {
+  const evaluations = Array.isArray(payload.evaluations) ? payload.evaluations : [];
+  const pending = Array.isArray(payload.pending_evaluations)
+    ? payload.pending_evaluations
+    : [];
+  const rollups = Array.isArray(payload.rollups) ? payload.rollups : [];
+  const cohorts = rollups.map(row => ({
+    key: cohortKey(row),
+    version: String(row?.architecture_version || 'unknown'),
+    fingerprint: String(row?.architecture_fingerprint || 'unknown'),
+    sampleCount: Number(row?.sample_count || 0),
+    hitRate: finiteNumber(row?.directional_hit_rate),
+    meanAlpha: finiteNumber(row?.mean_alpha_return),
+    meanScore: finiteNumber(row?.mean_score),
+    outcomeStatus: String(row?.outcome_assessment?.status || 'not_observed'),
+    rolling: Object.entries(
+      row?.outcome_assessment?.rolling_monitoring?.tickers || {},
+    ).flatMap(([ticker, tickerData]) => Object.entries(tickerData?.windows || {}).map(
+      ([windowSize, window]) => ({
+        ticker,
+        windowSize: Number(windowSize),
+        status: String(window?.status || 'insufficient_history'),
+        currentCount: Number(window?.current?.sample_count || 0),
+        currentMeanScore: finiteNumber(window?.current?.mean_score),
+        previousMeanScore: finiteNumber(window?.previous?.mean_score),
+        scoreDelta: finiteNumber(window?.current_minus_previous?.mean_score),
+        alphaDelta: finiteNumber(window?.current_minus_previous?.mean_alpha_return),
+      }),
+    )),
+  }));
+  return {
+    evaluationCount: evaluations.length,
+    pendingCount: Number(payload.pending_evaluation_count ?? pending.length),
+    cohortCount: cohorts.length,
+    pending,
+    cohorts,
+    comparison: payload.comparison || null,
+  };
+}
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function shortFingerprint(value) {
+  return value.length > 16 ? `${value.slice(0, 12)}…` : value;
+}
+
+export function createEvaluationDashboard({
+  api,
+  tickerField,
+  summaryElement,
+  rollupsElement,
+  pendingElement,
+  statusElement,
+  baselineField,
+  challengerField,
+  compareButton,
+  comparisonElement,
+  t,
+  locale,
+}) {
+  let cachedPayload = null;
+  const codeKeys = {
+    not_observed: 'evaluationCodeNotObserved',
+    insufficient_samples: 'evaluationCodeInsufficientSamples',
+    incomplete_temporal_evidence: 'evaluationCodeIncompleteTemporal',
+    uncertainty_ready: 'evaluationCodeUncertaintyReady',
+    insufficient_data: 'evaluationCodeInsufficientData',
+    invalid_comparison: 'evaluationCodeInvalidComparison',
+    review_required: 'evaluationCodeReviewRequired',
+    usable: 'evaluationCodeUsable',
+    failing: 'evaluationCodeFailing',
+    degraded: 'evaluationCodeDegraded',
+    insufficient_paired_samples: 'evaluationCodeInsufficientPairs',
+    paired_improvement_supported: 'evaluationCodeImprovementSupported',
+    minimum_improvement_not_supported: 'evaluationCodeImprovementUnsupported',
+    inconclusive: 'evaluationCodeInconclusive',
+    insufficient_paired_cost_samples: 'evaluationCodeInsufficientCostPairs',
+    execution_order_confounded: 'evaluationCodeOrderConfounded',
+    input_token_reduction_supported: 'evaluationCodeTokenReduction',
+    input_token_increase_supported: 'evaluationCodeTokenIncrease',
+    continue_sample_collection: 'evaluationCodeContinueCollection',
+    repair_pair_integrity: 'evaluationCodeRepairIntegrity',
+    repair_comparison_definition: 'evaluationCodeRepairComparison',
+    retain_baseline: 'evaluationCodeRetainBaseline',
+    human_review_challenger: 'evaluationCodeReviewChallenger',
+    human_review_cost_tradeoff: 'evaluationCodeReviewCostTradeoff',
+  };
+
+  function codeLabel(value) {
+    const normalized = String(value || 'not_observed');
+    const key = codeKeys[normalized];
+    return key ? t(key) : normalized.replaceAll('_', ' ');
+  }
+
+  function number(value, digits = 4) {
+    if (value === null || value === undefined) return '—';
+    return new Intl.NumberFormat(locale(), {
+      maximumFractionDigits: digits,
+      minimumFractionDigits: Math.min(2, digits),
+    }).format(value);
+  }
+
+  function percent(value) {
+    if (value === null || value === undefined) return '—';
+    return new Intl.NumberFormat(locale(), {
+      style: 'percent',
+      maximumFractionDigits: 1,
+    }).format(value);
+  }
+
+  function metric(label, value) {
+    const card = element('div', 'evaluation-summary-card');
+    card.append(
+      element('span', 'evaluation-summary-label', label),
+      element('strong', 'evaluation-summary-value', value),
+    );
+    return card;
+  }
+
+  function renderSummary(view) {
+    summaryElement.replaceChildren(
+      metric(t('evaluatedResults'), view.evaluationCount),
+      metric(t('pendingResults'), view.pendingCount),
+      metric(t('architectureCohorts'), view.cohortCount),
+    );
+  }
+
+  function rollingTable(rows) {
+    const wrapper = element('div', 'evaluation-table-wrap');
+    const table = element('table', 'evaluation-table');
+    const head = element('thead');
+    const headRow = element('tr');
+    [
+      t('evaluationTicker'),
+      t('rollingWindow'),
+      t('current'),
+      t('previous'),
+      t('change'),
+    ].forEach(label => headRow.append(element('th', null, label)));
+    head.append(headRow);
+    const body = element('tbody');
+    rows.forEach(row => {
+      const tr = element('tr');
+      tr.append(
+        element('td', null, row.ticker),
+        element('td', null, `${row.windowSize}`),
+        element('td', null, `${number(row.currentMeanScore)} · n=${row.currentCount}`),
+        element('td', null, number(row.previousMeanScore)),
+        element(
+          'td',
+          row.scoreDelta === null
+            ? 'evaluation-neutral'
+            : row.scoreDelta >= 0
+              ? 'evaluation-positive'
+              : 'evaluation-negative',
+          row.status === 'comparison_ready' ? number(row.scoreDelta) : '—',
+        ),
+      );
+      body.append(tr);
+    });
+    table.append(head, body);
+    wrapper.append(table);
+    return wrapper;
+  }
+
+  function renderRollups(view) {
+    if (!view.cohorts.length) {
+      rollupsElement.replaceChildren(element('p', 'evaluation-empty', t('noEvaluations')));
+      return;
+    }
+    rollupsElement.replaceChildren(...view.cohorts.map(cohort => {
+      const card = element('article', 'evaluation-card');
+      const header = element('div', 'evaluation-card-header');
+      const title = element('div');
+      title.append(
+        element('h3', null, cohort.version),
+        element('p', 'evaluation-fingerprint', `${t('fingerprint')}: ${shortFingerprint(cohort.fingerprint)}`),
+      );
+      header.append(
+        title,
+        element('span', 'evaluation-status-badge', codeLabel(cohort.outcomeStatus)),
+      );
+      const metrics = element('div', 'evaluation-metrics');
+      metrics.append(
+        metric(t('samples'), cohort.sampleCount),
+        metric(t('hitRate'), percent(cohort.hitRate)),
+        metric(t('meanAlpha'), percent(cohort.meanAlpha)),
+        metric(t('meanScore'), number(cohort.meanScore)),
+      );
+      card.append(header, metrics);
+      if (cohort.rolling.length) card.append(rollingTable(cohort.rolling));
+      return card;
+    }));
+  }
+
+  function renderPending(view) {
+    if (!view.pending.length) {
+      pendingElement.replaceChildren(element('p', 'evaluation-empty', t('noPendingEvaluations')));
+      return;
+    }
+    const list = element('ol', 'evaluation-pending-list');
+    view.pending.slice(0, 20).forEach(row => {
+      const item = element('li');
+      item.append(
+        element('strong', null, `${row.ticker || '—'} · ${row.analysis_date || '—'}`),
+        element(
+          'span',
+          null,
+          `${row.architecture_version || 'unknown'} · ${t('awaitingOutcome')}`,
+        ),
+      );
+      list.append(item);
+    });
+    pendingElement.replaceChildren(list);
+  }
+
+  function populateComparison(view) {
+    const previousBaseline = baselineField.value;
+    const previousChallenger = challengerField.value;
+    const options = view.cohorts.map(cohort => {
+      const option = element(
+        'option',
+        null,
+        `${cohort.version} · ${shortFingerprint(cohort.fingerprint)}`,
+      );
+      option.value = cohort.key;
+      return option;
+    });
+    baselineField.replaceChildren(...options.map(option => option.cloneNode(true)));
+    challengerField.replaceChildren(...options.map(option => option.cloneNode(true)));
+    const keys = new Set(view.cohorts.map(cohort => cohort.key));
+    baselineField.value = keys.has(previousBaseline)
+      ? previousBaseline
+      : (view.cohorts[0]?.key || '');
+    challengerField.value = keys.has(previousChallenger)
+      ? previousChallenger
+      : (view.cohorts.find(cohort => cohort.version !== view.cohorts[0]?.version)?.key || '');
+    compareButton.disabled = !baselineField.value || !challengerField.value;
+  }
+
+  function comparisonRow(label, value) {
+    const row = element('div', 'evaluation-comparison-row');
+    row.append(element('span', null, label), element('strong', null, value));
+    return row;
+  }
+
+  function renderComparison(comparison) {
+    if (!comparison) {
+      comparisonElement.replaceChildren(
+        element('p', 'evaluation-empty', t('comparisonUnavailable')),
+      );
+      return;
+    }
+    const assessment = comparison.optimization_assessment || {};
+    comparisonElement.replaceChildren(
+      comparisonRow(t('assessmentStatus'), codeLabel(comparison.status)),
+      comparisonRow(
+        t('experimentIntegrity'),
+        codeLabel(assessment.experiment_integrity?.status),
+      ),
+      comparisonRow(
+        t('outcomeEvidence'),
+        codeLabel(assessment.outcome_evidence?.status),
+      ),
+      comparisonRow(
+        t('costEvidence'),
+        codeLabel(assessment.cost_evidence?.status),
+      ),
+      comparisonRow(
+        t('validPairs'),
+        assessment.experiment_integrity?.valid_pair_count ?? 0,
+      ),
+      comparisonRow(
+        t('recommendedAction'),
+        codeLabel(assessment.recommended_action || 'continue_sample_collection'),
+      ),
+      element('p', 'evaluation-safety-note', t('automaticMutationDisabled')),
+    );
+  }
+
+  function render(payload) {
+    cachedPayload = payload;
+    const view = buildEvaluationViewModel(payload);
+    renderSummary(view);
+    renderRollups(view);
+    renderPending(view);
+    populateComparison(view);
+    renderComparison(view.comparison);
+    statusElement.textContent = '';
+  }
+
+  async function load() {
+    statusElement.textContent = t('loadingEvaluations');
+    try {
+      render(await api.getEvaluations({ ticker: tickerField.value.trim() }));
+    } catch (error) {
+      statusElement.textContent = `${t('evaluationLoadFailed')}: ${error.message}`;
+    }
+  }
+
+  async function compare() {
+    const view = buildEvaluationViewModel(cachedPayload || {});
+    const byKey = new Map(view.cohorts.map(cohort => [cohort.key, cohort]));
+    const baseline = byKey.get(baselineField.value);
+    const challenger = byKey.get(challengerField.value);
+    if (!baseline || !challenger || baseline.version === challenger.version) {
+      comparisonElement.replaceChildren(
+        element('p', 'evaluation-empty', t('comparisonRequiresDistinct')),
+      );
+      return;
+    }
+    compareButton.disabled = true;
+    try {
+      const payload = await api.getEvaluations({
+        ticker: tickerField.value.trim(),
+        baseline: baseline.version,
+        challenger: challenger.version,
+        baselineFingerprint: baseline.fingerprint,
+        challengerFingerprint: challenger.fingerprint,
+      });
+      cachedPayload = payload;
+      renderComparison(payload.comparison);
+    } catch (error) {
+      comparisonElement.replaceChildren(
+        element('p', 'evaluation-empty', `${t('evaluationLoadFailed')}: ${error.message}`),
+      );
+    } finally {
+      compareButton.disabled = false;
+    }
+  }
+
+  function relocalize() {
+    if (cachedPayload) render(cachedPayload);
+  }
+
+  return { load, compare, relocalize };
+}

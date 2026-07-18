@@ -37,6 +37,29 @@ test('API client preserves server error details and encodes run ids', { concurre
   assert.equal(paths[0], '/api/runs/run%20id%2Fone/report');
 });
 
+test('API client encodes evaluation cohort selectors', { concurrency: false }, async () => {
+  const paths = [];
+  globalThis.fetch = async path => {
+    paths.push(path);
+    return new Response(JSON.stringify({ evaluations: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  const { api } = await importSource('api-client.js');
+  await api.getEvaluations({
+    ticker: '0700.HK',
+    baseline: 'baseline v1',
+    challenger: 'candidate/v2',
+    baselineFingerprint: 'base+fp',
+    challengerFingerprint: 'candidate fp',
+  });
+  assert.equal(
+    paths[0],
+    '/api/evaluations?ticker=0700.HK&baseline=baseline+v1&challenger=candidate%2Fv2&baseline_fingerprint=base%2Bfp&challenger_fingerprint=candidate+fp',
+  );
+});
+
 test('event stream dispatches typed events, closes old connections, and reports reconnect once', { concurrency: false }, async () => {
   const instances = [];
   class FakeEventSource {
@@ -96,7 +119,8 @@ test('router restores settings deep links without native anchor scrolling', { co
   });
   const elements = {
     runControls: element(), runView: element(), settingsView: element(), providersView: element(),
-    runButton: element(), settingsButton: element(), providersButton: element(),
+    evaluationsView: element(), runButton: element(), settingsButton: element(),
+    providersButton: element(), evaluationsButton: element(),
   };
   const { createRouter } = await importSource('router.js');
   const router = createRouter({ elements, getCurrentRunId: () => null, onSelectRun() {} });
@@ -104,8 +128,90 @@ test('router restores settings deep links without native anchor scrolling', { co
   assert.equal(elements.runView.hidden, true);
   assert.equal(elements.settingsView.hidden, false);
   assert.equal(elements.providersView.hidden, true);
+  assert.equal(elements.evaluationsView.hidden, true);
   assert.deepEqual(scrollCalls, [[0, 0], [0, 0]]);
   assert.equal(typeof listeners.get('hashchange'), 'function');
+});
+
+test('router restores evaluation deep links and invokes the loader', { concurrency: false }, async () => {
+  let evaluationLoads = 0;
+  globalThis.window = {
+    location: { hash: '#evaluations', pathname: '/' },
+    history: { replaceState() {} },
+    addEventListener() {},
+    scrollTo() {},
+    requestAnimationFrame: callback => callback(),
+  };
+  const element = () => ({
+    hidden: false,
+    classList: { toggle() {} },
+  });
+  const elements = {
+    runControls: element(), runView: element(), settingsView: element(), providersView: element(),
+    evaluationsView: element(), runButton: element(), settingsButton: element(),
+    providersButton: element(), evaluationsButton: element(),
+  };
+  const { createRouter } = await importSource('router.js');
+  const router = createRouter({
+    elements,
+    getCurrentRunId: () => null,
+    onSelectRun() {},
+    onShowEvaluations: () => { evaluationLoads += 1; },
+  });
+  router.handleHash();
+  assert.equal(elements.evaluationsView.hidden, false);
+  assert.equal(elements.runView.hidden, true);
+  assert.equal(evaluationLoads, 1);
+});
+
+test('evaluation view model exposes rolling and pending evidence', { concurrency: false }, async () => {
+  const { buildEvaluationViewModel } = await importSource('components/evaluation-dashboard.js');
+  const view = buildEvaluationViewModel({
+    evaluations: [{ run_id: 'evaluated' }],
+    pending_evaluation_count: 1,
+    pending_evaluations: [{ run_id: 'pending' }],
+    rollups: [{
+      architecture_version: 'candidate',
+      architecture_fingerprint: 'fingerprint',
+      sample_count: 20,
+      directional_hit_rate: 0.6,
+      mean_alpha_return: 0.01,
+      mean_score: 0.008,
+      outcome_assessment: {
+        status: 'uncertainty_ready',
+        rolling_monitoring: {
+          tickers: {
+            NVDA: {
+              windows: {
+                5: {
+                  status: 'comparison_ready',
+                  current: { sample_count: 5, mean_score: -0.01 },
+                  previous: { mean_score: 0.02 },
+                  current_minus_previous: {
+                    mean_score: -0.03,
+                    mean_alpha_return: -0.02,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }],
+  });
+  assert.equal(view.evaluationCount, 1);
+  assert.equal(view.pendingCount, 1);
+  assert.equal(view.cohortCount, 1);
+  assert.deepEqual(view.cohorts[0].rolling[0], {
+    ticker: 'NVDA',
+    windowSize: 5,
+    status: 'comparison_ready',
+    currentCount: 5,
+    currentMeanScore: -0.01,
+    previousMeanScore: 0.02,
+    scoreDelta: -0.03,
+    alphaDelta: -0.02,
+  });
 });
 
 test('report reading mode preserves content until the user resumes live updates', { concurrency: false }, async () => {

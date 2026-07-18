@@ -235,6 +235,279 @@ h1 {
   color: var(--text-primary);
 }
 
+/* Outcome and architecture evaluation */
+.evaluation-view {
+  min-width: 0;
+  padding: 22px;
+}
+
+.evaluation-header,
+.evaluation-section-header,
+.evaluation-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.evaluation-header h2,
+.evaluation-section h2,
+.evaluation-card h3 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.evaluation-header > div > p {
+  max-width: 720px;
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.evaluation-filters,
+.evaluation-comparison-controls {
+  display: flex;
+  min-width: 0;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.evaluation-ticker-field {
+  width: 160px;
+}
+
+.evaluation-load-status {
+  min-height: 20px;
+  margin: 12px 0 0;
+  color: var(--accent-amber);
+  font-size: 12px;
+}
+
+.evaluation-summary,
+.evaluation-metrics {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.evaluation-summary {
+  margin-top: 4px;
+}
+
+.evaluation-summary-card {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg);
+}
+
+.evaluation-summary-label,
+.evaluation-summary-value {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-summary-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.evaluation-summary-value {
+  margin-top: 5px;
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.evaluation-layout {
+  display: grid;
+  min-width: 0;
+  align-items: start;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.evaluation-section,
+.evaluation-card {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--panel-bg);
+}
+
+.evaluation-section {
+  padding: 16px;
+}
+
+.evaluation-section h2 {
+  font-size: 14px;
+}
+
+.evaluation-rollups,
+.evaluation-sidebar {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.evaluation-rollups {
+  margin-top: 12px;
+}
+
+.evaluation-card {
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.evaluation-card h3 {
+  font-size: 14px;
+}
+
+.evaluation-fingerprint {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+}
+
+.evaluation-status-badge {
+  max-width: 200px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.14);
+  color: var(--accent-blue);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.evaluation-table-wrap {
+  min-width: 0;
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.evaluation-table {
+  width: 100%;
+  min-width: 540px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.evaluation-table th,
+.evaluation-table td {
+  padding: 8px;
+  border-top: 1px solid var(--border-subtle);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.evaluation-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.evaluation-positive { color: var(--accent-green); }
+.evaluation-negative { color: var(--accent-red); }
+.evaluation-neutral { color: var(--text-muted); }
+
+.evaluation-empty,
+.evaluation-safety-note {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.evaluation-pending-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evaluation-pending-list li {
+  min-width: 0;
+  padding: 9px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.evaluation-pending-list strong,
+.evaluation-pending-list span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-pending-list strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.evaluation-pending-list span {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.evaluation-comparison-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.evaluation-comparison-controls button {
+  grid-column: 1 / -1;
+}
+
+.evaluation-comparison {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.evaluation-comparison-row {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+.evaluation-comparison-row strong {
+  color: var(--text-primary);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .evaluation-view { padding: 14px; }
+  .evaluation-header { flex-direction: column; }
+  .evaluation-filters { width: 100%; }
+  .evaluation-ticker-field { width: auto; flex: 1; }
+  .evaluation-layout { grid-template-columns: minmax(0, 1fr); }
+  .evaluation-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .evaluation-summary { grid-template-columns: minmax(0, 1fr); }
+  .evaluation-filters { align-items: stretch; flex-direction: column; }
+  .evaluation-metrics { grid-template-columns: minmax(0, 1fr); }
+  .evaluation-card-header { flex-direction: column; }
+  .evaluation-status-badge { max-width: 100%; }
+  .evaluation-comparison-controls { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* Status pill */
 .status-pill {
   display: flex;

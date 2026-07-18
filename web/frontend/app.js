@@ -8,6 +8,7 @@ import { createEventStream } from './event-stream.js';
 import { createRouter } from './router.js';
 import { createSettingsController } from './components/settings-controller.js';
 import { createI18n } from './i18n.js';
+import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-evaluation-dashboard';
 
 /**
  * TradingAgents Web UI — Enhanced Application Script
@@ -31,12 +32,24 @@ const settingsView  = document.querySelector('#settingsView');
 const runViewButton = document.querySelector('#runViewButton');
 const settingsViewButton = document.querySelector('#settingsViewButton');
 const providersViewButton = document.querySelector('#providersViewButton');
+const evaluationsViewButton = document.querySelector('#evaluationsViewButton');
 const settingsForm  = document.querySelector('#settingsForm');
 const resetSettings = document.querySelector('#resetSettings');
 const resetProviders = document.querySelector('#resetProviders');
 const ohlcvSettingsBody = document.querySelector('#ohlcvSettingsBody');
 const analystPromptList = document.querySelector('#analystPromptList');
 const providersView = document.querySelector('#providersView');
+const evaluationsView = document.querySelector('#evaluationsView');
+const evaluationFilters = document.querySelector('#evaluationFilters');
+const evaluationTicker = document.querySelector('#evaluationTicker');
+const evaluationSummary = document.querySelector('#evaluationSummary');
+const evaluationRollups = document.querySelector('#evaluationRollups');
+const pendingEvaluations = document.querySelector('#pendingEvaluations');
+const evaluationStatus = document.querySelector('#evaluationStatus');
+const evaluationBaseline = document.querySelector('#evaluationBaseline');
+const evaluationChallenger = document.querySelector('#evaluationChallenger');
+const compareArchitectures = document.querySelector('#compareArchitectures');
+const evaluationComparison = document.querySelector('#evaluationComparison');
 const statusEl      = document.querySelector('#runStatus');
 const statusDot     = document.querySelector('#statusDot');
 const dataQualityNotice = document.querySelector('#dataQualityNotice');
@@ -214,6 +227,67 @@ const translations = {
     toolCalls: 'tools',
     tokens: 'Tokens',
     navProviders: 'Providers',
+    navEvaluations: 'Evaluations',
+    evaluationsTitle: 'Outcome & Architecture Evaluation',
+    evaluationsSubtitle: 'Audited fixed-horizon results, rolling monitoring, and conservative architecture gates.',
+    evaluationTicker: 'Ticker',
+    refreshEvaluations: 'Refresh',
+    architectureOutcomes: 'Architecture outcomes',
+    pendingEvaluations: 'Pending outcomes',
+    architectureComparison: 'Architecture comparison',
+    baseline: 'Baseline',
+    challenger: 'Challenger',
+    compare: 'Compare',
+    evaluatedResults: 'Evaluated results',
+    pendingResults: 'Pending results',
+    architectureCohorts: 'Architecture cohorts',
+    noEvaluations: 'No mature fixed-horizon outcomes yet.',
+    noPendingEvaluations: 'No validated decisions are awaiting settlement.',
+    loadingEvaluations: 'Loading audited evaluations…',
+    evaluationLoadFailed: 'Could not load evaluations',
+    fingerprint: 'Fingerprint',
+    samples: 'Samples',
+    hitRate: 'Hit rate',
+    meanAlpha: 'Mean alpha',
+    meanScore: 'Mean score',
+    rollingWindow: 'Window',
+    current: 'Current score',
+    previous: 'Previous score',
+    change: 'Change',
+    awaitingOutcome: 'awaiting fixed-horizon outcome',
+    comparisonUnavailable: 'Select two distinct architecture cohorts when both are available.',
+    comparisonRequiresDistinct: 'Baseline and challenger must use distinct architecture labels.',
+    assessmentStatus: 'Assessment status',
+    experimentIntegrity: 'Experiment integrity',
+    outcomeEvidence: 'Outcome evidence',
+    costEvidence: 'Cost evidence',
+    validPairs: 'Valid pairs',
+    recommendedAction: 'Recommended action',
+    automaticMutationDisabled: 'Automatic prompt, model, and topology changes are disabled; any promotion requires human review.',
+    evaluationCodeNotObserved: 'Not observed',
+    evaluationCodeInsufficientSamples: 'Insufficient samples',
+    evaluationCodeIncompleteTemporal: 'Incomplete temporal evidence',
+    evaluationCodeUncertaintyReady: 'Uncertainty estimate ready',
+    evaluationCodeInsufficientData: 'Insufficient data',
+    evaluationCodeInvalidComparison: 'Invalid comparison',
+    evaluationCodeReviewRequired: 'Human review required',
+    evaluationCodeUsable: 'Usable',
+    evaluationCodeFailing: 'Failing',
+    evaluationCodeDegraded: 'Degraded',
+    evaluationCodeInsufficientPairs: 'Insufficient paired samples',
+    evaluationCodeImprovementSupported: 'Paired improvement supported',
+    evaluationCodeImprovementUnsupported: 'Minimum improvement not supported',
+    evaluationCodeInconclusive: 'Inconclusive',
+    evaluationCodeInsufficientCostPairs: 'Insufficient paired cost samples',
+    evaluationCodeOrderConfounded: 'Execution order confounded',
+    evaluationCodeTokenReduction: 'Input-token reduction supported',
+    evaluationCodeTokenIncrease: 'Input-token increase supported',
+    evaluationCodeContinueCollection: 'Continue sample collection',
+    evaluationCodeRepairIntegrity: 'Repair pair integrity',
+    evaluationCodeRepairComparison: 'Repair comparison definition',
+    evaluationCodeRetainBaseline: 'Retain baseline',
+    evaluationCodeReviewChallenger: 'Review challenger manually',
+    evaluationCodeReviewCostTradeoff: 'Review outcome/cost trade-off',
     providersTitle: 'Capability Providers',
     providersSubtitle: 'Select and prioritize data & capability providers for your analysis runs.',
     providersSummaryTitle: 'Provider Data Capability Summary',
@@ -447,6 +521,67 @@ const translations = {
     toolCalls: '工具',
     tokens: 'Tokens',
     navProviders: '服务商',
+    navEvaluations: '评估',
+    evaluationsTitle: '结果与 Agent 架构评估',
+    evaluationsSubtitle: '展示经审计的固定期限结果、滚动变化和保守的架构优化门禁。',
+    evaluationTicker: '标的',
+    refreshEvaluations: '刷新',
+    architectureOutcomes: '架构结果',
+    pendingEvaluations: '待结算结果',
+    architectureComparison: '架构对比',
+    baseline: '基线',
+    challenger: '挑战者',
+    compare: '比较',
+    evaluatedResults: '已结算结果',
+    pendingResults: '待结算结果',
+    architectureCohorts: '架构 Cohort',
+    noEvaluations: '尚无成熟的固定期限结果。',
+    noPendingEvaluations: '目前没有等待结算的有效决策。',
+    loadingEvaluations: '正在加载经审计的评估…',
+    evaluationLoadFailed: '无法加载评估',
+    fingerprint: '配置指纹',
+    samples: '样本数',
+    hitRate: '命中率',
+    meanAlpha: '平均 Alpha',
+    meanScore: '平均得分',
+    rollingWindow: '窗口',
+    current: '当前得分',
+    previous: '前一窗口得分',
+    change: '变化',
+    awaitingOutcome: '等待固定期限结果',
+    comparisonUnavailable: '当存在两个不同架构 cohort 时可进行比较。',
+    comparisonRequiresDistinct: '基线和挑战者必须使用不同的架构标签。',
+    assessmentStatus: '评估状态',
+    experimentIntegrity: '实验完整性',
+    outcomeEvidence: '收益证据',
+    costEvidence: '成本证据',
+    validPairs: '有效配对',
+    recommendedAction: '建议动作',
+    automaticMutationDisabled: '禁止自动修改提示词、模型或拓扑；任何晋级都必须人工复核。',
+    evaluationCodeNotObserved: '尚未观察',
+    evaluationCodeInsufficientSamples: '样本不足',
+    evaluationCodeIncompleteTemporal: '时间窗口证据不完整',
+    evaluationCodeUncertaintyReady: '不确定性估计已就绪',
+    evaluationCodeInsufficientData: '数据不足',
+    evaluationCodeInvalidComparison: '比较定义无效',
+    evaluationCodeReviewRequired: '需要人工复核',
+    evaluationCodeUsable: '可用',
+    evaluationCodeFailing: '不通过',
+    evaluationCodeDegraded: '完整性下降',
+    evaluationCodeInsufficientPairs: '配对样本不足',
+    evaluationCodeImprovementSupported: '配对改善得到支持',
+    evaluationCodeImprovementUnsupported: '最低改善幅度未获支持',
+    evaluationCodeInconclusive: '证据不确定',
+    evaluationCodeInsufficientCostPairs: '配对成本样本不足',
+    evaluationCodeOrderConfounded: '执行顺序存在混杂',
+    evaluationCodeTokenReduction: '输入 Token 降幅得到支持',
+    evaluationCodeTokenIncrease: '输入 Token 增幅得到支持',
+    evaluationCodeContinueCollection: '继续积累样本',
+    evaluationCodeRepairIntegrity: '修复配对完整性',
+    evaluationCodeRepairComparison: '修复比较定义',
+    evaluationCodeRetainBaseline: '保留基线架构',
+    evaluationCodeReviewChallenger: '人工复核挑战者',
+    evaluationCodeReviewCostTradeoff: '人工复核收益与成本权衡',
     providersTitle: '服务商配置',
     providersSubtitle: '管理及排列各个底层能力的数服务商优先级及开关。',
     providersSummaryTitle: '数据能力实测摘要',
@@ -681,18 +816,35 @@ const eventStream = createEventStream({
   onEvent: handleRuntimeEvent,
   onReconnect: () => runtimeLog.append('error', null, 'Event stream reconnecting'),
 });
+const evaluationDashboard = createEvaluationDashboard({
+  api,
+  tickerField: evaluationTicker,
+  summaryElement: evaluationSummary,
+  rollupsElement: evaluationRollups,
+  pendingElement: pendingEvaluations,
+  statusElement: evaluationStatus,
+  baselineField: evaluationBaseline,
+  challengerField: evaluationChallenger,
+  compareButton: compareArchitectures,
+  comparisonElement: evaluationComparison,
+  t,
+  locale: i18n.locale,
+});
 const router = createRouter({
   elements: {
     runControls,
     runView,
     settingsView,
     providersView,
+    evaluationsView,
     runButton: runViewButton,
     settingsButton: settingsViewButton,
     providersButton: providersViewButton,
+    evaluationsButton: evaluationsViewButton,
   },
   getCurrentRunId: () => currentRunId,
   onSelectRun: runId => selectHistoryRun(runId, { updateHash: false }),
+  onShowEvaluations: () => evaluationDashboard.load(),
 });
 const settings = createSettingsController({
   form: settingsForm,
@@ -734,6 +886,14 @@ providersViewButton.addEventListener('click', () => {
   router.show('providers');
   loadEnvStatus();
 });
+evaluationsViewButton.addEventListener('click', () => {
+  router.show('evaluations');
+});
+evaluationFilters.addEventListener('submit', event => {
+  event.preventDefault();
+  evaluationDashboard.load();
+});
+compareArchitectures.addEventListener('click', () => evaluationDashboard.compare());
 resetProviders.addEventListener('click', () => {
   providerManager.reset();
 });
@@ -871,6 +1031,7 @@ function refreshLocalizedUi() {
   renderApiKeyStatus();
   renderAnalystPrompts();
   providerManager.refresh();
+  evaluationDashboard.relocalize();
   reportView.refresh();
 }
 

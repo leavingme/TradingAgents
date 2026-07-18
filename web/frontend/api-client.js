@@ -56,6 +56,26 @@ export const api = {
   async getAnalystPrompts() {
     return (await request('/api/config/analyst-prompts')).json();
   },
+  async getEvaluations({
+    ticker,
+    baseline,
+    challenger,
+    baselineFingerprint,
+    challengerFingerprint,
+  } = {}) {
+    const params = new URLSearchParams();
+    if (ticker) params.set('ticker', ticker);
+    if (baseline) params.set('baseline', baseline);
+    if (challenger) params.set('challenger', challenger);
+    if (baselineFingerprint) {
+      params.set('baseline_fingerprint', baselineFingerprint);
+    }
+    if (challengerFingerprint) {
+      params.set('challenger_fingerprint', challengerFingerprint);
+    }
+    const query = params.toString();
+    return (await request(`/api/evaluations${query ? `?${query}` : ''}`)).json();
+  },
   async verifyVendor(category, vendor) {
     return (await request(
       `/api/config/data-vendors/${encodeURIComponent(category)}/${encodeURIComponent(vendor)}/verify`,

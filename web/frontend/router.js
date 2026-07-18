@@ -1,23 +1,43 @@
-export function createRouter({ elements, getCurrentRunId, onSelectRun }) {
-  const { runControls, runView, settingsView, providersView, runButton, settingsButton, providersButton } = elements;
+export function createRouter({
+  elements,
+  getCurrentRunId,
+  onSelectRun,
+  onShowEvaluations = () => {},
+}) {
+  const {
+    runControls,
+    runView,
+    settingsView,
+    providersView,
+    evaluationsView,
+    runButton,
+    settingsButton,
+    providersButton,
+    evaluationsButton,
+  } = elements;
 
   function show(view, updateHash = true) {
     const settingsActive = view === 'settings';
     const providersActive = view === 'providers';
+    const evaluationsActive = view === 'evaluations';
     const runActive = view === 'run';
     runControls.classList.toggle('hidden', !runActive);
     runView.classList.toggle('hidden', !runActive);
     settingsView.classList.toggle('hidden', !settingsActive);
     providersView.classList.toggle('hidden', !providersActive);
+    evaluationsView.classList.toggle('hidden', !evaluationsActive);
     runControls.hidden = !runActive;
     runView.hidden = !runActive;
     settingsView.hidden = !settingsActive;
     providersView.hidden = !providersActive;
+    evaluationsView.hidden = !evaluationsActive;
     runButton.classList.toggle('active', runActive);
     settingsButton.classList.toggle('active', settingsActive);
     providersButton.classList.toggle('active', providersActive);
+    evaluationsButton.classList.toggle('active', evaluationsActive);
+    if (evaluationsActive) onShowEvaluations();
     if (!updateHash) return;
-    if (settingsActive || providersActive) {
+    if (settingsActive || providersActive || evaluationsActive) {
       window.location.hash = view;
     } else if (getCurrentRunId()) {
       setRun(getCurrentRunId());
@@ -28,7 +48,7 @@ export function createRouter({ elements, getCurrentRunId, onSelectRun }) {
 
   function handleHash() {
     const hash = window.location.hash.slice(1);
-    if (hash === 'settings' || hash === 'providers') {
+    if (hash === 'settings' || hash === 'providers' || hash === 'evaluations') {
       show(hash, false);
       resetScroll();
       return;

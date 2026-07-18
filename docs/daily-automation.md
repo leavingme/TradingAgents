@@ -160,6 +160,12 @@ venv/bin/python3.12 scripts/daily_analysis.py evaluate --ticker NVDA \
   --challenger-fingerprint CHALLENGER_SHA256
 ```
 
+WebUI 的 `#evaluations` 页面提供同一 SQLite/API 证据的日常运营视图：按标的显示已结算、
+待结算和 architecture cohort 数量，每个 fingerprint-scoped cohort 展示总体结果与
+5/10/20 滚动窗口；存在两个不同架构标签时，可以选择 baseline/challenger 并查询收益、
+成本和实验完整性门禁。页面只负责呈现服务端确定性结果，所有状态枚举按 UI language
+本地化；浏览器不重算 score、置信区间或晋级结论，也没有修改 prompt、模型或拓扑的入口。
+
 同一 architecture version 如果包含多个实际 fingerprint，未指定 fingerprint 的比较会
 继续 fail closed 为 `invalid_comparison`。CLI/API 必须同时提供两臂 fingerprint 才会筛选
 对应 cohort；不得只固定一臂而让另一臂继续混合配置。这样 implementation digest 变化后

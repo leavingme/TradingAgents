@@ -9,9 +9,16 @@ def test_implementation_digest_is_path_independent_and_content_sensitive(tmp_pat
     for root in (first, second):
         (root / "agents").mkdir(parents=True)
         (root / "automation").mkdir(parents=True)
+        (root / "runtime").mkdir(parents=True)
         (root / "agents" / "prompt.py").write_text("PROMPT = 'one'\n", encoding="utf-8")
         (root / "automation" / "daily.py").write_text(
             "OPERATIONAL = 'one'\n", encoding="utf-8"
+        )
+        (root / "reporting.py").write_text(
+            "REPORT_FORMAT = 'one'\n", encoding="utf-8"
+        )
+        (root / "runtime" / "analysis_runner.py").write_text(
+            "DECISION_RUNTIME = 'one'\n", encoding="utf-8"
         )
         (root / "ignored.txt").write_text("not executable\n", encoding="utf-8")
 
@@ -24,6 +31,19 @@ def test_implementation_digest_is_path_independent_and_content_sensitive(tmp_pat
         "OPERATIONAL = 'two'\n", encoding="utf-8"
     )
     assert architecture.architecture_implementation_digest(second) == first_digest
+
+    (second / "reporting.py").write_text(
+        "REPORT_FORMAT = 'two'\n", encoding="utf-8"
+    )
+    assert architecture.architecture_implementation_digest(second) == first_digest
+
+    (second / "runtime" / "analysis_runner.py").write_text(
+        "DECISION_RUNTIME = 'two'\n", encoding="utf-8"
+    )
+    assert architecture.architecture_implementation_digest(second) != first_digest
+    (second / "runtime" / "analysis_runner.py").write_text(
+        "DECISION_RUNTIME = 'one'\n", encoding="utf-8"
+    )
 
     (second / "agents" / "prompt.py").write_text("PROMPT = 'two'\n", encoding="utf-8")
     assert architecture.architecture_implementation_digest(second) != first_digest

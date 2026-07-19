@@ -112,6 +112,10 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
   SHA-256；`/api/runs/{run_id}/report` 只在路径位于服务端 results root 且 hash 完整匹配时
   返回内容。缺少旧版 hash 或文件被改写必须 409 fail closed，SQLite terminal decision
   始终是权威结论，不能让可变 Markdown 冒充另一 run 的审计证据。
+- 报告目录、渲染、写入和完整性摘要属于 decision 后的 operator artifact，固定封装在
+  architecture digest scope 之外的 `tradingagents.reporting`；decision runtime 只通过稳定的
+  `write_run_report()` 边界调用。以后修改报告格式、存储或 hash 校验不得再次切碎 Agent
+  cohort；反之，Agent、prompt、validator 或 decision runtime 变化仍必须改变 fingerprint。
 - 每个完成 Graph 的每日调度 live run 应在 canonical decision 已形成后追加
   `architecture_evaluation_status`，仅记录当前 architecture identity、扫描/待结算/cohort
   数量、实验就绪度、建议动作，以及最多三个 Agent/工具的有界数字成本热点。不得在该

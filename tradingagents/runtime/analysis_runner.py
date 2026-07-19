@@ -9,18 +9,16 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Iterator
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.evaluation import LONGITUDINAL_CONTEXT_SCHEMA
 from tradingagents.graph.checkpointer import get_checkpointer, thread_id
 from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.reporting import write_report_tree
+from tradingagents.reporting import write_run_report
 from tradingagents.architecture import (
     architecture_experiment_input_identity,
     architecture_fingerprint,
@@ -496,12 +494,14 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
                     content={"status": "completed"},
                 )
 
-        report_path = write_report_tree(
+        report_path, report_sha256 = write_run_report(
             final_state,
-            request.ticker,
-            _report_dir(request, config),
+            ticker=request.ticker,
+            analysis_date=str(request.analysis_date),
+            run_id=request.run_id,
+            results_dir=config["results_dir"],
+            report_dir=request.report_dir,
         )
-        report_sha256 = hashlib.sha256(report_path.read_bytes()).hexdigest()
         stats_event, last_stats = _stats_event(request.run_id, callbacks, last_stats, force=True)
         if stats_event is not None:
             yield stats_event
@@ -840,22 +840,3 @@ def _extract_content(content: Any) -> str | None:
         return text or None
     text = str(content).strip()
     return text or None
-
-
-def _report_dir(request: AnalysisRequest, config: dict[str, Any]) -> Path:
-    if request.report_dir is not None:
-        report_root = Path(request.report_dir)
-    else:
-        report_root = (
-            Path(config["results_dir"])
-            / safe_ticker_component(request.ticker)
-            / str(request.analysis_date)
-            / "reports"
-        )
-    try:
-        run_component = safe_ticker_component(request.run_id, max_len=128)
-    except ValueError:
-        run_component = (
-            "run-" + hashlib.sha256(request.run_id.encode("utf-8")).hexdigest()[:24]
-        )
-    return report_root / run_component

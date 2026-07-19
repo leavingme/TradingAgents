@@ -7,10 +7,12 @@ run produces the same on-disk report tree a CLI run does.
 """
 
 from datetime import datetime
+import hashlib
 from pathlib import Path
 import re
 
 from tradingagents.dataflows.config import get_config
+from tradingagents.dataflows.utils import safe_ticker_component
 
 
 # ---- Reasoning preamble cleaner -----------------------------------------------
@@ -263,3 +265,52 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
     header = f"# {title}\n\n{generated}: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     (save_path / "complete_report.md").write_text(header + "\n\n".join(sections), encoding="utf-8")
     return save_path / "complete_report.md"
+
+
+def run_report_dir(
+    *,
+    ticker: str,
+    analysis_date: str,
+    run_id: str,
+    results_dir: str | Path,
+    report_dir: str | Path | None = None,
+) -> Path:
+    """Return the immutable, run-scoped directory for a canonical report."""
+    if report_dir is not None:
+        report_root = Path(report_dir)
+    else:
+        report_root = (
+            Path(results_dir)
+            / safe_ticker_component(ticker)
+            / analysis_date
+            / "reports"
+        )
+    try:
+        run_component = safe_ticker_component(run_id, max_len=128)
+    except ValueError:
+        run_component = "run-" + hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:24]
+    return report_root / run_component
+
+
+def write_run_report(
+    final_state: dict,
+    *,
+    ticker: str,
+    analysis_date: str,
+    run_id: str,
+    results_dir: str | Path,
+    report_dir: str | Path | None = None,
+) -> tuple[Path, str]:
+    """Write one immutable report tree and return its path and SHA-256."""
+    path = write_report_tree(
+        final_state,
+        ticker,
+        run_report_dir(
+            ticker=ticker,
+            analysis_date=analysis_date,
+            run_id=run_id,
+            results_dir=results_dir,
+            report_dir=report_dir,
+        ),
+    )
+    return path, hashlib.sha256(path.read_bytes()).hexdigest()

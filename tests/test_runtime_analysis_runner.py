@@ -278,15 +278,15 @@ def test_same_date_runtime_reports_are_immutable_and_run_scoped(
 
 
 def test_unsafe_run_id_cannot_escape_report_root(tmp_path):
-    from tradingagents.runtime.analysis_runner import _report_dir
+    from tradingagents.reporting import run_report_dir
 
-    request = AnalysisRequest(
+    report_dir = run_report_dir(
         ticker="NVDA",
         analysis_date="2026-07-05",
-        report_dir=tmp_path / "reports",
         run_id="../../outside report",
+        results_dir=tmp_path,
+        report_dir=tmp_path / "reports",
     )
-    report_dir = _report_dir(request, {"results_dir": str(tmp_path)})
 
     assert report_dir.parent == tmp_path / "reports"
     assert report_dir.name.startswith("run-")

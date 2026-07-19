@@ -344,6 +344,12 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   `Persistent=true` 在周末或下一交易日收盘前补触发时，必须允许补跑最新一个已完成且
   尚无同版本 run 的配置工作日；不得遍历更早日期或伪造历史 live 决策。相同 symbol、
   analysis date 和 architecture version 继续使用 SQLite 幂等与有界重试语义。
+- 每日普通失败次数必须再按 active architecture fingerprint 隔离：同 version 下旧
+  fingerprint 的 `failed|cancelled|unavailable` 不得耗尽新 fingerprint 的预算或延迟；
+  但 `legacy-unspecified` / `pre-runtime-failure` 及 identity 预览失败必须保守计数。
+  `completed|review_required` 仍跨 fingerprint 保持一日期一次决策，active run、最终日 K
+  readiness 与 outcome settlement 状态也继续跨 fingerprint 生效，禁止用源码部署绕过
+  幂等、并发或数据门禁。
 - 无人值守 scheduler 的失败 JSON/journal 只能保留安全状态、run identity 和内部异常类型；
   不得序列化异常正文，因为 provider/backend 异常可能携带 URL、token 或请求参数。
 - live runtime 必须在 market-data readiness 通过后、读取纵向上下文和构造 Agent state 前，

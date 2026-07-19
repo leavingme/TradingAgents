@@ -42,6 +42,14 @@ server-side 授权门禁，不影响普通单 arm 每日运行。
 若异常早于 canonical runtime 注册 run，scheduler 也会写入明确标记为
 `pre-runtime-failure` 的失败占位，使该失败仍计入同一有界重试预算；不会因为缺少
 SQLite attempt 而每 15 分钟无限重试。
+普通失败预算还要求 architecture fingerprint 一致：同一 version 在安全修复或决策实现
+变更后产生的新 fingerprint，不继承旧 fingerprint 的 `failed` / `cancelled` /
+`unavailable` 次数或等待时间，避免当天已经修复的 active identity 仍被旧实现耗尽预算。
+无法确定 fingerprint 的 legacy 行和 `pre-runtime-failure` 继续计入当前预算，identity
+预览失败时也退回保守的跨 fingerprint 计数，不能借此形成无界重试。这个隔离只适用于
+普通失败：任一 fingerprint 已有 `completed` / `review_required` 时仍保持“一日期一次
+决策”的幂等；active run、final-bar readiness 及 outcome settlement 等待也继续跨
+fingerprint 生效，不能通过部署新源码绕过并发锁或数据门禁。
 `Persistent=true` 的恢复语义由调度器补全：若主机从周五收盘前停到周末才恢复，
 周末 wake-up 仍会补跑最新完整的周五交易日，而不会因为恢复当天不是配置工作日就永久
 漏失。补跑只针对当时最新一个完整市场日，不遍历更早日期，也不把当前 live 信息伪装成

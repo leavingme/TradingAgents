@@ -773,6 +773,7 @@ def _existing_run_disposition(
     *,
     schedule: DailySchedule,
     now: datetime,
+    current_architecture_fingerprint: str | None = None,
 ) -> tuple[str, dict[str, Any]] | None:
     if not existing:
         return None
@@ -858,22 +859,37 @@ def _existing_run_disposition(
             < active_since + timedelta(minutes=schedule.stale_active_after_minutes)
         ):
             return "already_recorded", newest_active
+    unscoped_fingerprints = {None, "", "legacy-unspecified", "pre-runtime-failure"}
     counted_attempts = [
-        row for row in existing
+        row
+        for row in existing
         if row.get("status") not in {
             "market_data_pending",
             "market_data_unavailable",
             "outcome_settlement_pending",
             "outcome_settlement_unavailable",
         }
+        and (
+            current_architecture_fingerprint is None
+            or row.get("architecture_fingerprint")
+            in unscoped_fingerprints | {current_architecture_fingerprint}
+        )
     ]
     if len(counted_attempts) >= schedule.max_attempts_per_date:
-        return "attempts_exhausted", latest
-    reference = _parse_timestamp(latest.get("finished_at") or latest.get("created_at"))
+        return "attempts_exhausted", counted_attempts[0]
+    if not counted_attempts:
+        return None
+    latest_attempt = counted_attempts[0]
+    reference = _parse_timestamp(
+        latest_attempt.get("finished_at") or latest_attempt.get("created_at")
+    )
     if reference is not None:
         retry_at = reference + timedelta(minutes=schedule.retry_after_minutes)
         if now.astimezone(timezone.utc) < retry_at:
-            return "retry_wait", {**latest, "retry_at": retry_at.isoformat()}
+            return "retry_wait", {
+                **latest_attempt,
+                "retry_at": retry_at.isoformat(),
+            }
     return None
 
 
@@ -962,10 +978,33 @@ def run_due_analyses(
                 analysis_date,
                 target.architecture_version,
             )
+            current_architecture_fingerprint = None
+            existing_statuses = {str(row.get("status")) for row in existing}
+            if (
+                not existing_statuses.intersection({"completed", "review_required"})
+                and any(
+                    row.get("status") in {"failed", "cancelled", "unavailable"}
+                    for row in existing
+                )
+            ):
+                try:
+                    current_architecture_fingerprint = (
+                        scheduled_architecture_identity(
+                            target, runtime_preferences
+                        )["architecture_fingerprint"]
+                    )
+                except Exception:
+                    # Preserve the conservative legacy budget if identity
+                    # preview itself is unavailable. The actual runtime call,
+                    # when still below budget, persists the typed failure.
+                    current_architecture_fingerprint = None
             disposition = _existing_run_disposition(
                 existing,
                 schedule=schedule,
                 now=current,
+                current_architecture_fingerprint=(
+                    current_architecture_fingerprint
+                ),
             )
             if disposition is not None:
                 scheduler_status, latest = disposition

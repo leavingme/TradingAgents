@@ -979,6 +979,220 @@ def test_failed_run_retries_only_after_delay_and_stops_at_bound(tmp_path, monkey
     assert exhausted[0]["status"] == "attempts_exhausted"
 
 
+def test_old_fingerprint_failure_does_not_consume_active_identity_budget(
+    tmp_path, monkeypatch
+):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.scheduled_architecture_identity",
+        lambda target, preferences: {"architecture_fingerprint": "active-fp"},
+    )
+    schedule = DailySchedule(
+        enabled=True,
+        targets=_schedule().targets,
+        max_attempts_per_date=1,
+    )
+    store.create_run(
+        "old-failure",
+        "NVDA",
+        "2026-07-17",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        status="failed",
+        created_at="2026-07-17T20:35:00+00:00",
+        architecture_version=schedule.targets[0].architecture_version,
+        architecture_fingerprint="old-fp",
+    )
+    store.mark_finished(
+        "old-failure", "failed", finished_at="2026-07-17T20:40:00+00:00"
+    )
+    calls = []
+
+    def execute(request):
+        calls.append(request)
+        store.create_run(
+            request.run_id,
+            request.ticker,
+            request.analysis_date,
+            request.asset_type,
+            request.selected_analysts,
+            request.llm_provider,
+            request.research_depth,
+            status="completed",
+            architecture_version=request.architecture_version,
+            architecture_fingerprint="active-fp",
+        )
+        store.mark_finished(request.run_id, "completed")
+        return SimpleNamespace(
+            run_id=request.run_id,
+            decision_status="validated",
+            report_path=None,
+        )
+
+    result = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 17, 0, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert result[0]["status"] == "completed"
+    assert len(calls) == 1
+
+
+def test_active_fingerprint_failure_still_exhausts_its_own_budget(
+    tmp_path, monkeypatch
+):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.scheduled_architecture_identity",
+        lambda target, preferences: {"architecture_fingerprint": "active-fp"},
+    )
+    schedule = DailySchedule(
+        enabled=True,
+        targets=_schedule().targets,
+        max_attempts_per_date=1,
+    )
+    store.create_run(
+        "active-failure",
+        "NVDA",
+        "2026-07-17",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        status="failed",
+        created_at="2026-07-17T20:35:00+00:00",
+        architecture_version=schedule.targets[0].architecture_version,
+        architecture_fingerprint="active-fp",
+    )
+    store.mark_finished(
+        "active-failure", "failed", finished_at="2026-07-17T20:40:00+00:00"
+    )
+
+    result = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 18, 0, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=lambda request: (_ for _ in ()).throw(
+            AssertionError("active identity budget must remain bounded")
+        ),
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert result[0]["status"] == "attempts_exhausted"
+    assert result[0]["run_id"] == "active-failure"
+
+
+def test_retry_identity_preview_failure_keeps_conservative_legacy_budget(
+    tmp_path, monkeypatch
+):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.scheduled_architecture_identity",
+        lambda target, preferences: (_ for _ in ()).throw(RuntimeError("broken")),
+    )
+    schedule = DailySchedule(
+        enabled=True,
+        targets=_schedule().targets,
+        max_attempts_per_date=2,
+        retry_after_minutes=60,
+    )
+    store.create_run(
+        "unknown-active-identity",
+        "NVDA",
+        "2026-07-17",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        status="failed",
+        created_at="2026-07-17T20:35:00+00:00",
+        architecture_version=schedule.targets[0].architecture_version,
+        architecture_fingerprint="old-fp",
+    )
+    store.mark_finished(
+        "unknown-active-identity",
+        "failed",
+        finished_at="2026-07-17T20:40:00+00:00",
+    )
+
+    result = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 17, 0, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=lambda request: (_ for _ in ()).throw(
+            AssertionError("unknown identity must not bypass retry delay")
+        ),
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert result[0]["status"] == "retry_wait"
+    assert result[0]["run_id"] == "unknown-active-identity"
+
+
+def test_old_fingerprint_success_still_preserves_one_decision_per_date(
+    tmp_path, monkeypatch
+):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.scheduled_architecture_identity",
+        lambda target, preferences: (_ for _ in ()).throw(
+            AssertionError("successful date must not rebuild retry identity")
+        ),
+    )
+    schedule = _schedule()
+    store.create_run(
+        "old-review",
+        "NVDA",
+        "2026-07-17",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        status="review_required",
+        architecture_version=schedule.targets[0].architecture_version,
+        architecture_fingerprint="old-fp",
+    )
+    store.mark_finished("old-review", "review_required")
+
+    result = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 17, 0, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=lambda request: (_ for _ in ()).throw(
+            AssertionError("successful date must remain idempotent")
+        ),
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert result[0]["status"] == "already_recorded"
+    assert result[0]["run_id"] == "old-review"
+
+
 def test_market_data_pending_retries_without_consuming_analysis_attempt(
     tmp_path, monkeypatch
 ):

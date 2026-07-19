@@ -383,6 +383,143 @@ def test_canonical_runtime_injects_sqlite_longitudinal_context(monkeypatch, tmp_
     }
 
 
+def test_live_runtime_injects_outcome_settled_in_same_run(monkeypatch, tmp_path):
+    from tradingagents.evaluation import OutcomeMeasurement
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+    from tradingagents.runtime import analysis_runner
+    from tradingagents.runtime.history import history_store
+
+    prior_run_id = "prior-outcome-matures-today"
+    architecture_fingerprint = "a" * 64
+    history_store.create_run(
+        prior_run_id,
+        "NVDA",
+        "2026-07-01",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        architecture_version="baseline",
+        architecture_fingerprint=architecture_fingerprint,
+    )
+    history_store.mark_started(
+        prior_run_id,
+        started_at="2026-07-01T20:00:00+00:00",
+    )
+    history_store.update_run_market_data_date(prior_run_id, "2026-06-30")
+    history_store.add_event(
+        prior_run_id,
+        AnalysisEvent(
+            type="run_completed",
+            run_id=prior_run_id,
+            timestamp="2026-07-01T21:00:00+00:00",
+            content={
+                "decision": "Rating: Buy",
+                "decision_status": "validated",
+                "decision_as_of": "2026-07-01T21:00:00+00:00",
+                "architecture_input_schema": (
+                    "tradingagents/research-manager-pre-context-input/v1"
+                ),
+                "architecture_input_fingerprint": "prior-upstream-state",
+                "architecture_input_complete": True,
+            },
+        ),
+    )
+    history_store.mark_finished(
+        prior_run_id,
+        "completed",
+        finished_at="2026-07-01T21:01:00+00:00",
+    )
+
+    captured_state = {}
+
+    class CapturingCompiledGraph(FakeCompiledGraph):
+        def stream(self, init_state, **kwargs):
+            captured_state.update(init_state)
+            yield from super().stream(init_state, **kwargs)
+
+    class SameRunSettlementGraph(FakeTradingAgentsGraph):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.graph = CapturingCompiledGraph()
+            self.memory_log.get_pending_entries = lambda: []
+
+        def _resolve_benchmark(self, ticker):
+            return "SPY"
+
+        def _fetch_returns(self, ticker, trade_date, **kwargs):
+            assert ticker == "NVDA"
+            assert trade_date == "2026-07-01"
+            assert kwargs["as_of_date"] == "2026-07-10"
+            assert kwargs["decision_as_of"] == "2026-07-01T21:00:00+00:00"
+            return OutcomeMeasurement(
+                raw_return=0.05,
+                benchmark_return=0.02,
+                alpha_return=0.03,
+                horizon_sessions=5,
+                entry_date="2026-07-02",
+                exit_date="2026-07-09",
+                stock_entry_close=100.0,
+                stock_exit_close=105.0,
+                benchmark_entry_close=500.0,
+                benchmark_exit_close=510.0,
+                stock_entry_source_id="ohlcv:test:stock-entry:2026-07-02",
+                stock_exit_source_id="ohlcv:test:stock-exit:2026-07-09",
+                benchmark_entry_source_id="ohlcv:test:bench-entry:2026-07-02",
+                benchmark_exit_source_id="ohlcv:test:bench-exit:2026-07-09",
+                decision_as_of="2026-07-01T21:00:00+00:00",
+                decision_timezone="America/New_York",
+                entry_cutoff_date="2026-07-01",
+            )
+
+        def _resolve_pending_entries(self, ticker, as_of_date=None):
+            return TradingAgentsGraph._resolve_pending_entries(
+                self,
+                ticker,
+                as_of_date=as_of_date,
+            )
+
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", SameRunSettlementGraph)
+    current_run_id = "runtime-same-run-outcome-injection"
+    events = list(
+        run_analysis_stream(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date="2026-07-10",
+                selected_analysts=("market",),
+                report_dir=tmp_path / "reports",
+                run_id=current_run_id,
+            )
+        )
+    )
+
+    evaluations = history_store.list_decision_evaluations(
+        ticker="NVDA",
+        include_runtime_metrics=False,
+    )
+    assert len(evaluations) == 1
+    assert evaluations[0]["run_id"] == prior_run_id
+    assert evaluations[0]["evaluated_by_run_id"] == current_run_id
+    context = json.loads(captured_state["past_context"])
+    assert context["selection"]["same_symbol_scanned_count"] == 1
+    assert context["selection"]["same_symbol_included_count"] == 1
+    assert context["same_symbol_outcomes"][0]["run_id"] == prior_run_id
+    assert context["same_symbol_outcomes"][0]["score"] == 0.03
+    status = next(
+        event for event in events if event.type == "longitudinal_context_status"
+    )
+    assert status.content["status"] == "loaded"
+    assert status.content["same_symbol_scanned_count"] == 1
+    assert status.content["same_symbol_included_count"] == 1
+    persisted_status = next(
+        event
+        for event in history_store.get_run(current_run_id)["events"]
+        if event["type"] == "longitudinal_context_status"
+    )
+    assert persisted_status["content"]["same_symbol_scanned_count"] == 1
+    assert persisted_status["content"]["same_symbol_included_count"] == 1
+
+
 def test_runtime_rejects_malformed_longitudinal_context(monkeypatch, tmp_path):
     from tradingagents.runtime import analysis_runner
     from tradingagents.runtime.history import history_store

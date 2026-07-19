@@ -346,6 +346,9 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   analysis date 和 architecture version 继续使用 SQLite 幂等与有界重试语义。
 - 无人值守 scheduler 的失败 JSON/journal 只能保留安全状态、run identity 和内部异常类型；
   不得序列化异常正文，因为 provider/backend 异常可能携带 URL、token 或请求参数。
+- live runtime 必须在 market-data readiness 通过后、读取纵向上下文和构造 Agent state 前，
+  先结算当前已经成熟的 SQLite pending outcomes；同轮新写入结果必须立即出现在 canonical
+  longitudinal context。`point_in_time` 不得执行事后结算，未成熟结果继续保持 pending。
 
 ## 测试和验证注意事项
 

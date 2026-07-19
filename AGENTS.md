@@ -122,6 +122,10 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
   有成本或结果样本而显示成当前架构。identity 预览不得选择行情、调用 vendor/LLM、写入
   History Store 或返回 backend URL/凭据。schedule/config 不可用时只返回安全异常类型与
   空清单，不能让 `/api/evaluations` 猜测 active identity。
+- active architecture 的测量连续性只作为 operator 建议：首次稳定自然运行前、运行异常
+  修复前，以及达到 canonical 最低 outcome 样本数前，应保持决策架构身份稳定，避免连续
+  改动使当前 cohort 永远无法形成基线。安全与正确性修复始终优先于连续性建议；该建议
+  不得阻止修复，也不得授权自动修改 prompt、模型、拓扑或启用 paired shadow。
 - 服务端 API 密钥及证书状态查询（`/api/config/env-status`）已拓展以兼容底层能力数据源（如 FRED, Alpha Vantage, Longbridge MCP 等）的状态展示。前端无需保存或输入 API Key，通过后端环境变量和本地文件存在性推断其可用性。
 - Web API 非 loopback 绑定必须设置 `TRADINGAGENTS_WEB_AUTH_TOKEN`；正式入口会同时启用全 API bearer 认证。浏览器请求不得提交 `results_dir`/`report_dir`，backend URL 只能来自内置服务商端点或服务端 `TRADINGAGENTS_ALLOWED_BACKEND_URLS` 白名单。并发与每分钟启动上限分别由 `TRADINGAGENTS_WEB_MAX_ACTIVE_RUNS`（默认 2）和 `TRADINGAGENTS_WEB_RUN_RATE_LIMIT`（默认 10）控制。
 

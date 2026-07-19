@@ -140,6 +140,12 @@ cancelled 状态、stats 覆盖、总成本及 Agent/工具热点。`rolling-run
 `promotion_gate_effect=none`。这条时间轴不要求市场结果成熟，因此下一次日跑结束后即可
 诊断成本；它与 outcome sample count 分开显示，cost-only cohort 不进入 baseline/
 challenger 收益比较下拉框，也不降低 20 个结果、5-session 或严格配对门槛。
+`active_architecture_inventory` 还为下一次自然调度的精确 ticker/version/fingerprint
+生成 `architecture-measurement-continuity/v1`。它确定性区分等待首次自然运行、先修复
+异常运行、保持架构等待结果成熟、继续积累结果，以及达到 20 个 outcome 后进入人工评估。
+在最低样本前，这只是“保持决策架构稳定”的 operator 建议，用来避免频繁改动切碎 cohort；
+安全与正确性修复始终覆盖该建议。它不会阻止修复，不会进入 Agent state，不会改变架构
+fingerprint，也不会授权自动修改 prompt、模型、拓扑或开启 paired shadow。
 Market Analyst 的模型工具面不再接收多年度原始日线表：底层仍以完整窗口计算并验证
 OHLCV/200 SMA 等指标，但只向模型渲染一次批量指标和紧凑 verified snapshot（最新行、
 指标、最近 30 个收盘）。这减少工具循环上下文，不改变 vendor fallback、缓存、validator

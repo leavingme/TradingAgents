@@ -90,6 +90,18 @@ def test_daily_evaluate_observes_active_identity_without_runs_or_outcomes(tmp_pa
     assert active["observation_status"] == "awaiting_first_active_run"
     assert active["terminal_run_count"] == 0
     assert active["outcome_sample_count"] == 0
+    assert active["measurement_continuity"] == {
+        "schema": "tradingagents/architecture-measurement-continuity/v1",
+        "status": "awaiting_initial_run",
+        "recommended_action": (
+            "collect_first_active_run_without_decision_changes"
+        ),
+        "minimum_outcome_samples": 20,
+        "measurement_continuity_recommended": True,
+        "safety_and_correctness_fixes_override_continuity": True,
+        "automatic_architecture_mutation_allowed": False,
+        "paired_shadow_authorization_required": True,
+    }
     assert active["automatic_architecture_mutation_allowed"] is False
     assert active["paired_shadow_authorization_required"] is True
     assert str(tmp_path) not in serialized

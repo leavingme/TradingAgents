@@ -5,9 +5,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .outcomes import DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES
+
 
 ACTIVE_ARCHITECTURE_OBSERVATION_SCHEMA = (
     "tradingagents/active-architecture-observation/v1"
+)
+ARCHITECTURE_MEASUREMENT_CONTINUITY_SCHEMA = (
+    "tradingagents/architecture-measurement-continuity/v1"
 )
 MAX_ACTIVE_ARCHITECTURES = 128
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -99,6 +104,26 @@ def observe_active_architectures(
             status = "active_run_requires_attention"
         else:
             status = "awaiting_first_active_run"
+        if (
+            outcome_sample_count
+            >= DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES
+        ):
+            continuity_status = "minimum_outcome_sample_reached"
+            continuity_action = "review_active_architecture_assessment"
+        elif outcome_sample_count:
+            continuity_status = "outcome_collection_in_progress"
+            continuity_action = "continue_active_outcome_collection"
+        elif not matched_runs:
+            continuity_status = "awaiting_initial_run"
+            continuity_action = (
+                "collect_first_active_run_without_decision_changes"
+            )
+        elif not validated_run_count:
+            continuity_status = "repair_before_measurement"
+            continuity_action = "repair_active_run_before_experiment"
+        else:
+            continuity_status = "outcome_collection_in_progress"
+            continuity_action = "hold_architecture_for_outcome_maturity"
         output.append(
             {
                 **identity,
@@ -109,6 +134,21 @@ def observe_active_architectures(
                 "validated_run_count": validated_run_count,
                 "attention_run_count": attention_run_count,
                 "outcome_sample_count": outcome_sample_count,
+                "measurement_continuity": {
+                    "schema": ARCHITECTURE_MEASUREMENT_CONTINUITY_SCHEMA,
+                    "status": continuity_status,
+                    "recommended_action": continuity_action,
+                    "minimum_outcome_samples": (
+                        DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES
+                    ),
+                    "measurement_continuity_recommended": (
+                        outcome_sample_count
+                        < DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES
+                    ),
+                    "safety_and_correctness_fixes_override_continuity": True,
+                    "automatic_architecture_mutation_allowed": False,
+                    "paired_shadow_authorization_required": True,
+                },
                 "automatic_architecture_mutation_allowed": False,
                 "paired_shadow_authorization_required": True,
             }

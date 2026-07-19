@@ -8,7 +8,7 @@ import { createEventStream } from './event-stream.js?v=20260718-architecture-eva
 import { createRouter } from './router.js';
 import { createSettingsController } from './components/settings-controller.js';
 import { createI18n } from './i18n.js';
-import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260718-active-architecture-lifecycle';
+import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260719-measurement-continuity';
 
 /**
  * TradingAgents Web UI — Enhanced Application Script
@@ -255,6 +255,10 @@ const translations = {
     previousDailyTokens: 'Previous daily input tokens',
     costWindowStatus: 'Window status',
     architectureLifecycle: 'Architecture lifecycle',
+    measurementContinuity: 'Measurement continuity',
+    continuityRecommendedAction: 'Continuity action',
+    activeOutcomeProgress: 'Active outcome progress',
+    safetyFixesOverrideContinuity: 'Safety/correctness fixes override continuity',
     outcomeStatus: 'Outcome status',
     noEvaluations: 'No mature fixed-horizon outcomes yet.',
     noPendingEvaluations: 'No validated decisions are awaiting settlement.',
@@ -331,6 +335,15 @@ const translations = {
     evaluationCodeArchitectureScheduleDisabled: 'Architecture schedule disabled',
     evaluationCodeArchitectureInventoryUnavailable: 'Active architecture inventory unavailable',
     evaluationCodeCrossTickerAggregate: 'Cross-ticker outcome aggregate',
+    evaluationCodeAwaitingInitialRun: 'Awaiting first stable natural run',
+    evaluationCodeRepairBeforeMeasurement: 'Repair required before measurement',
+    evaluationCodeOutcomeCollectionInProgress: 'Outcome collection in progress',
+    evaluationCodeMinimumOutcomeReached: 'Minimum outcome sample reached',
+    evaluationCodeCollectFirstStableRun: 'Collect first active run without decision changes',
+    evaluationCodeRepairActiveRunFirst: 'Repair active run before any experiment',
+    evaluationCodeHoldForOutcomeMaturity: 'Hold architecture stable for outcome maturity',
+    evaluationCodeContinueActiveOutcomes: 'Continue active outcome collection',
+    evaluationCodeReviewActiveAssessment: 'Review active architecture assessment',
     optimizationDiagnostic: 'Optimization diagnostic',
     experimentReadiness: 'Experiment readiness',
     controlledExperimentReady: 'Controlled experiment ready',
@@ -601,6 +614,10 @@ const translations = {
     previousDailyTokens: '前一窗口日均输入 Token',
     costWindowStatus: '窗口状态',
     architectureLifecycle: '架构生命周期',
+    measurementContinuity: '测量连续性',
+    continuityRecommendedAction: '连续性建议动作',
+    activeOutcomeProgress: '当前架构结果进度',
+    safetyFixesOverrideContinuity: '安全与正确性修复可覆盖连续性建议',
     outcomeStatus: '结果状态',
     noEvaluations: '尚无成熟的固定期限结果。',
     noPendingEvaluations: '目前没有等待结算的有效决策。',
@@ -677,6 +694,15 @@ const translations = {
     evaluationCodeArchitectureScheduleDisabled: '架构调度已关闭',
     evaluationCodeArchitectureInventoryUnavailable: '当前架构清单不可用',
     evaluationCodeCrossTickerAggregate: '跨标的结果聚合',
+    evaluationCodeAwaitingInitialRun: '等待首次稳定自然运行',
+    evaluationCodeRepairBeforeMeasurement: '测量前需要先修复',
+    evaluationCodeOutcomeCollectionInProgress: '正在积累结果样本',
+    evaluationCodeMinimumOutcomeReached: '已达到最低结果样本数',
+    evaluationCodeCollectFirstStableRun: '保持决策架构不变并收集首次自然运行',
+    evaluationCodeRepairActiveRunFirst: '先修复当前运行，再开始实验',
+    evaluationCodeHoldForOutcomeMaturity: '保持架构稳定并等待结果成熟',
+    evaluationCodeContinueActiveOutcomes: '继续积累当前架构结果',
+    evaluationCodeReviewActiveAssessment: '人工复核当前架构评估',
     optimizationDiagnostic: '优化诊断',
     experimentReadiness: '实验就绪度',
     controlledExperimentReady: '受控实验是否就绪',

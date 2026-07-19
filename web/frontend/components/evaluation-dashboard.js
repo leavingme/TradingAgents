@@ -114,6 +114,28 @@ export function buildEvaluationViewModel(payload = {}) {
       activeOutcomeSampleCount: Number(
         activeArchitecture?.outcome_sample_count || 0,
       ),
+      measurementContinuity: activeArchitecture?.measurement_continuity
+        && typeof activeArchitecture.measurement_continuity === 'object'
+        ? {
+          status: String(
+            activeArchitecture.measurement_continuity.status || 'not_observed',
+          ),
+          recommendedAction: String(
+            activeArchitecture.measurement_continuity.recommended_action
+              || 'continue_active_outcome_collection',
+          ),
+          minimumOutcomeSamples: Number(
+            activeArchitecture.measurement_continuity.minimum_outcome_samples || 0,
+          ),
+          recommended: Boolean(
+            activeArchitecture.measurement_continuity.measurement_continuity_recommended,
+          ),
+          safetyOverride: Boolean(
+            activeArchitecture.measurement_continuity
+              .safety_and_correctness_fixes_override_continuity,
+          ),
+        }
+        : null,
       sampleCount: Number(row?.sample_count || 0),
       costSampleCount: Number(runCost?.sample_count || 0),
       costStatsObservedCount: Number(runCost?.stats_observed_count || 0),
@@ -307,6 +329,15 @@ export function createEvaluationDashboard({
     scheduled_architecture_disabled: 'evaluationCodeArchitectureScheduleDisabled',
     active_architecture_inventory_unavailable: 'evaluationCodeArchitectureInventoryUnavailable',
     cross_ticker_outcome_aggregate: 'evaluationCodeCrossTickerAggregate',
+    awaiting_initial_run: 'evaluationCodeAwaitingInitialRun',
+    repair_before_measurement: 'evaluationCodeRepairBeforeMeasurement',
+    outcome_collection_in_progress: 'evaluationCodeOutcomeCollectionInProgress',
+    minimum_outcome_sample_reached: 'evaluationCodeMinimumOutcomeReached',
+    collect_first_active_run_without_decision_changes: 'evaluationCodeCollectFirstStableRun',
+    repair_active_run_before_experiment: 'evaluationCodeRepairActiveRunFirst',
+    hold_architecture_for_outcome_maturity: 'evaluationCodeHoldForOutcomeMaturity',
+    continue_active_outcome_collection: 'evaluationCodeContinueActiveOutcomes',
+    review_active_architecture_assessment: 'evaluationCodeReviewActiveAssessment',
   };
 
   function codeLabel(value) {
@@ -490,6 +521,26 @@ export function createEvaluationDashboard({
           t(cohort.optimization.controlledExperimentReady ? 'yes' : 'no'),
         ),
       );
+      if (cohort.measurementContinuity) {
+        diagnostic.append(
+          comparisonRow(
+            t('measurementContinuity'),
+            codeLabel(cohort.measurementContinuity.status),
+          ),
+          comparisonRow(
+            t('continuityRecommendedAction'),
+            codeLabel(cohort.measurementContinuity.recommendedAction),
+          ),
+          comparisonRow(
+            t('activeOutcomeProgress'),
+            `${cohort.activeOutcomeSampleCount}/${cohort.measurementContinuity.minimumOutcomeSamples}`,
+          ),
+          comparisonRow(
+            t('safetyFixesOverrideContinuity'),
+            t(cohort.measurementContinuity.safetyOverride ? 'yes' : 'no'),
+          ),
+        );
+      }
       if (cohort.costSampleCount) {
         diagnostic.append(
           comparisonRow(

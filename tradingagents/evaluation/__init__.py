@@ -23,6 +23,7 @@ from .operator_costs import (
     load_operator_run_costs,
 )
 from .active_architecture import (
+    ARCHITECTURE_MEASUREMENT_CONTINUITY_SCHEMA,
     active_architecture_inventory_payload,
     observe_active_architectures,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "ARCHITECTURE_OPTIMIZATION_ASSESSMENT_SCHEMA",
     "ARCHITECTURE_OUTCOME_ASSESSMENT_SCHEMA",
     "ARCHITECTURE_RUN_COST_ROLLUP_SCHEMA",
+    "ARCHITECTURE_MEASUREMENT_CONTINUITY_SCHEMA",
     "DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES",
     "OutcomeMeasurement",
     "OUTCOME_SCORING_VERSION",

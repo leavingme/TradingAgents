@@ -199,6 +199,13 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
         observation_status: 'active_outcome_observed',
         terminal_run_count: 20,
         outcome_sample_count: 20,
+        measurement_continuity: {
+          status: 'minimum_outcome_sample_reached',
+          recommended_action: 'review_active_architecture_assessment',
+          minimum_outcome_samples: 20,
+          measurement_continuity_recommended: false,
+          safety_and_correctness_fixes_override_continuity: true,
+        },
       }],
     },
     evaluations: [{ run_id: 'evaluated' }],
@@ -311,6 +318,13 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   assert.equal(view.activeInventoryStatus, 'loaded');
   assert.equal(view.cohorts[0].active, true);
   assert.equal(view.cohorts[0].architectureStatus, 'active_outcome_observed');
+  assert.deepEqual(view.cohorts[0].measurementContinuity, {
+    status: 'minimum_outcome_sample_reached',
+    recommendedAction: 'review_active_architecture_assessment',
+    minimumOutcomeSamples: 20,
+    recommended: false,
+    safetyOverride: true,
+  });
   assert.equal(view.runCostSampleCount, 2);
   assert.equal(view.cohorts[0].costSampleCount, 1);
   assert.equal(view.cohorts[0].costStatsObservedCount, 1);
@@ -379,6 +393,13 @@ test('evaluation view separates awaiting active architecture from historical cos
         observation_status: 'awaiting_first_active_run',
         terminal_run_count: 0,
         outcome_sample_count: 0,
+        measurement_continuity: {
+          status: 'awaiting_initial_run',
+          recommended_action: 'collect_first_active_run_without_decision_changes',
+          minimum_outcome_samples: 20,
+          measurement_continuity_recommended: true,
+          safety_and_correctness_fixes_override_continuity: true,
+        },
       }],
     },
     run_cost_rollups: [{
@@ -396,17 +417,20 @@ test('evaluation view separates awaiting active architecture from historical cos
       active: row.active,
       status: row.architectureStatus,
       costSamples: row.costSampleCount,
+      continuity: row.measurementContinuity?.status || null,
     })),
     [{
       fingerprint: 'current-fingerprint',
       active: true,
       status: 'awaiting_first_active_run',
       costSamples: 0,
+      continuity: 'awaiting_initial_run',
     }, {
       fingerprint: 'historical-fingerprint',
       active: false,
       status: 'historical_architecture',
       costSamples: 1,
+      continuity: null,
     }],
   );
 });

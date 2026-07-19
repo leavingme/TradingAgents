@@ -27,27 +27,58 @@ def _identity(ticker="NVDA", version="production", fingerprint="a" * 64):
 
 
 @pytest.mark.parametrize(
-    ("runs", "evaluations", "expected_status"),
+    (
+        "runs",
+        "evaluations",
+        "expected_status",
+        "continuity_status",
+        "continuity_action",
+    ),
     [
-        ([], [], "awaiting_first_active_run"),
+        (
+            [],
+            [],
+            "awaiting_first_active_run",
+            "awaiting_initial_run",
+            "collect_first_active_run_without_decision_changes",
+        ),
         (
             [{"status": "review_required", "decision_status": "review_required"}],
             [],
             "active_run_requires_attention",
+            "repair_before_measurement",
+            "repair_active_run_before_experiment",
         ),
         (
             [{"status": "completed", "decision_status": "validated"}],
             [],
             "awaiting_outcome_maturity",
+            "outcome_collection_in_progress",
+            "hold_architecture_for_outcome_maturity",
         ),
         (
             [{"status": "completed", "decision_status": "validated"}],
             [{"score": 0.01}],
             "active_outcome_observed",
+            "outcome_collection_in_progress",
+            "continue_active_outcome_collection",
+        ),
+        (
+            [],
+            [{"score": 0.01}],
+            "active_outcome_observed",
+            "outcome_collection_in_progress",
+            "continue_active_outcome_collection",
         ),
     ],
 )
-def test_active_architecture_observation_states(runs, evaluations, expected_status):
+def test_active_architecture_observation_states(
+    runs,
+    evaluations,
+    expected_status,
+    continuity_status,
+    continuity_action,
+):
     identity = _identity()
     key = {
         "ticker": "NVDA",
@@ -66,10 +97,43 @@ def test_active_architecture_observation_states(runs, evaluations, expected_stat
     assert observed["observation_status"] == expected_status
     assert observed["terminal_run_count"] == len(runs)
     assert observed["outcome_sample_count"] == len(evaluations)
+    continuity = observed["measurement_continuity"]
+    assert continuity["status"] == continuity_status
+    assert continuity["recommended_action"] == continuity_action
+    assert continuity["minimum_outcome_samples"] == 20
+    assert continuity["measurement_continuity_recommended"] is True
+    assert continuity["safety_and_correctness_fixes_override_continuity"] is True
+    assert continuity["automatic_architecture_mutation_allowed"] is False
+    assert continuity["paired_shadow_authorization_required"] is True
     assert observed["automatic_architecture_mutation_allowed"] is False
     assert observed["paired_shadow_authorization_required"] is True
     assert "secret" not in observed
     assert identity["secret"] == "must-not-survive"
+
+
+def test_active_architecture_reaches_review_only_after_minimum_outcomes():
+    identity = _identity()
+    key = {
+        "ticker": "NVDA",
+        "architecture_version": "production",
+        "architecture_fingerprint": "a" * 64,
+    }
+    observed = observe_active_architectures(
+        [identity],
+        evaluations=[{**key, "score": 0.01} for _ in range(20)],
+        terminal_runs=[
+            {**key, "status": "completed", "decision_status": "validated"}
+        ],
+    )[0]
+
+    continuity = observed["measurement_continuity"]
+    assert continuity["status"] == "minimum_outcome_sample_reached"
+    assert continuity["recommended_action"] == (
+        "review_active_architecture_assessment"
+    )
+    assert continuity["measurement_continuity_recommended"] is False
+    assert continuity["safety_and_correctness_fixes_override_continuity"] is True
+    assert continuity["automatic_architecture_mutation_allowed"] is False
 
 
 def test_active_architecture_matching_requires_ticker_version_and_fingerprint():

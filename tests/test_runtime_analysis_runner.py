@@ -389,6 +389,28 @@ def test_live_runtime_injects_outcome_settled_in_same_run(monkeypatch, tmp_path)
     from tradingagents.runtime import analysis_runner
     from tradingagents.runtime.history import history_store
 
+    poisoned_run_id = "poisoned-validated-history"
+    history_store.create_run(
+        poisoned_run_id,
+        "NVDA",
+        "2026-06-30",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        architecture_version="legacy-invalid",
+        architecture_fingerprint="b" * 64,
+    )
+    history_store.add_event(
+        poisoned_run_id,
+        AnalysisEvent(
+            type="run_completed",
+            run_id=poisoned_run_id,
+            timestamp="2026-06-30T21:00:00+00:00",
+            content={"decision_status": "validated"},
+        ),
+    )
+
     prior_run_id = "prior-outcome-matures-today"
     architecture_fingerprint = "a" * 64
     history_store.create_run(
@@ -500,6 +522,17 @@ def test_live_runtime_injects_outcome_settled_in_same_run(monkeypatch, tmp_path)
     assert len(evaluations) == 1
     assert evaluations[0]["run_id"] == prior_run_id
     assert evaluations[0]["evaluated_by_run_id"] == current_run_id
+    blocked = next(
+        row
+        for row in history_store.list_unevaluated_validated_runs(ticker="NVDA")
+        if row["run_id"] == poisoned_run_id
+    )
+    assert blocked["settlement_issue_code"] == "validated_decision_missing"
+    assert any(
+        event.type == "run_completed"
+        and event.content.get("decision_status") == "validated"
+        for event in events
+    )
     context = json.loads(captured_state["past_context"])
     assert context["selection"]["same_symbol_scanned_count"] == 1
     assert context["selection"]["same_symbol_included_count"] == 1

@@ -539,7 +539,10 @@ def test_architecture_evaluation_status_is_compact_and_scoped_to_run_identity():
 
         def list_unevaluated_validated_runs(self, **kwargs):
             assert kwargs == {"ticker": "NVDA"}
-            return [{"run_id": "pending"}]
+            return [{
+                "run_id": "pending",
+                "settlement_issue_code": "validated_decision_missing",
+            }]
 
     store = FakeStore()
     status = _architecture_evaluation_status(
@@ -560,6 +563,7 @@ def test_architecture_evaluation_status_is_compact_and_scoped_to_run_identity():
         "scan_limit": ARCHITECTURE_EVALUATION_SCAN_LIMIT,
         "evaluated_count_scanned": 1,
         "pending_evaluation_count": 1,
+        "blocked_evaluation_count": 1,
         "cohort_count": 1,
         "other_cohort_count": 0,
         "current_architecture": {

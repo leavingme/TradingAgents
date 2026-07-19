@@ -50,7 +50,7 @@ _SCHEDULER_FAILURE_STATUSES = {
     "failed", "unavailable", "attempts_exhausted", "market_data_unavailable"
 }
 ARCHITECTURE_EVALUATION_STATUS_SCHEMA = (
-    "tradingagents/architecture-evaluation-status/v2"
+    "tradingagents/architecture-evaluation-status/v3"
 )
 ARCHITECTURE_EVALUATION_SCAN_LIMIT = 5000
 CONTEXT_COST_DIAGNOSTIC_SCHEMA = "tradingagents/context-cost-diagnostic/v1"
@@ -177,14 +177,16 @@ def _architecture_evaluation_status(
         else None
     )
     optimization = optimization if isinstance(optimization, dict) else {}
+    pending_runs = store.list_unevaluated_validated_runs(ticker=ticker)
     return {
         "schema": ARCHITECTURE_EVALUATION_STATUS_SCHEMA,
         "status": "loaded" if evaluations else "empty",
         "ticker": ticker,
         "scan_limit": ARCHITECTURE_EVALUATION_SCAN_LIMIT,
         "evaluated_count_scanned": len(evaluations),
-        "pending_evaluation_count": len(
-            store.list_unevaluated_validated_runs(ticker=ticker)
+        "pending_evaluation_count": len(pending_runs),
+        "blocked_evaluation_count": sum(
+            bool(row.get("settlement_issue_code")) for row in pending_runs
         ),
         "cohort_count": len(rollups),
         "other_cohort_count": len(rollups) - int(selected is not None),

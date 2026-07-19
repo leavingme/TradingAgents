@@ -349,6 +349,11 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - live runtime 必须在 market-data readiness 通过后、读取纵向上下文和构造 Agent state 前，
   先结算当前已经成熟的 SQLite pending outcomes；同轮新写入结果必须立即出现在 canonical
   longitudinal context。`point_in_time` 不得执行事后结算，未成熟结果继续保持 pending。
+- 单条 validated 历史 run 若缺少终态决策、可识别 rating、合法 analysis/market-data date
+  或带时区 decision timestamp，必须按 run + horizon 写入类型化
+  `decision_evaluation_issues` 并保持 outcome fail closed；不得生成评分、进入纵向上下文，
+  也不得让该历史“毒丸”阻断其他成熟结果或当天新分析。CLI/API/每日架构快照必须区分正常
+  等待成熟与 `blocked_invalid_history`；只允许保存白名单 issue code，不得保存异常正文。
 
 ## 测试和验证注意事项
 

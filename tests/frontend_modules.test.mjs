@@ -210,7 +210,11 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
     },
     evaluations: [{ run_id: 'evaluated' }],
     pending_evaluation_count: 1,
-    pending_evaluations: [{ run_id: 'pending' }],
+    pending_evaluations: [{
+      run_id: 'pending',
+      status: 'blocked_invalid_history',
+      settlement_issue_code: 'validated_decision_missing',
+    }],
     run_cost_sample_count: 2,
     run_cost_rollups: [{
       ticker: 'NVDA',
@@ -313,6 +317,11 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   });
   assert.equal(view.evaluationCount, 1);
   assert.equal(view.pendingCount, 1);
+  assert.equal(view.pending[0].status, 'blocked_invalid_history');
+  assert.equal(
+    view.pending[0].settlement_issue_code,
+    'validated_decision_missing',
+  );
   assert.equal(view.cohortCount, 2);
   assert.equal(view.activeArchitectureCount, 1);
   assert.equal(view.activeInventoryStatus, 'loaded');

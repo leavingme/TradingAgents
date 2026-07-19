@@ -359,7 +359,7 @@ class TradingAgentsGraph:
         Each run is measured from its own persisted decision timestamp so two
         runs sharing an analysis date cannot inherit an earlier run's entry.
         """
-        from tradingagents.agents.utils.rating import parse_rating
+        from tradingagents.agents.utils.rating import RATINGS_5_TIER, parse_rating
         from tradingagents.evaluation import OutcomeMeasurement, score_outcome
         from tradingagents.runtime.audit_context import current_run_id
         from tradingagents.runtime.audit_context import (
@@ -373,6 +373,16 @@ class TradingAgentsGraph:
             return
         benchmark = self._resolve_benchmark(ticker)
         resolved_by_date: dict[str, OutcomeMeasurement] = {}
+        evaluating_run_id = current_run_id()
+
+        def block_invalid_history(run_id: str, issue_code: str) -> None:
+            history_store.record_decision_evaluation_issue(
+                run_id,
+                horizon_sessions=DEFAULT_OUTCOME_HORIZON_SESSIONS,
+                issue_code=issue_code,
+                detected_by_run_id=evaluating_run_id,
+            )
+
         for prior_run in prior_runs:
             run_record = history_store.get_run(prior_run["run_id"])
             terminal = next(
@@ -381,6 +391,7 @@ class TradingAgentsGraph:
                     for event in reversed((run_record or {}).get("events", []))
                     if event.get("type") == "run_completed"
                     and isinstance(event.get("content"), dict)
+                    and event["content"].get("decision_status") == "validated"
                 ),
                 None,
             )
@@ -388,16 +399,71 @@ class TradingAgentsGraph:
             decision_as_of = (
                 terminal["content"].get("decision_as_of") if terminal else None
             ) or (terminal.get("timestamp") if terminal else None)
+            if terminal is None:
+                block_invalid_history(
+                    prior_run["run_id"], "validated_terminal_event_missing"
+                )
+                continue
             if not isinstance(decision, str) or not decision.strip():
-                raise RuntimeError(
-                    "validated historical run lacks its own persisted decision: "
-                    f"{prior_run['run_id']}"
+                block_invalid_history(
+                    prior_run["run_id"], "validated_decision_missing"
                 )
+                continue
+            rating = parse_rating(decision, default="")
+            if rating not in RATINGS_5_TIER:
+                block_invalid_history(
+                    prior_run["run_id"], "validated_rating_missing"
+                )
+                continue
             if not isinstance(decision_as_of, str) or not decision_as_of.strip():
-                raise RuntimeError(
-                    "validated historical run lacks decision_as_of: "
-                    f"{prior_run['run_id']}"
+                block_invalid_history(
+                    prior_run["run_id"], "decision_as_of_missing"
                 )
+                continue
+            try:
+                parsed_analysis_date = datetime.strptime(
+                    str(prior_run.get("analysis_date")), "%Y-%m-%d"
+                ).date()
+            except (TypeError, ValueError):
+                block_invalid_history(
+                    prior_run["run_id"], "analysis_date_invalid"
+                )
+                continue
+            market_data_date = prior_run.get("market_data_date")
+            if market_data_date is not None:
+                try:
+                    parsed_market_data_date = datetime.strptime(
+                        str(market_data_date), "%Y-%m-%d"
+                    ).date()
+                except (TypeError, ValueError):
+                    block_invalid_history(
+                        prior_run["run_id"], "market_data_date_invalid"
+                    )
+                    continue
+                if parsed_market_data_date > parsed_analysis_date:
+                    block_invalid_history(
+                        prior_run["run_id"], "market_data_date_invalid"
+                    )
+                    continue
+            try:
+                parsed_decision_as_of = datetime.fromisoformat(
+                    decision_as_of.replace("Z", "+00:00")
+                )
+                if (
+                    parsed_decision_as_of.tzinfo is None
+                    or parsed_decision_as_of.utcoffset() is None
+                ):
+                    raise ValueError("timezone required")
+            except ValueError:
+                block_invalid_history(
+                    prior_run["run_id"], "decision_as_of_invalid"
+                )
+                continue
+            history_store.resolve_decision_evaluation_issue(
+                prior_run["run_id"],
+                horizon_sessions=DEFAULT_OUTCOME_HORIZON_SESSIONS,
+                resolved_by_run_id=evaluating_run_id,
+            )
             purpose_token = bind_vendor_call_purpose("outcome_evaluation")
             try:
                 measurement = self._fetch_returns(
@@ -414,7 +480,6 @@ class TradingAgentsGraph:
                 continue
             if not isinstance(measurement, OutcomeMeasurement):
                 raise RuntimeError("audited outcome resolver returned no provenance")
-            rating = parse_rating(decision)
             scored = score_outcome(rating, measurement.alpha_return)
             history_store.add_decision_evaluation({
                 "run_id": prior_run["run_id"],

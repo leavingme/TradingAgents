@@ -263,6 +263,57 @@ def test_history_lists_validated_runs_without_markdown_or_existing_outcome(tmp_p
     ]
 
 
+def test_history_exposes_typed_settlement_issue_and_resolution(tmp_path):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    store.create_run(
+        "invalid-pending", "NVDA", "2026-07-01", "stock", ["market"],
+        "minimax-cn", 1,
+    )
+    store.add_event("invalid-pending", AnalysisEvent(
+        type="run_completed",
+        run_id="invalid-pending",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={"decision_status": "validated"},
+    ))
+
+    store.record_decision_evaluation_issue(
+        "invalid-pending",
+        horizon_sessions=5,
+        issue_code="validated_decision_missing",
+        detected_by_run_id="current-run",
+    )
+    pending = store.list_unevaluated_validated_runs(ticker="NVDA")
+    assert pending[0]["settlement_issue_code"] == "validated_decision_missing"
+    assert pending[0]["settlement_issue_detected_at"]
+
+    # Re-observing an unchanged issue is idempotent and repair remains explicit.
+    first_detected_at = pending[0]["settlement_issue_detected_at"]
+    store.record_decision_evaluation_issue(
+        "invalid-pending",
+        horizon_sessions=5,
+        issue_code="validated_decision_missing",
+        detected_by_run_id="later-run",
+    )
+    assert store.list_unevaluated_validated_runs(ticker="NVDA")[0][
+        "settlement_issue_detected_at"
+    ] == first_detected_at
+    store.resolve_decision_evaluation_issue(
+        "invalid-pending",
+        horizon_sessions=5,
+        resolved_by_run_id="repair-run",
+    )
+    repaired = store.list_unevaluated_validated_runs(ticker="NVDA")[0]
+    assert repaired["settlement_issue_code"] is None
+    assert repaired["settlement_issue_detected_at"] is None
+
+    with pytest.raises(ValueError, match="unsupported"):
+        store.record_decision_evaluation_issue(
+            "invalid-pending",
+            horizon_sessions=5,
+            issue_code="provider said credential=secret",
+        )
+
+
 def test_history_rejects_evaluation_without_exact_ohlcv_provenance(tmp_path):
     store = RunHistoryStore(tmp_path / "runs.db")
     store.create_run(

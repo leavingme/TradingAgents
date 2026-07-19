@@ -394,7 +394,15 @@ async def get_decision_evaluations(
             "started_at": row.get("started_at"),
             "finished_at": row.get("finished_at"),
             "horizon_sessions": DEFAULT_OUTCOME_HORIZON_SESSIONS,
-            "status": "awaiting_fixed_horizon_outcome",
+            "status": (
+                "blocked_invalid_history"
+                if row.get("settlement_issue_code")
+                else "awaiting_fixed_horizon_outcome"
+            ),
+            "settlement_issue_code": row.get("settlement_issue_code"),
+            "settlement_issue_detected_at": row.get(
+                "settlement_issue_detected_at"
+            ),
         }
         for row in pending_rows[:bounded_limit]
     ]
@@ -402,6 +410,9 @@ async def get_decision_evaluations(
         "ticker_scope": ticker_scope,
         "evaluations": evaluations,
         "pending_evaluation_count": len(pending_rows),
+        "blocked_evaluation_count": sum(
+            bool(row.get("settlement_issue_code")) for row in pending_rows
+        ),
         "pending_evaluations": pending,
         "rollups": architecture_rollups(evaluations),
         "run_cost_sample_count": len(run_cost_rows),

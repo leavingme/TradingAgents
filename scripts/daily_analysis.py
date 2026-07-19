@@ -35,6 +35,7 @@ def _pending_evaluation_summary(
     row: dict,
     horizon_sessions: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
 ) -> dict:
+    issue_code = row.get("settlement_issue_code")
     return {
         "run_id": row.get("run_id"),
         "ticker": row.get("ticker"),
@@ -46,7 +47,15 @@ def _pending_evaluation_summary(
         "started_at": row.get("started_at"),
         "finished_at": row.get("finished_at"),
         "horizon_sessions": horizon_sessions,
-        "status": "awaiting_fixed_horizon_outcome",
+        "status": (
+            "blocked_invalid_history"
+            if issue_code
+            else "awaiting_fixed_horizon_outcome"
+        ),
+        "settlement_issue_code": issue_code,
+        "settlement_issue_detected_at": row.get(
+            "settlement_issue_detected_at"
+        ),
     }
 
 
@@ -79,6 +88,9 @@ def main() -> int:
         payload = {
             "evaluation_count": len(evaluations),
             "pending_evaluation_count": len(pending),
+            "blocked_evaluation_count": sum(
+                bool(row.get("settlement_issue_code")) for row in pending
+            ),
             "pending_evaluations": [
                 _pending_evaluation_summary(row) for row in pending
             ],

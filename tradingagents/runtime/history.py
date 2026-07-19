@@ -13,6 +13,17 @@ from .events import AnalysisEvent
 from tradingagents.sqlite_utils import configure_wal, connect_sqlite
 from tradingagents.evaluation import DEFAULT_OUTCOME_HORIZON_SESSIONS
 
+
+OUTCOME_SETTLEMENT_ISSUE_CODES = frozenset({
+    "validated_terminal_event_missing",
+    "validated_decision_missing",
+    "validated_rating_missing",
+    "analysis_date_invalid",
+    "market_data_date_invalid",
+    "decision_as_of_missing",
+    "decision_as_of_invalid",
+})
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -200,6 +211,20 @@ class RunHistoryStore:
                         scoring_version       TEXT NOT NULL DEFAULT 'alpha-exposure-v1',
                         hold_band             REAL NOT NULL DEFAULT 0.02,
                         evaluated_at          TEXT NOT NULL,
+                        PRIMARY KEY (run_id, horizon_sessions),
+                        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS decision_evaluation_issues (
+                        run_id                TEXT NOT NULL,
+                        horizon_sessions      INTEGER NOT NULL,
+                        issue_code            TEXT NOT NULL,
+                        detected_by_run_id    TEXT,
+                        first_detected_at      TEXT NOT NULL,
+                        last_detected_at       TEXT NOT NULL,
+                        resolved_by_run_id    TEXT,
+                        resolved_at           TEXT,
                         PRIMARY KEY (run_id, horizon_sessions),
                         FOREIGN KEY (run_id) REFERENCES runs(run_id)
                     )
@@ -423,6 +448,8 @@ class RunHistoryStore:
                     for row in conn.execute(
                         f"""
                         SELECT runs.*, terminal.timestamp AS decision_as_of
+                             , issue.issue_code AS settlement_issue_code
+                             , issue.first_detected_at AS settlement_issue_detected_at
                         FROM runs
                         LEFT JOIN decision_evaluations
                           ON decision_evaluations.run_id = runs.run_id
@@ -434,14 +461,95 @@ class RunHistoryStore:
                               WHERE candidate.run_id = runs.run_id
                                 AND candidate.event_type = 'run_completed'
                           )
+                        LEFT JOIN decision_evaluation_issues AS issue
+                          ON issue.run_id = runs.run_id
+                         AND issue.horizon_sessions = ?
+                         AND issue.resolved_at IS NULL
                         WHERE runs.decision_status = 'validated'
                           {ticker_clause}
                           AND decision_evaluations.run_id IS NULL
                         ORDER BY runs.analysis_date, runs.created_at, runs.run_id
                         """,
-                        params,
+                        [params[0], params[0], *params[1:]],
                     ).fetchall()
                 ]
+
+    def record_decision_evaluation_issue(
+        self,
+        run_id: str,
+        *,
+        horizon_sessions: int,
+        issue_code: str,
+        detected_by_run_id: str | None = None,
+    ) -> None:
+        """Persist one safe, typed blocker for an otherwise pending outcome.
+
+        The issue is scoped to the historical run. Re-observing the same
+        blocker is idempotent, while a changed blocker updates the lifecycle
+        row without storing exception text or provider data.
+        """
+        if issue_code not in OUTCOME_SETTLEMENT_ISSUE_CODES:
+            raise ValueError("unsupported decision evaluation issue code")
+        horizon = int(horizon_sessions)
+        if horizon <= 0:
+            raise ValueError("horizon_sessions must be positive")
+        now = _now()
+        with self._lock:
+            with self._conn() as conn:
+                if conn.execute(
+                    "SELECT 1 FROM runs WHERE run_id=?", (run_id,)
+                ).fetchone() is None:
+                    raise ValueError("decision evaluation issue run_id does not exist")
+                conn.execute(
+                    """
+                    INSERT INTO decision_evaluation_issues (
+                        run_id, horizon_sessions, issue_code,
+                        detected_by_run_id, first_detected_at, last_detected_at,
+                        resolved_by_run_id, resolved_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
+                    ON CONFLICT(run_id, horizon_sessions) DO UPDATE SET
+                        issue_code=excluded.issue_code,
+                        detected_by_run_id=excluded.detected_by_run_id,
+                        first_detected_at=excluded.first_detected_at,
+                        last_detected_at=excluded.last_detected_at,
+                        resolved_by_run_id=NULL,
+                        resolved_at=NULL
+                    WHERE decision_evaluation_issues.issue_code <> excluded.issue_code
+                       OR decision_evaluation_issues.resolved_at IS NOT NULL
+                    """,
+                    (
+                        run_id,
+                        horizon,
+                        issue_code,
+                        detected_by_run_id,
+                        now,
+                        now,
+                    ),
+                )
+
+    def resolve_decision_evaluation_issue(
+        self,
+        run_id: str,
+        *,
+        horizon_sessions: int,
+        resolved_by_run_id: str | None = None,
+    ) -> None:
+        """Close an active typed blocker after the persisted run is repaired."""
+        with self._lock:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE decision_evaluation_issues
+                    SET resolved_by_run_id=?, resolved_at=?
+                    WHERE run_id=? AND horizon_sessions=? AND resolved_at IS NULL
+                    """,
+                    (
+                        resolved_by_run_id,
+                        _now(),
+                        run_id,
+                        int(horizon_sessions),
+                    ),
+                )
 
     def update_run_architecture(
         self,

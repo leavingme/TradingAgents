@@ -615,7 +615,11 @@ export function createEvaluationDashboard({
         element(
           'span',
           null,
-          `${row.architecture_version || 'unknown'} · ${t('awaitingOutcome')}`,
+          `${row.architecture_version || 'unknown'} · ${
+            row.status === 'blocked_invalid_history'
+              ? `${t('settlementBlocked')} (${row.settlement_issue_code || 'unknown'})`
+              : t('awaitingOutcome')
+          }`,
         ),
       );
       list.append(item);

@@ -850,6 +850,12 @@ def test_evaluation_endpoint_returns_rows_and_rollups(monkeypatch):
             "decision_as_of": "2026-07-10T21:00:00+00:00",
         },
     ))
+    history_store.record_decision_evaluation_issue(
+        "pending-evaluation-run",
+        horizon_sessions=5,
+        issue_code="validated_decision_missing",
+        detected_by_run_id="current-run",
+    )
 
     response = asyncio.run(main.get_decision_evaluations(ticker="nvda", limit=50))
     assert response["ticker_scope"] == "NVDA"
@@ -862,7 +868,10 @@ def test_evaluation_endpoint_returns_rows_and_rollups(monkeypatch):
     assert active["architectures"][0]["terminal_run_count"] == 0
     assert len(response["evaluations"]) == 1
     assert response["pending_evaluation_count"] == 1
-    assert response["pending_evaluations"] == [{
+    assert response["blocked_evaluation_count"] == 1
+    pending_response = dict(response["pending_evaluations"][0])
+    assert pending_response.pop("settlement_issue_detected_at")
+    assert pending_response == {
         "run_id": "pending-evaluation-run",
         "ticker": "NVDA",
         "analysis_date": "2026-07-10",
@@ -873,8 +882,9 @@ def test_evaluation_endpoint_returns_rows_and_rollups(monkeypatch):
         "started_at": None,
         "finished_at": None,
         "horizon_sessions": 5,
-        "status": "awaiting_fixed_horizon_outcome",
-    }]
+        "status": "blocked_invalid_history",
+        "settlement_issue_code": "validated_decision_missing",
+    }
     assert response["evaluations"][0]["runtime_seconds"] == 120.0
     assert response["evaluations"][0]["tokens_in"] == 900
     assert response["evaluations"][0]["tool_context_status"] == "observed"

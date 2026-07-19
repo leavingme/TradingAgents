@@ -105,3 +105,45 @@ def test_daily_evaluate_observes_active_identity_without_runs_or_outcomes(tmp_pa
     assert active["automatic_architecture_mutation_allowed"] is False
     assert active["paired_shadow_authorization_required"] is True
     assert str(tmp_path) not in serialized
+
+
+def test_daily_evaluate_distinguishes_invalid_history_from_maturing_outcome(
+    tmp_path,
+):
+    from tradingagents.runtime.events import AnalysisEvent
+    from tradingagents.runtime.history import RunHistoryStore
+
+    store = RunHistoryStore(tmp_path / "runs.db")
+    store.create_run(
+        "blocked-outcome",
+        "NVDA",
+        "2026-07-01",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+    )
+    store.add_event("blocked-outcome", AnalysisEvent(
+        type="run_completed",
+        run_id="blocked-outcome",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={"decision_status": "validated"},
+    ))
+    store.record_decision_evaluation_issue(
+        "blocked-outcome",
+        horizon_sessions=5,
+        issue_code="validated_decision_missing",
+        detected_by_run_id="auditor-run",
+    )
+
+    payload, serialized = _run_daily_cli(tmp_path, "evaluate")
+
+    assert payload["pending_evaluation_count"] == 1
+    assert payload["blocked_evaluation_count"] == 1
+    assert payload["pending_evaluations"][0]["status"] == (
+        "blocked_invalid_history"
+    )
+    assert payload["pending_evaluations"][0]["settlement_issue_code"] == (
+        "validated_decision_missing"
+    )
+    assert "auditor-run" not in serialized

@@ -4,10 +4,12 @@ import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-import pytest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from tradingagents.dataflows import interface
+import pytest
+
+from tradingagents.dataflows import interface, longbridge_mcp
 from tradingagents.dataflows.errors import NoUsableFinancialDataError
 from tradingagents.dataflows.financial_validation import (
     FINANCIAL_EVIDENCE_SCHEMA,
@@ -329,6 +331,77 @@ def test_aggregate_financial_evidence_falls_back_as_one_atomic_capability(
         )
 
     assert json.loads(rendered)["entity"]["symbol"] == "SECOND"
+
+
+@pytest.mark.unit
+def test_expired_mcp_financial_evidence_falls_back_atomically_to_cli(
+    mock_financial_data,
+):
+    is_data = mock_financial_data({
+        "Q1 2026": {"Revenue": 1000, "Net Income": 200}
+    })
+    bs_data = mock_financial_data({
+        "Q1 2026": {
+            "Total Assets": 5000,
+            "Total Liabilities": 3000,
+            "Total Equity": 2000,
+            "Cash and Equivalents": 1000,
+        }
+    })
+    cf_data = mock_financial_data({
+        "Q1 2026": {"Net Income": 200, "Cash and Equivalents": 1000}
+    })
+    fd_data = mock_financial_data(
+        {}, entity_metadata={"symbol": "MOCK", "name": "CLI Company"}
+    )
+    cli_payloads = {
+        "get_income_statement": is_data,
+        "get_balance_sheet": bs_data,
+        "get_cashflow": cf_data,
+        "get_fundamentals": fd_data,
+    }
+    cli_calls = {method: 0 for method in cli_payloads}
+
+    def cli(method):
+        def fetch(*args, **kwargs):
+            cli_calls[method] += 1
+            return cli_payloads[method]
+        return fetch
+
+    vendor_methods = {
+        method: {
+            "longbridge_mcp": interface.VENDOR_METHODS[method]["longbridge_mcp"],
+            "longbridge": cli(method),
+        }
+        for method in cli_payloads
+    }
+    expired_token = {
+        "access_token": "sentinel-must-not-escape",
+        "expiry": (
+            datetime.now(timezone.utc) - timedelta(minutes=5)
+        ).isoformat(),
+    }
+
+    with interface._financial_cache_condition:
+        interface._shared_financial_cache.clear()
+        interface._shared_financial_inflight.clear()
+    with mock.patch.dict(interface.VENDOR_METHODS, vendor_methods, clear=False), \
+         mock.patch(
+             "tradingagents.dataflows.interface.get_vendor",
+             return_value="longbridge_mcp, longbridge",
+         ), \
+         mock.patch.object(
+             longbridge_mcp, "_load_token", return_value=expired_token
+         ) as load_token:
+        rendered = interface.route_to_vendor(
+            "get_financial_evidence", "MOCK", "quarterly", None
+        )
+
+    payload = json.loads(rendered)
+    assert payload["status"] == "verified_and_reconciled"
+    assert payload["entity"]["name"] == "CLI Company"
+    assert cli_calls == {method: 1 for method in cli_payloads}
+    assert load_token.call_count == 4
 
 
 @pytest.mark.unit

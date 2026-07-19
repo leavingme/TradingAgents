@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -119,6 +120,51 @@ def test_news_router_prefers_mcp_then_cli(monkeypatch):
     assert attempts == ["longbridge_mcp", "longbridge"]
     assert result.items[0].title == "Fallback headline"
     assert result.items[0].source_id.startswith("news_")
+
+
+@pytest.mark.unit
+def test_expired_mcp_news_uses_configured_longbridge_cli_fallback(monkeypatch):
+    set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
+    expired_loads = []
+    cli_calls = []
+    monkeypatch.setattr(
+        longbridge_mcp,
+        "_load_token",
+        lambda: expired_loads.append(True) or {
+            "access_token": "sentinel-must-not-escape",
+            "expiry": (
+                datetime.now(timezone.utc) - timedelta(minutes=5)
+            ).isoformat(),
+        },
+    )
+
+    def cli(*args):
+        cli_calls.append(args)
+        return longbridge._news_rows_to_feed([{
+            "title": "Fallback headline",
+            "published_at": (
+                datetime.now(timezone.utc) - timedelta(minutes=1)
+            ).isoformat(),
+            "url": "https://longbridge.com/news/expired-token-fallback",
+            "description": "Fallback article body.",
+        }], vendor="longbridge", scope="ticker", start_date=args[1],
+            end_date=args[2], query=args[0], symbol=args[0])
+
+    monkeypatch.setitem(
+        interface.VENDOR_METHODS["get_news"], "longbridge", cli
+    )
+    end_date = datetime.now(timezone.utc).date()
+    start_date = end_date - timedelta(days=6)
+    try:
+        result = interface.route_to_vendor(
+            "get_news", "NVDA", start_date.isoformat(), end_date.isoformat()
+        )
+    finally:
+        set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
+
+    assert result.items[0].title == "Fallback headline"
+    assert expired_loads == [True]
+    assert len(cli_calls) == 1
 
 
 @pytest.mark.unit

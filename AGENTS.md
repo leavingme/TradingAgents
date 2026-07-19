@@ -460,6 +460,10 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   `/api/config/env-status` 的 `configured` 必须基于 token schema 和带时区 expiry
   验证，不能只根据文件是否存在；可额外返回不含凭据的 `credential_status` 和
   UTC `expires_at`。
+  过期认证的离线门禁必须调用真实 MCP adapter，并分别证明 OHLCV、结构化个股新闻和
+  `get_financial_evidence` 会按配置进入 CLI；财务 fallback 必须以 IS/BS/CF/公司资料的
+  完整 reconciliation 能力为原子单位，不能混用半套 vendor。该门禁只证明 router 控制流，
+  不能替代到期后的真实 CLI OAuth/网络探测。
 - **Longbridge-first OHLCV**：原始 OHLCV 默认优先使用 Longbridge MCP/CLI，
   Westock 作为覆盖率或 Longbridge 不可用时的 fallback。技术指标和基本面仍按
   各自配置链路。当分析日为当前交易日时，收盘缓冲期结束前不得把当日日 K

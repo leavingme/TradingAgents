@@ -6,6 +6,7 @@ Regressions for #988 (explicit single-vendor config still fell back to others),
 were swallowed without a trace).
 """
 import copy
+from datetime import datetime, timedelta, timezone
 import unittest
 from unittest import mock
 
@@ -13,7 +14,7 @@ import pytest
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import interface
+from tradingagents.dataflows import interface, longbridge_mcp
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 
@@ -41,6 +42,46 @@ def _raises(exc):
     def impl(symbol, *a, **k):
         raise exc
     return impl
+
+
+@pytest.mark.unit
+def test_expired_mcp_ohlcv_uses_configured_longbridge_cli_fallback(
+    monkeypatch, tmp_path
+):
+    _reset_config()
+    set_config({
+        "data_cache_dir": str(tmp_path / "cache"),
+        "data_vendors": {
+            "core_stock_apis": "longbridge_mcp, longbridge",
+        },
+    })
+    expired_loads = []
+    cli_calls = []
+    monkeypatch.setattr(
+        longbridge_mcp,
+        "_load_token",
+        lambda: expired_loads.append(True) or {
+            "access_token": "sentinel-must-not-escape",
+            "expiry": (
+                datetime.now(timezone.utc) - timedelta(minutes=5)
+            ).isoformat(),
+        },
+    )
+    monkeypatch.setitem(
+        interface.VENDOR_METHODS["get_stock_data"],
+        "longbridge",
+        lambda *args, **kwargs: cli_calls.append(args) or VALID_OHLCV,
+    )
+    try:
+        result = interface.route_to_vendor(
+            "get_stock_data", "AAPL", "2026-01-01", "2026-01-10"
+        )
+    finally:
+        _reset_config()
+
+    assert result == VALID_OHLCV
+    assert expired_loads == [True]
+    assert len(cli_calls) == 1
 
 
 @pytest.mark.unit

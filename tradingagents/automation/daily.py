@@ -14,6 +14,7 @@ the verified market-data date remains a separately audited runtime field.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -32,6 +33,7 @@ from tradingagents.architecture import (
 )
 from tradingagents.dataflows.ohlcv_cache import latest_completed_daily_bar_date
 from tradingagents.dataflows.utils import safe_ticker_component
+from tradingagents.evaluation import DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES
 from tradingagents.runtime import (
     AnalysisEvent,
     AnalysisExecutionError,
@@ -53,6 +55,7 @@ _TERMINAL_STATUSES = {
     "market_data_unavailable",
     "outcome_settlement_pending",
     "outcome_settlement_unavailable",
+    "experiment_budget_complete",
 }
 _SCHEDULER_FAILURE_STATUSES = {
     "failed", "unavailable", "attempts_exhausted", "market_data_unavailable",
@@ -70,6 +73,11 @@ SCHEDULED_ARCHITECTURE_INVENTORY_SCHEMA = (
     "tradingagents/scheduled-architecture-inventory/v1"
 )
 MAX_SCHEDULED_ARCHITECTURES = 128
+EXPERIMENT_MINIMUM_SCORE_IMPROVEMENT = 0.002
+ARCHITECTURE_EXPERIMENT_PLAN_SCHEMA = (
+    "tradingagents/architecture-experiment-plan/v1"
+)
+_EXPERIMENT_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,80}$")
 _SETTING_KEYS = {
     "research_depth",
     "llm_provider",
@@ -374,10 +382,95 @@ class ScheduledTarget:
 
 
 @dataclass(frozen=True)
+class ArchitectureExperimentPlan:
+    """Bounded, fingerprinted intent fixed before a paired shadow starts."""
+
+    experiment_id: str
+    minimum_paired_samples: int
+    maximum_paired_samples: int
+    minimum_score_improvement: float
+    primary_metric: str = "mean_score_delta"
+
+    @classmethod
+    def from_dict(cls, payload: Any) -> "ArchitectureExperimentPlan":
+        if not isinstance(payload, dict):
+            raise ValueError("enabled paired shadow schedule requires experiment_plan")
+        experiment_id = str(payload.get("experiment_id", "")).strip()
+        if not _EXPERIMENT_ID_RE.fullmatch(experiment_id):
+            raise ValueError("invalid experiment_plan experiment_id")
+        primary_metric = str(payload.get("primary_metric", "")).strip()
+        if primary_metric != "mean_score_delta":
+            raise ValueError("experiment_plan primary_metric must be mean_score_delta")
+        minimum_paired_samples = int(payload.get("minimum_paired_samples", 0))
+        maximum_paired_samples = int(payload.get("maximum_paired_samples", 0))
+        if minimum_paired_samples != DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES:
+            raise ValueError(
+                "experiment_plan minimum_paired_samples must match the canonical "
+                "architecture comparison policy"
+            )
+        if (
+            maximum_paired_samples < minimum_paired_samples
+            or maximum_paired_samples > 200
+        ):
+            raise ValueError(
+                "experiment_plan maximum_paired_samples must be between the minimum and 200"
+            )
+        minimum_score_improvement = float(
+            payload.get("minimum_score_improvement", -1)
+        )
+        if minimum_score_improvement != EXPERIMENT_MINIMUM_SCORE_IMPROVEMENT:
+            raise ValueError(
+                "experiment_plan minimum_score_improvement must match the canonical "
+                "architecture comparison policy"
+            )
+        return cls(
+            experiment_id=experiment_id,
+            primary_metric=primary_metric,
+            minimum_paired_samples=minimum_paired_samples,
+            maximum_paired_samples=maximum_paired_samples,
+            minimum_score_improvement=minimum_score_improvement,
+        )
+
+    def identity(
+        self,
+        architecture_identities: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        arms = sorted(
+            (
+                {
+                    "architecture_version": row["architecture_version"],
+                    "architecture_fingerprint": row["architecture_fingerprint"],
+                    "longitudinal_context_mode": row["longitudinal_context_mode"],
+                }
+                for row in architecture_identities
+            ),
+            key=lambda row: row["architecture_version"],
+        )
+        manifest = {
+            "schema": ARCHITECTURE_EXPERIMENT_PLAN_SCHEMA,
+            "experiment_id": self.experiment_id,
+            "treatment": "research_manager_longitudinal_context",
+            "primary_metric": self.primary_metric,
+            "minimum_paired_samples": self.minimum_paired_samples,
+            "maximum_paired_samples": self.maximum_paired_samples,
+            "minimum_score_improvement": self.minimum_score_improvement,
+            "arms": arms,
+        }
+        canonical = json.dumps(
+            manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return {
+            **manifest,
+            "fingerprint": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        }
+
+
+@dataclass(frozen=True)
 class DailySchedule:
     enabled: bool
     targets: tuple[ScheduledTarget, ...]
     paired_shadow_authorized: bool = False
+    experiment_plan: ArchitectureExperimentPlan | None = None
     max_attempts_per_date: int = 2
     retry_after_minutes: int = 60
     stale_active_after_minutes: int = 360
@@ -426,6 +519,14 @@ class DailySchedule:
             raise ValueError(
                 "enabled paired shadow schedule requires paired_shadow_authorized=true"
             )
+        if self.enabled and shadow_groups and self.experiment_plan is None:
+            raise ValueError(
+                "enabled paired shadow schedule requires experiment_plan"
+            )
+        if self.experiment_plan is not None and len(shadow_groups) != 1:
+            raise ValueError(
+                "experiment_plan requires exactly one paired shadow symbol"
+            )
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "DailySchedule":
@@ -434,6 +535,11 @@ class DailySchedule:
             raise ValueError("daily schedule targets must be a list")
         targets = tuple(ScheduledTarget.from_dict(item) for item in raw_targets)
         paired_shadow_authorized = payload.get("paired_shadow_authorized") is True
+        experiment_plan = (
+            ArchitectureExperimentPlan.from_dict(payload.get("experiment_plan"))
+            if payload.get("experiment_plan") is not None
+            else None
+        )
         max_attempts = int(payload.get("max_attempts_per_date", 2))
         retry_minutes = int(payload.get("retry_after_minutes", 60))
         stale_minutes = int(payload.get("stale_active_after_minutes", 360))
@@ -490,6 +596,7 @@ class DailySchedule:
             enabled=payload.get("enabled") is True,
             targets=targets,
             paired_shadow_authorized=paired_shadow_authorized,
+            experiment_plan=experiment_plan,
             max_attempts_per_date=max_attempts,
             retry_after_minutes=retry_minutes,
             stale_active_after_minutes=stale_minutes,
@@ -511,6 +618,47 @@ def load_daily_schedule(path: Path | None = None) -> DailySchedule:
     if not isinstance(payload, dict):
         raise ValueError("daily schedule root must be an object")
     return DailySchedule.from_dict(payload)
+
+
+def _register_experiment_plan(
+    schedule: DailySchedule,
+    registry_dir: Path,
+    preferences: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Create-once registry entry and reject later changes to the same plan ID."""
+    plan = schedule.experiment_plan
+    if plan is None:
+        return None
+    identity = _experiment_plan_identity(schedule, preferences)
+    registry_dir.mkdir(parents=True, exist_ok=True)
+    path = registry_dir / f"{plan.experiment_id}.json"
+    serialized = json.dumps(
+        identity, ensure_ascii=False, sort_keys=True, indent=2
+    ) + "\n"
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        try:
+            registered = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("registered experiment plan is unreadable") from exc
+        if registered != identity:
+            raise ValueError(
+                "registered experiment plan fingerprint does not match schedule"
+            )
+        return identity
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
+    return identity
 
 
 def load_runtime_preferences(path: Path | None = None) -> dict[str, Any]:
@@ -635,6 +783,19 @@ def scheduled_architecture_identity(
     }
 
 
+def _experiment_plan_identity(
+    schedule: DailySchedule,
+    preferences: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if schedule.experiment_plan is None:
+        return None
+    identities = [
+        scheduled_architecture_identity(target, preferences)
+        for target in schedule.targets
+    ]
+    return schedule.experiment_plan.identity(identities)
+
+
 def load_scheduled_architecture_inventory(
     schedule_path: Path | None = None,
     preferences_path: Path | None = None,
@@ -647,19 +808,21 @@ def load_scheduled_architecture_inventory(
     """
     try:
         schedule = load_daily_schedule(schedule_path)
+        preferences = load_runtime_preferences(preferences_path)
+        experiment_plan = _experiment_plan_identity(schedule, preferences)
         if not schedule.enabled:
             return {
                 "schema": SCHEDULED_ARCHITECTURE_INVENTORY_SCHEMA,
                 "status": "schedule_disabled",
                 "schedule_enabled": False,
                 "paired_shadow_authorized": schedule.paired_shadow_authorized,
+                "experiment_plan": experiment_plan,
                 "architectures": [],
             }
         if len(schedule.targets) > MAX_SCHEDULED_ARCHITECTURES:
             raise ValueError(
                 "scheduled architecture inventory exceeds its bounded limit"
             )
-        preferences = load_runtime_preferences(preferences_path)
         identities = [
             scheduled_architecture_identity(target, preferences)
             for target in schedule.targets
@@ -669,6 +832,7 @@ def load_scheduled_architecture_inventory(
             "status": "loaded",
             "schedule_enabled": True,
             "paired_shadow_authorized": schedule.paired_shadow_authorized,
+            "experiment_plan": experiment_plan,
             "architectures": identities,
         }
     except Exception as exc:
@@ -677,6 +841,7 @@ def load_scheduled_architecture_inventory(
             "status": "unavailable",
             "schedule_enabled": None,
             "paired_shadow_authorized": False,
+            "experiment_plan": None,
             "architectures": [],
             "error_type": type(exc).__name__,
         }
@@ -931,6 +1096,15 @@ def run_due_analyses(
     with lock_context as acquired:
         if not acquired:
             return [{"status": "locked", "reason": "another scheduler invocation is active"}]
+        experiment_plan = (
+            _experiment_plan_identity(schedule, runtime_preferences)
+        )
+        if experiment_plan is not None and not dry_run:
+            experiment_plan = _register_experiment_plan(
+                schedule,
+                actual_lock_path.parent / "architecture_experiments",
+                runtime_preferences,
+            )
         outcomes: list[dict[str, Any]] = []
         analysis_dates: dict[int, str] = {}
         date_by_symbol: dict[str, str] = {}
@@ -972,6 +1146,38 @@ def run_due_analyses(
             group_positions[group_key] = group_positions.get(group_key, 0) + 1
             execution_order = group_positions[group_key]
             execution_group_size = group_sizes[group_key]
+            experiment_fields = (
+                {
+                    "experiment_id": experiment_plan["experiment_id"],
+                    "experiment_plan_fingerprint": experiment_plan["fingerprint"],
+                }
+                if experiment_plan is not None and execution_group_size == 2
+                else {}
+            )
+            if experiment_plan is not None and execution_group_size == 2:
+                completed_pairs = _completed_shadow_pair_count(
+                    store,
+                    symbol=target.symbol,
+                    analysis_date=analysis_date,
+                    architecture_versions=tuple(
+                        row.architecture_version
+                        for row in schedule.targets
+                        if row.symbol == target.symbol
+                    ),
+                )
+                if completed_pairs >= experiment_plan["maximum_paired_samples"]:
+                    outcomes.append({
+                        "symbol": target.symbol,
+                        "analysis_date": analysis_date,
+                        "status": "experiment_budget_complete",
+                        "architecture_version": target.architecture_version,
+                        "completed_paired_samples": completed_pairs,
+                        "maximum_paired_samples": experiment_plan[
+                            "maximum_paired_samples"
+                        ],
+                        **experiment_fields,
+                    })
+                    continue
             existing = _runs_for_market_date(
                 store,
                 target.symbol,
@@ -1057,6 +1263,7 @@ def run_due_analyses(
                         "schedule_trigger": schedule_trigger,
                         "planned_execution_order": execution_order,
                         "execution_group_size": execution_group_size,
+                        **experiment_fields,
                         **(
                             {"retry_at": latest["retry_at"]}
                             if latest.get("retry_at")
@@ -1112,6 +1319,7 @@ def run_due_analyses(
                         "longitudinal_context_mode": request.longitudinal_context_mode,
                         "planned_execution_order": execution_order,
                         "execution_group_size": execution_group_size,
+                        **experiment_fields,
                     }
                 )
                 continue
@@ -1184,6 +1392,7 @@ def run_due_analyses(
                         "schedule_trigger": schedule_trigger,
                         "planned_execution_order": execution_order,
                         "execution_group_size": execution_group_size,
+                        **experiment_fields,
                     }
                 )
                 continue
@@ -1214,6 +1423,7 @@ def run_due_analyses(
                     "schedule_trigger": schedule_trigger,
                     "planned_execution_order": execution_order,
                     "execution_group_size": execution_group_size,
+                    **experiment_fields,
                     "report_path": str(result.report_path) if result.report_path else None,
                     "architecture_evaluation_status": evaluation_status,
                 }

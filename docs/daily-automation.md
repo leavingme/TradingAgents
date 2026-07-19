@@ -274,6 +274,16 @@ instrument context 与完整 investment debate history，刻意排除 `past_cont
 输出因独立重跑而漂移，该 pair 会计入 `architecture_input_mismatches_excluded`，不能
 冒充纵向上下文带来的架构收益。该 schema 只适用于当前研究经理分叉实验；更早的
 拓扑分叉需要另设 pre-treatment schema 或共享上游 snapshot/replay。
+
+启用 paired shadow 前还必须在服务端 schedule 中提供
+`architecture-experiment-plan/v1`。计划固定 `experiment_id`、主指标
+`mean_score_delta`、最少/最多配对样本数、最低 score 改善幅度，以及从两个 target
+规范化得到的架构版本、实际决策 fingerprint 和 treatment 模式。首次非 dry-run 调度会以 `0600` 权限将计划写入
+`~/.tradingagents/architecture_experiments/<experiment_id>.json`；同一 ID 后续只有完全相同
+的规范计划和 SHA-256 fingerprint 才能继续，改成本上限、换双臂、改变实现/模型配置或复用 ID 会 fail closed。
+达到 `maximum_paired_samples` 后，两臂均返回 `experiment_budget_complete`，不再发起新的
+LLM 分析。dry-run 只展示计划身份，不创建注册文件；默认生产单架构 schedule 不受影响，
+`paired_shadow_authorized=true` 仍是独立的显式成本授权门禁。
 查询方式：
 
 ```bash

@@ -16,6 +16,7 @@ from tradingagents.automation.daily import (
     _architecture_evaluation_status,
     _context_cost_diagnostic,
     _record_architecture_evaluation_status,
+    _register_experiment_plan,
     load_runtime_preferences,
     load_scheduled_architecture_inventory,
     run_due_analyses,
@@ -37,6 +38,17 @@ def _schedule() -> DailySchedule:
             ),
         ),
     )
+
+
+def _experiment_plan(**overrides):
+    return {
+        "experiment_id": "nvda-rm-context-test-v1",
+        "primary_metric": "mean_score_delta",
+        "minimum_paired_samples": 20,
+        "maximum_paired_samples": 30,
+        "minimum_score_improvement": 0.002,
+        **overrides,
+    }
 
 
 def test_systemd_assets_preserve_long_run_and_persistent_timer_contract():
@@ -156,6 +168,7 @@ def test_scheduled_architecture_inventory_fails_closed_without_leaking_paths(tmp
         "status": "unavailable",
         "schedule_enabled": None,
         "paired_shadow_authorized": False,
+        "experiment_plan": None,
         "architectures": [],
         "error_type": "FileNotFoundError",
     }
@@ -279,6 +292,7 @@ def test_schedule_allows_paired_shadow_versions_for_same_symbol():
     schedule = DailySchedule.from_dict({
         "enabled": True,
         "paired_shadow_authorized": True,
+        "experiment_plan": _experiment_plan(),
         "targets": [
             {
                 **common,
@@ -336,6 +350,79 @@ def test_enabled_paired_shadow_requires_explicit_cost_authorization():
         DailySchedule(enabled=True, targets=direct_targets)
 
 
+def test_enabled_paired_shadow_requires_preregistered_plan():
+    common = {
+        "symbol": "NVDA",
+        "timezone": "America/New_York",
+        "run_after": "16:30",
+    }
+    with pytest.raises(ValueError, match="requires experiment_plan"):
+        DailySchedule.from_dict({
+            "enabled": True,
+            "paired_shadow_authorized": True,
+            "targets": [
+                {
+                    **common,
+                    "architecture_version": "baseline",
+                    "longitudinal_context_mode": "portfolio_only",
+                },
+                {
+                    **common,
+                    "architecture_version": "challenger",
+                    "longitudinal_context_mode": "research_and_portfolio",
+                },
+            ],
+        })
+
+
+def test_experiment_plan_registry_is_create_once(tmp_path):
+    common = {
+        "symbol": "NVDA",
+        "timezone": "America/New_York",
+        "run_after": "16:30",
+    }
+
+    def build_plan(maximum_samples):
+        return DailySchedule.from_dict({
+            "enabled": True,
+            "paired_shadow_authorized": True,
+            "experiment_plan": _experiment_plan(
+                maximum_paired_samples=maximum_samples
+            ),
+            "targets": [
+                {
+                    **common,
+                    "architecture_version": "baseline",
+                    "longitudinal_context_mode": "portfolio_only",
+                },
+                {
+                    **common,
+                    "architecture_version": "challenger",
+                    "longitudinal_context_mode": "research_and_portfolio",
+                },
+            ],
+        })
+
+    first = _register_experiment_plan(
+        build_plan(30), tmp_path, {"research_depth": 1}
+    )
+    repeated = _register_experiment_plan(
+        build_plan(30), tmp_path, {"research_depth": 1}
+    )
+
+    assert repeated == first
+    assert all(len(arm["architecture_fingerprint"]) == 64 for arm in first["arms"])
+    assert (tmp_path / "nvda-rm-context-test-v1.json").stat().st_mode & 0o777 == 0o600
+    with pytest.raises(ValueError, match="does not match schedule"):
+        _register_experiment_plan(
+            build_plan(31), tmp_path, {"research_depth": 1}
+        )
+    with pytest.raises(ValueError, match="does not match schedule"):
+        _register_experiment_plan(
+            build_plan(30), tmp_path, {"research_depth": 3}
+        )
+
+
 def test_paired_shadow_rejects_non_comparable_upstream_inputs():
     common = {
         "symbol": "NVDA",
@@ -373,6 +460,7 @@ def test_completed_shadow_pairs_counterbalance_cold_cache_execution_order(
     schedule = DailySchedule.from_dict({
         "enabled": True,
         "paired_shadow_authorized": True,
+        "experiment_plan": _experiment_plan(),
         "targets": [
             {
                 **common,
@@ -462,6 +550,7 @@ def test_incomplete_shadow_pair_does_not_advance_counterbalance(tmp_path, monkey
     schedule = DailySchedule.from_dict({
         "enabled": True,
         "paired_shadow_authorized": True,
+        "experiment_plan": _experiment_plan(),
         "targets": [
             {
                 **common,
@@ -506,6 +595,67 @@ def test_incomplete_shadow_pair_does_not_advance_counterbalance(tmp_path, monkey
         "baseline",
         "challenger",
     ]
+
+
+def test_paired_shadow_stops_at_preregistered_sample_budget(tmp_path, monkeypatch):
+    common = {
+        "symbol": "NVDA",
+        "timezone": "America/New_York",
+        "run_after": "16:30",
+    }
+    schedule = DailySchedule.from_dict({
+        "enabled": True,
+        "paired_shadow_authorized": True,
+        "experiment_plan": _experiment_plan(maximum_paired_samples=20),
+        "targets": [
+            {
+                **common,
+                "architecture_version": "baseline",
+                "longitudinal_context_mode": "portfolio_only",
+            },
+            {
+                **common,
+                "architecture_version": "challenger",
+                "longitudinal_context_mode": "research_and_portfolio",
+            },
+        ],
+    })
+    store = RunHistoryStore(tmp_path / "runs.db")
+    for day in range(1, 21):
+        for version in ("baseline", "challenger"):
+            run_id = f"{version}-202606{day:02d}"
+            store.create_run(
+                run_id,
+                "NVDA",
+                f"2026-06-{day:02d}",
+                "stock",
+                ["market"],
+                "minimax-cn",
+                1,
+                architecture_version=version,
+            )
+            store.mark_finished(run_id, "completed")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: now,
+    )
+
+    result = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 20, 16, 45, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        dry_run=True,
+    )
+
+    assert [row["status"] for row in result] == [
+        "experiment_budget_complete",
+        "experiment_budget_complete",
+    ]
+    assert {row["completed_paired_samples"] for row in result} == {20}
+    assert {row["experiment_id"] for row in result} == {
+        "nvda-rm-context-test-v1"
+    }
 
 
 def test_runtime_preferences_reuse_server_models_and_vendor_order(tmp_path):

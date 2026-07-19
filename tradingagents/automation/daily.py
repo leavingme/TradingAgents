@@ -50,7 +50,7 @@ _SCHEDULER_FAILURE_STATUSES = {
     "failed", "unavailable", "attempts_exhausted", "market_data_unavailable"
 }
 ARCHITECTURE_EVALUATION_STATUS_SCHEMA = (
-    "tradingagents/architecture-evaluation-status/v4"
+    "tradingagents/architecture-evaluation-status/v5"
 )
 ARCHITECTURE_EVALUATION_SCAN_LIMIT = 5000
 CONTEXT_COST_DIAGNOSTIC_SCHEMA = "tradingagents/context-cost-diagnostic/v1"
@@ -191,6 +191,9 @@ def _architecture_evaluation_status(
         "in_progress_evaluation_count": sum(
             bool(row.get("settlement_claimed_by_run_id"))
             for row in pending_runs
+        ),
+        "failed_evaluation_count": sum(
+            bool(row.get("settlement_failure_code")) for row in pending_runs
         ),
         "cohort_count": len(rollups),
         "other_cohort_count": len(rollups) - int(selected is not None),

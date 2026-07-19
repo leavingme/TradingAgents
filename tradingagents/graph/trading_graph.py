@@ -48,6 +48,18 @@ class OutcomeSettlementInProgressError(RuntimeError):
     """A different audited run owns the fixed-horizon settlement lease."""
 
 
+class OutcomeSettlementDataError(RuntimeError):
+    """Canonical outcome data was unavailable or failed validation."""
+
+    _CODES = {"ohlcv_unavailable", "outcome_validation_failed"}
+
+    def __init__(self, code: str):
+        if code not in self._CODES:
+            raise ValueError("unsupported outcome settlement data error code")
+        self.code = code
+        super().__init__("outcome settlement data is unavailable")
+
+
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
@@ -224,6 +236,7 @@ class TradingAgentsGraph:
         holding_days: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
         benchmark: str = "SPY", as_of_date: str | None = None,
         return_details: bool = False, decision_as_of: str | None = None,
+        strict_errors: bool = False,
     ):
         """Fetch an information-safe raw/alpha return after the decision day.
 
@@ -277,9 +290,18 @@ class TradingAgentsGraph:
             # Use the canonical configured OHLCV route/cache for both legs.
             # Evaluation must not silently hard-code Westock while the analysis
             # itself is configured Longbridge-first.
-            stock = load_ohlcv(ticker, end_str)
-            bench = load_ohlcv(benchmark, end_str)
+            try:
+                stock = load_ohlcv(ticker, end_str)
+                bench = load_ohlcv(benchmark, end_str)
+            except Exception as exc:
+                if strict_errors:
+                    raise OutcomeSettlementDataError(
+                        "ohlcv_unavailable"
+                    ) from exc
+                raise
             if stock.empty or bench.empty:
+                if strict_errors:
+                    raise OutcomeSettlementDataError("ohlcv_unavailable")
                 return None if return_details else (None, None, None)
 
             def closes(frame: pd.DataFrame, label: str) -> pd.DataFrame:
@@ -349,11 +371,22 @@ class TradingAgentsGraph:
                     entry_cutoff_date=entry_cutoff_date.isoformat(),
                 )
             return raw, alpha, holding_days
-        except Exception as e:
+        except OutcomeSettlementDataError as exc:
             logger.warning(
-                "Could not resolve outcome for %s on %s vs %s (will retry next run): %s",
-                ticker, trade_date, benchmark, e,
+                "Outcome settlement failed for %s on %s vs %s: failure_code=%s",
+                ticker, trade_date, benchmark, exc.code,
             )
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Could not resolve outcome for %s on %s vs %s; "
+                "will retry next run: error_type=%s",
+                ticker, trade_date, benchmark, type(exc).__name__,
+            )
+            if strict_errors:
+                raise OutcomeSettlementDataError(
+                    "outcome_validation_failed"
+                ) from exc
             return None if return_details else (None, None, None)
 
     def _resolve_pending_entries(self, ticker: str, as_of_date: str | None = None) -> None:
@@ -496,9 +529,27 @@ class TradingAgentsGraph:
                         as_of_date=as_of_date,
                         return_details=True,
                         decision_as_of=decision_as_of,
+                        strict_errors=True,
                     )
+                except OutcomeSettlementDataError as exc:
+                    if not evaluating_run_id:
+                        raise RuntimeError(
+                            "strict outcome settlement requires an audited run"
+                        ) from exc
+                    history_store.record_decision_evaluation_failure(
+                        prior_run["run_id"],
+                        horizon_sessions=DEFAULT_OUTCOME_HORIZON_SESSIONS,
+                        failure_code=exc.code,
+                        failed_by_run_id=evaluating_run_id,
+                    )
+                    raise
                 finally:
                     reset_vendor_call_purpose(purpose_token)
+                history_store.resolve_decision_evaluation_failure(
+                    prior_run["run_id"],
+                    horizon_sessions=DEFAULT_OUTCOME_HORIZON_SESSIONS,
+                    resolved_by_run_id=evaluating_run_id,
+                )
                 if measurement is None:
                     continue
                 if not isinstance(measurement, OutcomeMeasurement):

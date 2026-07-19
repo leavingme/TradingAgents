@@ -359,6 +359,12 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   `OutcomeSettlementInProgressError` fail closed，不得用尚未包含该成熟结果的旧上下文继续。
   租约固定有界并允许崩溃后接管，非 owner 不得释放；CLI/API/每日快照必须把活跃租约显示为
   `settlement_in_progress`，不得把它误报为普通等待或损坏历史。
+- outcome resolver 只有在标的与基准均取得有效 OHLCV、但共同收盘点不足 entry + 完整
+  horizon 时才能返回普通 pending。空数据、vendor/router 异常、字段/日期/数值/精确来源证明
+  失败必须在 strict live 结算中写入白名单 `decision_evaluation_failures`，然后以类型化
+  `OutcomeSettlementDataError` 在 Agent 前 fail closed；不得把这些故障压成 `None` 或记录
+  外部异常正文。CLI/API/每日快照必须显示 `retryable_settlement_failure`、安全 failure code
+  和累计次数；数据恢复或确认尚未成熟后关闭失败生命周期。
 
 ## 测试和验证注意事项
 

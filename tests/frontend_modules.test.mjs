@@ -212,8 +212,9 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
     pending_evaluation_count: 1,
     pending_evaluations: [{
       run_id: 'pending',
-      status: 'settlement_in_progress',
-      settlement_claimed_by_run_id: 'current-run',
+      status: 'retryable_settlement_failure',
+      settlement_failure_code: 'ohlcv_unavailable',
+      settlement_failure_count: 2,
     }],
     run_cost_sample_count: 2,
     run_cost_rollups: [{
@@ -317,11 +318,12 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   });
   assert.equal(view.evaluationCount, 1);
   assert.equal(view.pendingCount, 1);
-  assert.equal(view.pending[0].status, 'settlement_in_progress');
+  assert.equal(view.pending[0].status, 'retryable_settlement_failure');
   assert.equal(
-    view.pending[0].settlement_claimed_by_run_id,
-    'current-run',
+    view.pending[0].settlement_failure_code,
+    'ohlcv_unavailable',
   );
+  assert.equal(view.pending[0].settlement_failure_count, 2);
   assert.equal(view.cohortCount, 2);
   assert.equal(view.activeArchitectureCount, 1);
   assert.equal(view.activeInventoryStatus, 'loaded');

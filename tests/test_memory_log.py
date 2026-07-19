@@ -10,7 +10,10 @@ from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.graph.propagation import Propagator
 from tradingagents.graph.reflection import Reflector
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.graph.trading_graph import (
+    OutcomeSettlementDataError,
+    TradingAgentsGraph,
+)
 from tradingagents.evaluation import OutcomeMeasurement
 
 _SEP = TradingMemoryLog._SEPARATOR
@@ -585,6 +588,46 @@ class TestDeferredReflection:
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-04-19")
         assert raw is None and alpha is None and days is None
 
+    def test_fetch_returns_strict_mode_keeps_confirmed_short_horizon_pending(self):
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        with patch("tradingagents.dataflows.stockstats_utils.load_ohlcv") as fetch:
+            fetch.return_value = pd.DataFrame({
+                "Date": ["2026-04-20"],
+                "Close": [100.0],
+            })
+            measurement = TradingAgentsGraph._fetch_returns(
+                mock_graph,
+                "NVDA",
+                "2026-04-19",
+                return_details=True,
+                decision_as_of="2026-04-19T22:00:00+00:00",
+                strict_errors=True,
+            )
+        assert measurement is None
+
+    def test_fetch_returns_strict_mode_types_failure_and_redacts_body(
+        self, caplog
+    ):
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        sentinel = "https://provider.example/path?token=sentinel-secret"
+        with patch(
+            "tradingagents.dataflows.stockstats_utils.load_ohlcv",
+            side_effect=RuntimeError(sentinel),
+        ):
+            with pytest.raises(OutcomeSettlementDataError) as exc_info:
+                TradingAgentsGraph._fetch_returns(
+                    mock_graph,
+                    "NVDA",
+                    "2026-04-01",
+                    return_details=True,
+                    decision_as_of="2026-04-01T22:00:00+00:00",
+                    strict_errors=True,
+                )
+        assert exc_info.value.code == "ohlcv_unavailable"
+        assert str(exc_info.value) == "outcome settlement data is unavailable"
+        assert sentinel not in caplog.text
+        assert "failure_code=ohlcv_unavailable" in caplog.text
+
     def test_fetch_returns_uses_decision_market_day_not_old_analysis_day(
         self, monkeypatch
     ):
@@ -959,6 +1002,82 @@ class TestDeferredReflection:
             )
         finally:
             reset_run_id(token)
+        assert released == [(('prior-run',), {
+            "horizon_sessions": 5,
+            "claimed_by_run_id": "current-run",
+        })]
+
+    def test_resolve_persists_typed_data_failure_and_releases_claim(
+        self, tmp_path, monkeypatch
+    ):
+        from tradingagents.runtime.audit_context import bind_run_id, reset_run_id
+        from tradingagents.runtime.history import history_store
+
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.memory_log = make_log(tmp_path)
+        mock_graph._resolve_benchmark.return_value = "SPY"
+        mock_graph._fetch_returns.side_effect = OutcomeSettlementDataError(
+            "ohlcv_unavailable"
+        )
+        monkeypatch.setattr(
+            history_store,
+            "list_unevaluated_validated_runs",
+            lambda **kwargs: [{
+                "run_id": "prior-run",
+                "analysis_date": "2026-01-05",
+                "market_data_date": "2026-01-05",
+                "architecture_version": "baseline",
+            }],
+        )
+        monkeypatch.setattr(history_store, "get_run", lambda run_id: {
+            "events": [{
+                "type": "run_completed",
+                "timestamp": "2026-01-05T22:00:00+00:00",
+                "content": {
+                    "decision": DECISION_BUY,
+                    "decision_status": "validated",
+                    "decision_as_of": "2026-01-05T22:00:00+00:00",
+                },
+            }],
+        })
+        monkeypatch.setattr(
+            history_store,
+            "claim_decision_evaluation",
+            lambda *args, **kwargs: "claimed",
+        )
+        failures = []
+        monkeypatch.setattr(
+            history_store,
+            "record_decision_evaluation_failure",
+            lambda *args, **kwargs: failures.append((args, kwargs)),
+        )
+        resolved = []
+        monkeypatch.setattr(
+            history_store,
+            "resolve_decision_evaluation_failure",
+            lambda *args, **kwargs: resolved.append((args, kwargs)),
+        )
+        released = []
+        monkeypatch.setattr(
+            history_store,
+            "release_decision_evaluation_claim",
+            lambda *args, **kwargs: released.append((args, kwargs)),
+        )
+        token = bind_run_id("current-run")
+        try:
+            with pytest.raises(OutcomeSettlementDataError) as exc_info:
+                TradingAgentsGraph._resolve_pending_entries(
+                    mock_graph, "NVDA", as_of_date="2026-01-12"
+                )
+        finally:
+            reset_run_id(token)
+        assert exc_info.value.code == "ohlcv_unavailable"
+        assert failures == [(('prior-run',), {
+            "horizon_sessions": 5,
+            "failure_code": "ohlcv_unavailable",
+            "failed_by_run_id": "current-run",
+        })]
+        assert resolved == []
         assert released == [(('prior-run',), {
             "horizon_sessions": 5,
             "claimed_by_run_id": "current-run",

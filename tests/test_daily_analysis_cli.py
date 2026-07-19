@@ -160,12 +160,38 @@ def test_daily_evaluate_distinguishes_invalid_history_from_maturing_outcome(
         horizon_sessions=5,
         claimed_by_run_id="settler-run",
     ) == "claimed"
+    store.create_run(
+        "failed-outcome",
+        "NVDA",
+        "2026-07-03",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+    )
+    store.add_event("failed-outcome", AnalysisEvent(
+        type="run_completed",
+        run_id="failed-outcome",
+        timestamp="2026-07-03T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-03T21:00:00+00:00",
+        },
+    ))
+    store.record_decision_evaluation_failure(
+        "failed-outcome",
+        horizon_sessions=5,
+        failure_code="ohlcv_unavailable",
+        failed_by_run_id="settler-run",
+    )
 
     payload, serialized = _run_daily_cli(tmp_path, "evaluate")
 
-    assert payload["pending_evaluation_count"] == 2
+    assert payload["pending_evaluation_count"] == 3
     assert payload["blocked_evaluation_count"] == 1
     assert payload["in_progress_evaluation_count"] == 1
+    assert payload["failed_evaluation_count"] == 1
     pending_by_status = {
         row["status"]: row for row in payload["pending_evaluations"]
     }
@@ -180,4 +206,10 @@ def test_daily_evaluate_distinguishes_invalid_history_from_maturing_outcome(
     assert pending_by_status["settlement_in_progress"][
         "settlement_claim_expires_at"
     ]
+    assert pending_by_status["retryable_settlement_failure"][
+        "settlement_failure_code"
+    ] == "ohlcv_unavailable"
+    assert pending_by_status["retryable_settlement_failure"][
+        "settlement_failure_count"
+    ] == 1
     assert "auditor-run" not in serialized

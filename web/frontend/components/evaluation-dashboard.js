@@ -620,6 +620,8 @@ export function createEvaluationDashboard({
               ? `${t('settlementBlocked')} (${row.settlement_issue_code || 'unknown'})`
               : row.status === 'settlement_in_progress'
               ? t('settlementInProgress')
+              : row.status === 'retryable_settlement_failure'
+              ? `${t('settlementRetryableFailure')} (${row.settlement_failure_code || 'unknown'} · ${row.settlement_failure_count || 1})`
               : t('awaitingOutcome')
           }`,
         ),

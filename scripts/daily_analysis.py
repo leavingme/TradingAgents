@@ -37,6 +37,7 @@ def _pending_evaluation_summary(
 ) -> dict:
     issue_code = row.get("settlement_issue_code")
     claimed_by_run_id = row.get("settlement_claimed_by_run_id")
+    failure_code = row.get("settlement_failure_code")
     return {
         "run_id": row.get("run_id"),
         "ticker": row.get("ticker"),
@@ -53,6 +54,8 @@ def _pending_evaluation_summary(
             if issue_code
             else "settlement_in_progress"
             if claimed_by_run_id
+            else "retryable_settlement_failure"
+            if failure_code
             else "awaiting_fixed_horizon_outcome"
         ),
         "settlement_issue_code": issue_code,
@@ -63,6 +66,9 @@ def _pending_evaluation_summary(
         "settlement_claim_expires_at": row.get(
             "settlement_claim_expires_at"
         ),
+        "settlement_failure_code": failure_code,
+        "settlement_failure_count": row.get("settlement_failure_count"),
+        "settlement_last_failed_at": row.get("settlement_last_failed_at"),
     }
 
 
@@ -100,6 +106,9 @@ def main() -> int:
             ),
             "in_progress_evaluation_count": sum(
                 bool(row.get("settlement_claimed_by_run_id")) for row in pending
+            ),
+            "failed_evaluation_count": sum(
+                bool(row.get("settlement_failure_code")) for row in pending
             ),
             "pending_evaluations": [
                 _pending_evaluation_summary(row) for row in pending

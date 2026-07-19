@@ -545,6 +545,9 @@ def test_architecture_evaluation_status_is_compact_and_scoped_to_run_identity():
             }, {
                 "run_id": "claimed",
                 "settlement_claimed_by_run_id": "current-run",
+            }, {
+                "run_id": "failed",
+                "settlement_failure_code": "ohlcv_unavailable",
             }]
 
     store = FakeStore()
@@ -565,9 +568,10 @@ def test_architecture_evaluation_status_is_compact_and_scoped_to_run_identity():
         "ticker": "NVDA",
         "scan_limit": ARCHITECTURE_EVALUATION_SCAN_LIMIT,
         "evaluated_count_scanned": 1,
-        "pending_evaluation_count": 2,
+        "pending_evaluation_count": 3,
         "blocked_evaluation_count": 1,
         "in_progress_evaluation_count": 1,
+        "failed_evaluation_count": 1,
         "cohort_count": 1,
         "other_cohort_count": 0,
         "current_architecture": {

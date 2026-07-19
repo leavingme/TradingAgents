@@ -399,6 +399,8 @@ async def get_decision_evaluations(
                 if row.get("settlement_issue_code")
                 else "settlement_in_progress"
                 if row.get("settlement_claimed_by_run_id")
+                else "retryable_settlement_failure"
+                if row.get("settlement_failure_code")
                 else "awaiting_fixed_horizon_outcome"
             ),
             "settlement_issue_code": row.get("settlement_issue_code"),
@@ -410,6 +412,11 @@ async def get_decision_evaluations(
             ),
             "settlement_claim_expires_at": row.get(
                 "settlement_claim_expires_at"
+            ),
+            "settlement_failure_code": row.get("settlement_failure_code"),
+            "settlement_failure_count": row.get("settlement_failure_count"),
+            "settlement_last_failed_at": row.get(
+                "settlement_last_failed_at"
             ),
         }
         for row in pending_rows[:bounded_limit]
@@ -424,6 +431,9 @@ async def get_decision_evaluations(
         "in_progress_evaluation_count": sum(
             bool(row.get("settlement_claimed_by_run_id"))
             for row in pending_rows
+        ),
+        "failed_evaluation_count": sum(
+            bool(row.get("settlement_failure_code")) for row in pending_rows
         ),
         "pending_evaluations": pending,
         "rollups": architecture_rollups(evaluations),

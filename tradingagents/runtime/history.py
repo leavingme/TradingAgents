@@ -23,6 +23,10 @@ OUTCOME_SETTLEMENT_ISSUE_CODES = frozenset({
     "decision_as_of_missing",
     "decision_as_of_invalid",
 })
+OUTCOME_SETTLEMENT_FAILURE_CODES = frozenset({
+    "ohlcv_unavailable",
+    "outcome_validation_failed",
+})
 OUTCOME_SETTLEMENT_LEASE_SECONDS = 3600
 
 def _now() -> str:
@@ -240,6 +244,22 @@ class RunHistoryStore:
                         PRIMARY KEY (run_id, horizon_sessions),
                         FOREIGN KEY (run_id) REFERENCES runs(run_id),
                         FOREIGN KEY (claimed_by_run_id) REFERENCES runs(run_id)
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS decision_evaluation_failures (
+                        run_id                TEXT NOT NULL,
+                        horizon_sessions      INTEGER NOT NULL,
+                        failure_code          TEXT NOT NULL,
+                        failed_by_run_id      TEXT NOT NULL,
+                        failure_count         INTEGER NOT NULL,
+                        first_failed_at        TEXT NOT NULL,
+                        last_failed_at         TEXT NOT NULL,
+                        resolved_by_run_id    TEXT,
+                        resolved_at           TEXT,
+                        PRIMARY KEY (run_id, horizon_sessions),
+                        FOREIGN KEY (run_id) REFERENCES runs(run_id),
+                        FOREIGN KEY (failed_by_run_id) REFERENCES runs(run_id)
                     )
                 """)
                 conn.execute(
@@ -465,6 +485,9 @@ class RunHistoryStore:
                              , issue.first_detected_at AS settlement_issue_detected_at
                              , claim.claimed_by_run_id AS settlement_claimed_by_run_id
                              , claim.expires_at AS settlement_claim_expires_at
+                             , failure.failure_code AS settlement_failure_code
+                             , failure.failure_count AS settlement_failure_count
+                             , failure.last_failed_at AS settlement_last_failed_at
                         FROM runs
                         LEFT JOIN decision_evaluations
                           ON decision_evaluations.run_id = runs.run_id
@@ -484,14 +507,108 @@ class RunHistoryStore:
                           ON claim.run_id = runs.run_id
                          AND claim.horizon_sessions = ?
                          AND julianday(claim.expires_at) > julianday('now')
+                        LEFT JOIN decision_evaluation_failures AS failure
+                          ON failure.run_id = runs.run_id
+                         AND failure.horizon_sessions = ?
+                         AND failure.resolved_at IS NULL
                         WHERE runs.decision_status = 'validated'
                           {ticker_clause}
                           AND decision_evaluations.run_id IS NULL
                         ORDER BY runs.analysis_date, runs.created_at, runs.run_id
                         """,
-                        [params[0], params[0], params[0], *params[1:]],
+                        [params[0], params[0], params[0], params[0], *params[1:]],
                     ).fetchall()
                 ]
+
+    def record_decision_evaluation_failure(
+        self,
+        run_id: str,
+        *,
+        horizon_sessions: int,
+        failure_code: str,
+        failed_by_run_id: str,
+    ) -> None:
+        """Persist a safe retryable settlement failure without error text."""
+        if failure_code not in OUTCOME_SETTLEMENT_FAILURE_CODES:
+            raise ValueError("unsupported decision evaluation failure code")
+        horizon = int(horizon_sessions)
+        if horizon <= 0:
+            raise ValueError("horizon_sessions must be positive")
+        now = _canonical_utc_timestamp(_now(), "failed_at")
+        with self._lock:
+            with self._conn() as conn:
+                for candidate, field in (
+                    (run_id, "run_id"),
+                    (failed_by_run_id, "failed_by_run_id"),
+                ):
+                    if conn.execute(
+                        "SELECT 1 FROM runs WHERE run_id=?", (candidate,)
+                    ).fetchone() is None:
+                        raise ValueError(
+                            f"decision evaluation failure {field} does not exist"
+                        )
+                conn.execute(
+                    """
+                    INSERT INTO decision_evaluation_failures (
+                        run_id, horizon_sessions, failure_code,
+                        failed_by_run_id, failure_count,
+                        first_failed_at, last_failed_at,
+                        resolved_by_run_id, resolved_at
+                    ) VALUES (?, ?, ?, ?, 1, ?, ?, NULL, NULL)
+                    ON CONFLICT(run_id, horizon_sessions) DO UPDATE SET
+                        failure_code=excluded.failure_code,
+                        failed_by_run_id=excluded.failed_by_run_id,
+                        failure_count=CASE
+                            WHEN decision_evaluation_failures.resolved_at IS NULL
+                             AND decision_evaluation_failures.failure_code =
+                                 excluded.failure_code
+                            THEN decision_evaluation_failures.failure_count + 1
+                            ELSE 1
+                        END,
+                        first_failed_at=CASE
+                            WHEN decision_evaluation_failures.resolved_at IS NULL
+                             AND decision_evaluation_failures.failure_code =
+                                 excluded.failure_code
+                            THEN decision_evaluation_failures.first_failed_at
+                            ELSE excluded.first_failed_at
+                        END,
+                        last_failed_at=excluded.last_failed_at,
+                        resolved_by_run_id=NULL,
+                        resolved_at=NULL
+                    """,
+                    (
+                        run_id,
+                        horizon,
+                        failure_code,
+                        failed_by_run_id,
+                        now,
+                        now,
+                    ),
+                )
+
+    def resolve_decision_evaluation_failure(
+        self,
+        run_id: str,
+        *,
+        horizon_sessions: int,
+        resolved_by_run_id: str | None = None,
+    ) -> None:
+        """Close a retryable failure after data is valid or confirmed immature."""
+        with self._lock:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    UPDATE decision_evaluation_failures
+                    SET resolved_by_run_id=?, resolved_at=?
+                    WHERE run_id=? AND horizon_sessions=? AND resolved_at IS NULL
+                    """,
+                    (
+                        resolved_by_run_id,
+                        _canonical_utc_timestamp(_now(), "resolved_at"),
+                        run_id,
+                        int(horizon_sessions),
+                    ),
+                )
 
     def claim_decision_evaluation(
         self,

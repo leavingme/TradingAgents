@@ -446,6 +446,64 @@ def test_history_concurrent_settlement_claim_has_exactly_one_owner(tmp_path):
     assert claims[0]["claimed_by_run_id"] in {"settler-a", "settler-b"}
 
 
+def test_history_tracks_retryable_settlement_failure_lifecycle(tmp_path):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    for run_id in ("pending-outcome", "settler"):
+        store.create_run(
+            run_id, "NVDA", "2026-07-01", "stock", ["market"],
+            "minimax-cn", 1,
+        )
+    store.add_event("pending-outcome", AnalysisEvent(
+        type="run_completed",
+        run_id="pending-outcome",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-01T21:00:00+00:00",
+        },
+    ))
+
+    for _ in range(2):
+        store.record_decision_evaluation_failure(
+            "pending-outcome",
+            horizon_sessions=5,
+            failure_code="ohlcv_unavailable",
+            failed_by_run_id="settler",
+        )
+    failed = store.list_unevaluated_validated_runs(ticker="NVDA")[0]
+    assert failed["settlement_failure_code"] == "ohlcv_unavailable"
+    assert failed["settlement_failure_count"] == 2
+    assert failed["settlement_last_failed_at"]
+
+    store.record_decision_evaluation_failure(
+        "pending-outcome",
+        horizon_sessions=5,
+        failure_code="outcome_validation_failed",
+        failed_by_run_id="settler",
+    )
+    changed = store.list_unevaluated_validated_runs(ticker="NVDA")[0]
+    assert changed["settlement_failure_code"] == "outcome_validation_failed"
+    assert changed["settlement_failure_count"] == 1
+
+    store.resolve_decision_evaluation_failure(
+        "pending-outcome",
+        horizon_sessions=5,
+        resolved_by_run_id="settler",
+    )
+    resolved = store.list_unevaluated_validated_runs(ticker="NVDA")[0]
+    assert resolved["settlement_failure_code"] is None
+    assert resolved["settlement_failure_count"] is None
+
+    with pytest.raises(ValueError, match="unsupported"):
+        store.record_decision_evaluation_failure(
+            "pending-outcome",
+            horizon_sessions=5,
+            failure_code="https://provider.example/secret",
+            failed_by_run_id="settler",
+        )
+
+
 def test_history_rejects_evaluation_without_exact_ohlcv_provenance(tmp_path):
     store = RunHistoryStore(tmp_path / "runs.db")
     store.create_run(

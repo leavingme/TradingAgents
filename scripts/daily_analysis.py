@@ -144,6 +144,10 @@ def main() -> int:
                 }
                 for item in schedule.targets
             ],
+            "active_architecture_inventory": load_scheduled_architecture_inventory(
+                args.config,
+                args.web_config,
+            ),
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0

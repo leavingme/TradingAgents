@@ -401,10 +401,11 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - **Longbridge token 过期时间**：token 位于仓库根目录
   `.longbridge_mcp_token.json`，签发后约 14–30 天过期（以文件内 `expiry` 为准）。
   运行长 smoke 或自然调度前只读取并检查 expiry 字段，不输出 token 字段。截至
-  2026-07-18：过期时间为 2026-07-18 23:56 CST，晚于首个自然调度窗口但早于
-  下一次周一窗口。expiry 缺失、格式错误或无时区必须视为过期并触发
+  2026-07-19 安全状态函数已确认该 bearer 于 2026-07-18 23:56 CST 过期，返回
+  `status=expired` / `configured=false`。expiry 缺失、格式错误或无时区必须视为过期并触发
   `MCPAuthError`；不得假定 token 有效。独立 Longbridge CLI OAuth 是 MCP 认证失败时
-  的第一 fallback，但每次到期前仍需用真实结构化能力探测确认其健康。
+  的第一 fallback；到期前的 CLI/OHLCV/财务/新闻探测不能替代到期后的真实网络能力
+  证据，下一次自然运行前仍需重新探测，未探测时只能报告“fallback 已配置”。
   `/api/config/env-status` 的 `configured` 必须基于 token schema 和带时区 expiry
   验证，不能只根据文件是否存在；可额外返回不含凭据的 `credential_status` 和
   UTC `expires_at`。

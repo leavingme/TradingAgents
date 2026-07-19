@@ -75,6 +75,32 @@ def _enforce_rate(bucket: str, *, limit: int, window_seconds: int = 60) -> None:
         events.append(now)
 
 
+def _annotate_verification_credential_state(
+    verifications: dict,
+    data_vendors: dict,
+) -> dict:
+    """Keep historical checks intact while exposing the current credential gate."""
+    annotated: dict = {}
+    for category, vendors in verifications.items():
+        annotated[category] = {}
+        for vendor, verification in vendors.items():
+            item = dict(verification)
+            credential = data_vendors.get(vendor, {})
+            required = bool(credential.get("required"))
+            configured = bool(credential.get("configured"))
+            credential_status = credential.get("credential_status")
+            item["historical"] = True
+            item["current_credential_usable"] = not required or configured
+            item["current_credential_status"] = (
+                credential_status
+                or ("configured" if configured else "missing")
+                if required
+                else "not_required"
+            )
+            annotated[category][vendor] = item
+    return annotated
+
+
 @app.get("/api/config/defaults")
 async def get_config_defaults():
     fields = RunCreateRequest.model_fields
@@ -191,10 +217,14 @@ async def get_env_status():
             "required": False,
         }
 
+    verifications = _annotate_verification_credential_state(
+        vendor_verification_store.list_latest(),
+        data_vendors,
+    )
     return {
         "providers": providers,
         "data_vendors": data_vendors,
-        "vendor_verifications": vendor_verification_store.list_latest(),
+        "vendor_verifications": verifications,
     }
 
 

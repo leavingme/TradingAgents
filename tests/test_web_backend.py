@@ -191,6 +191,20 @@ def test_get_env_status_reports_provider_key_presence(monkeypatch):
             "expiry": "2000-01-01T00:00:00+00:00",
         },
     )
+    monkeypatch.setattr(
+        main.vendor_verification_store,
+        "list_latest",
+        lambda: {
+            "core_stock_apis": {
+                "longbridge_mcp": {
+                    "vendor": "longbridge_mcp",
+                    "category": "core_stock_apis",
+                    "status": "available",
+                    "verified_at": "2026-07-17T00:00:00+00:00",
+                }
+            }
+        },
+    )
     status = asyncio.run(main.get_env_status())
 
     assert status["providers"]["minimax-cn"]["env_var"] == "MINIMAX_CN_API_KEY"
@@ -204,7 +218,38 @@ def test_get_env_status_reports_provider_key_presence(monkeypatch):
         "credential_status": "expired",
         "expires_at": "2000-01-01T00:00:00+00:00",
     }
+    verification = status["vendor_verifications"]["core_stock_apis"]["longbridge_mcp"]
+    assert verification["status"] == "available"
+    assert verification["historical"] is True
+    assert verification["current_credential_usable"] is False
+    assert verification["current_credential_status"] == "expired"
     assert "sentinel-secret" not in str(status)
+
+
+def test_verification_credential_annotation_does_not_overstate_current_usability():
+    from web.backend.main import _annotate_verification_credential_state
+
+    original = {
+        "news_data": {
+            "longbridge": {"status": "available", "verified_at": "earlier"},
+            "duckduckgo": {"status": "no_data", "verified_at": "earlier"},
+        }
+    }
+    result = _annotate_verification_credential_state(
+        original,
+        {
+            "longbridge": {"required": True, "configured": True},
+            "duckduckgo": {"required": False, "configured": True},
+        },
+    )
+
+    assert result["news_data"]["longbridge"]["current_credential_usable"] is True
+    assert result["news_data"]["longbridge"]["current_credential_status"] == "configured"
+    assert result["news_data"]["duckduckgo"]["current_credential_status"] == "not_required"
+    assert original["news_data"]["longbridge"] == {
+        "status": "available",
+        "verified_at": "earlier",
+    }
 
 
 def test_run_create_request_passes_webui_config():

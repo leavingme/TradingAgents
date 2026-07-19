@@ -2130,7 +2130,8 @@ h2, .panel-title {
 }
 
 .vendor-health-badge.unavailable,
-.vendor-health-badge.not_configured {
+.vendor-health-badge.not_configured,
+.vendor-health-badge.credential_blocked {
   color: var(--accent-red);
   background: rgba(239,68,68,0.12);
 }

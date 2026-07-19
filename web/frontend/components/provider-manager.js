@@ -37,6 +37,22 @@ const FALLBACK_DEFAULTS = {
   prediction_markets: 'polymarket',
 };
 
+export function verificationPresentation(verification, credential) {
+  const credentialBlocked = credential?.required && !credential?.configured;
+  const credentialStatus = credential?.credential_status
+    || verification?.current_credential_status
+    || (credentialBlocked ? 'missing' : null);
+  return {
+    historical: Boolean(verification?.verified_at),
+    healthState: credentialBlocked ? 'credential_blocked' : (verification?.status || 'unverified'),
+    healthKey: credentialBlocked && credentialStatus === 'expired'
+      ? 'vendorCurrentlyUnavailable'
+      : credentialBlocked
+        ? 'vendorCredentialBlocked'
+        : null,
+  };
+}
+
 export function createProviderManager({ api, t, locale, configDefaults, envStatus, setEnvStatus, ohlcvSettingsBody }) {
   let state = {};
 
@@ -176,18 +192,19 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
 
     const meta = PROVIDER_META[vendor.id] || { name: vendor.id };
     const verification = environment?.vendor_verifications?.[category]?.[vendor.id];
-    const verificationState = verification?.status || 'unverified';
-    const credential = credentialStatus(environment?.data_vendors?.[vendor.id]);
+    const vendorCredential = environment?.data_vendors?.[vendor.id];
+    const presentation = verificationPresentation(verification, vendorCredential);
+    const credential = credentialStatus(vendorCredential);
     item.innerHTML = `
       <div class="provider-item-left">
         <input type="checkbox" class="provider-enable-checkbox" ${vendor.enabled ? 'checked' : ''} />
         <span class="provider-identity">
           <span class="provider-name">${escapeHtml(meta.name)}</span>
-          <span class="provider-verification-detail" title="${escapeHtml(verification?.detail || '')}">${escapeHtml(formatVerification(verification))}</span>
+          <span class="provider-verification-detail" title="${escapeHtml(verification?.detail || '')}">${escapeHtml(formatVerification(verification, presentation.historical))}</span>
         </span>
       </div>
       <div class="provider-item-right">
-        <span class="vendor-health-badge ${verificationState}">${escapeHtml(formatHealth(verificationState))}</span>
+        <span class="vendor-health-badge ${presentation.healthState}">${escapeHtml(presentation.healthKey ? t(presentation.healthKey) : formatHealth(presentation.healthState))}</span>
         <span class="env-status-badge ${credential.className}">${escapeHtml(credential.label)}</span>
         ${meta.verifiable === false ? '' : `<button type="button" class="btn-verify-vendor" title="${escapeHtml(t('vendorVerify'))}" aria-label="${escapeHtml(t('vendorVerify'))}">↻</button>`}
         <div class="provider-order-buttons">
@@ -212,6 +229,9 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
 
   function credentialStatus(status) {
     if (!status?.required) return { className: 'optional', label: t('apiKeyNotRequired') };
+    if (status.credential_status === 'expired') {
+      return { className: 'missing', label: t('vendorCredentialExpired') };
+    }
     return status.configured
       ? { className: 'configured', label: t('apiKeyConfigured') }
       : { className: 'missing', label: t('apiKeyMissing') };
@@ -252,14 +272,15 @@ export function createProviderManager({ api, t, locale, configDefaults, envStatu
     }[status] || t('vendorUnavailable');
   }
 
-  function formatVerification(verification) {
+  function formatVerification(verification, historical = false) {
     if (!verification?.verified_at) return t('vendorNeverVerified');
     const source = verification.source === 'manual' ? t('vendorVerifiedManual') : t('vendorVerifiedAnalysis');
     const time = new Intl.DateTimeFormat(locale() === 'zh' ? 'zh-CN' : 'en', {
       dateStyle: 'short', timeStyle: 'medium',
     }).format(new Date(verification.verified_at));
     const latency = Number.isFinite(verification.latency_ms) ? ` · ${verification.latency_ms} ms` : '';
-    return `${source} · ${time}${latency}`;
+    const prefix = historical ? `${t('vendorHistoricalVerification')} · ` : '';
+    return `${prefix}${source} · ${time}${latency}`;
   }
 
   function renderOhlcvTable() {

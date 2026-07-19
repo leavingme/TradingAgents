@@ -60,6 +60,33 @@ test('API client encodes evaluation cohort selectors', { concurrency: false }, a
   );
 });
 
+test('provider verification separates historical success from current credential usability', { concurrency: false }, async () => {
+  const { verificationPresentation } = await importSource('components/provider-manager.js');
+  const expired = verificationPresentation(
+    {
+      status: 'available',
+      verified_at: '2026-07-17T00:00:00Z',
+      current_credential_status: 'expired',
+    },
+    { required: true, configured: false, credential_status: 'expired' },
+  );
+  assert.deepEqual(expired, {
+    historical: true,
+    healthState: 'credential_blocked',
+    healthKey: 'vendorCurrentlyUnavailable',
+  });
+
+  const credentialReady = verificationPresentation(
+    { status: 'available', verified_at: '2026-07-17T00:00:00Z' },
+    { required: true, configured: true },
+  );
+  assert.deepEqual(credentialReady, {
+    historical: true,
+    healthState: 'available',
+    healthKey: null,
+  });
+});
+
 test('event stream dispatches typed events, closes old connections, and reports reconnect once', { concurrency: false }, async () => {
   const instances = [];
   class FakeEventSource {

@@ -1,4 +1,4 @@
-import { createProviderManager } from './components/provider-manager.js?v=20260715-stocktwits-browser';
+import { createProviderManager } from './components/provider-manager.js?v=20260719-credential-usability-v2';
 import { createAgentTimeline, formatAgentName } from './components/agent-timeline.js?v=20260711-agent-status-init';
 import { createReportViewer } from './components/report-viewer.js';
 import { createRunHistory } from './components/run-history.js?v=20260716-data-quality-details';
@@ -407,6 +407,10 @@ const translations = {
     vendorNoData: 'No data',
     vendorRateLimited: 'Rate limited',
     vendorNotConfigured: 'Not configured',
+    vendorHistoricalVerification: 'Last verification',
+    vendorCredentialBlocked: 'Credential unavailable',
+    vendorCredentialExpired: 'Credential expired',
+    vendorCurrentlyUnavailable: 'Currently unavailable',
     compTokenRequired: 'Token Required',
     compKeyRequired: 'Key Required',
     compNone: 'None',
@@ -771,6 +775,10 @@ const translations = {
     vendorNoData: '无数据',
     vendorRateLimited: '达到频率限制',
     vendorNotConfigured: '未配置',
+    vendorHistoricalVerification: '上次验证',
+    vendorCredentialBlocked: '当前凭据不可用',
+    vendorCredentialExpired: '当前凭据已过期',
+    vendorCurrentlyUnavailable: '当前不可用',
     compTokenRequired: '需要 Token',
     compKeyRequired: '需要 API Key',
     compNone: '无需',

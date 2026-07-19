@@ -8,7 +8,9 @@ if (!port) throw new Error(
 
 await new Promise(resolve => setTimeout(resolve, 1000));
 const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-const page = targets.find(target => target.type === 'page');
+const page = targets.find(target => (
+  target.type === 'page' && target.url.includes('127.0.0.1')
+)) || targets.find(target => target.type === 'page' && target.url !== 'about:blank');
 if (!page) throw new Error('no Chrome page target found');
 
 const socket = new WebSocket(page.webSocketDebuggerUrl);
@@ -45,19 +47,23 @@ if (emulatedWidth && emulatedHeight) {
 
 const expression = `JSON.stringify({
   readyState: document.readyState,
+  url: location.href,
+  title: document.title,
+  bodyText: document.body?.textContent?.trim().replace(/\\s+/g, ' ').slice(0, 300) || '',
   hash: location.hash,
   scroll: { x: window.scrollX, y: window.scrollY },
   viewport: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight },
   documentScrollWidth: document.documentElement.scrollWidth,
   bodyScrollWidth: document.body.scrollWidth,
   horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-  runHidden: document.querySelector('#runView').hidden,
-  settingsHidden: document.querySelector('#settingsView').hidden,
-  providersHidden: document.querySelector('#providersView').hidden,
-  evaluationsHidden: document.querySelector('#evaluationsView').hidden,
+  runHidden: document.querySelector('#runView')?.hidden ?? null,
+  settingsHidden: document.querySelector('#settingsView')?.hidden ?? null,
+  providersHidden: document.querySelector('#providersView')?.hidden ?? null,
+  evaluationsHidden: document.querySelector('#evaluationsView')?.hidden ?? null,
   evaluationCards: document.querySelectorAll('.evaluation-card').length,
   evaluationText: document.querySelector('#evaluationRollups')?.textContent?.trim().slice(0, 500) || '',
   providerRows: document.querySelectorAll('.provider-item').length,
+  longbridgeMcpProviderText: document.querySelector('.provider-item[data-vendor="longbridge_mcp"]')?.textContent?.trim().replace(/\\s+/g, ' ').slice(0, 500) || '',
   historyRows: document.querySelectorAll('#historyList > li').length,
   reportPlaceholder: Boolean(document.querySelector('.report-empty')),
 })`;

@@ -460,7 +460,13 @@ def get_stock_data(
     cache_dir = config["data_cache_dir"]
 
     # --- cache read ---
-    cached = read_cached_ohlcv(cache_dir, cache_key, start_date, end_date)
+    cached = read_cached_ohlcv(
+        cache_dir,
+        cache_key,
+        start_date,
+        end_date,
+        expected_vendor="longbridge_mcp",
+    )
     if cached is not None:
         cached["Date"] = cached["Date"].dt.strftime("%Y-%m-%d")
         rows = list(cached[["Date", "Open", "High", "Low", "Close", "Volume"]].itertuples(index=False, name=None))

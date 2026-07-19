@@ -1,10 +1,18 @@
 import json
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
+import pandas as pd
 import pytest
 
 from tradingagents.dataflows import longbridge, longbridge_mcp
 from tradingagents.dataflows.config import set_config
-from tradingagents.dataflows.ohlcv_model import resolve_ohlcv_source_id
+from tradingagents.dataflows.ohlcv_cache import merge_and_write_ohlcv, read_cached_ohlcv
+from tradingagents.dataflows.ohlcv_model import (
+    batch_from_frame,
+    resolve_ohlcv_provenance,
+    resolve_ohlcv_source_id,
+)
 
 
 BAR = {
@@ -80,3 +88,103 @@ def test_range_only_legacy_audit_cannot_claim_exact_bar_provenance(tmp_path):
         encoding="utf-8",
     )
     assert resolve_ohlcv_source_id(str(tmp_path), "NVDA", "2026-07-10") is None
+
+
+def _cached_batch(vendor: str):
+    frame = pd.DataFrame({
+        "Date": pd.to_datetime(["2026-07-09", "2026-07-10"]),
+        "Open": [200.0, 202.0],
+        "High": [205.0, 211.0],
+        "Low": [199.0, 201.92],
+        "Close": [203.0, 210.96],
+        "Volume": [1000, 2000],
+    })
+    return batch_from_frame(
+        frame,
+        symbol="NVDA.US",
+        vendor=vendor,
+        adapter_version=f"{vendor}_test_v1",
+        timezone_semantics="exchange_trading_date",
+        raw_timestamps=["2026-07-09", "2026-07-10"],
+    )
+
+
+@pytest.mark.unit
+def test_shared_cache_requires_exact_vendor_provenance(tmp_path):
+    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", _cached_batch("longbridge"))
+
+    matching = read_cached_ohlcv(
+        str(tmp_path), "NVDA_US", "2026-07-09", "2026-07-10",
+        expected_vendor="longbridge",
+    )
+    mismatched = read_cached_ohlcv(
+        str(tmp_path), "NVDA_US", "2026-07-09", "2026-07-10",
+        expected_vendor="longbridge_mcp",
+    )
+
+    assert matching is not None and len(matching) == 2
+    assert mismatched is None
+    assert resolve_ohlcv_provenance(
+        str(tmp_path), "NVDA_US", ["2026-07-09", "2026-07-10"]
+    ) == {
+        "2026-07-09": {
+            "vendor": "longbridge",
+            "batch_id": _audit(tmp_path)["batch_id"],
+        },
+        "2026-07-10": {
+            "vendor": "longbridge",
+            "batch_id": _audit(tmp_path)["batch_id"],
+        },
+    }
+
+    mixed_batch = _cached_batch("longbridge_mcp")
+    merge_and_write_ohlcv(
+        str(tmp_path),
+        "NVDA_US",
+        replace(mixed_batch, bars=(mixed_batch.bars[-1],)),
+    )
+    assert read_cached_ohlcv(
+        str(tmp_path), "NVDA_US", "2026-07-09", "2026-07-10",
+        expected_vendor="longbridge",
+    ) is None
+    assert read_cached_ohlcv(
+        str(tmp_path), "NVDA_US", "2026-07-09", "2026-07-10",
+        expected_vendor="longbridge_mcp",
+    ) is None
+
+
+@pytest.mark.unit
+def test_vendor_cache_rejects_rows_without_exact_audit(tmp_path):
+    frame = pd.DataFrame({
+        "Date": ["2026-07-10"],
+        "Open": [202.0],
+        "High": [211.0],
+        "Low": [201.92],
+        "Close": [210.96],
+        "Volume": [2000],
+    })
+    frame.to_csv(tmp_path / "NVDA_US.csv", index=False)
+
+    assert read_cached_ohlcv(
+        str(tmp_path), "NVDA_US", "2026-07-10", "2026-07-10",
+        expected_vendor="longbridge",
+    ) is None
+
+
+@pytest.mark.unit
+def test_expired_mcp_cannot_claim_cli_cache(monkeypatch, tmp_path):
+    set_config({"data_cache_dir": str(tmp_path)})
+    merge_and_write_ohlcv(str(tmp_path), "NVDA_US", _cached_batch("longbridge"))
+    monkeypatch.setattr(
+        longbridge_mcp,
+        "_load_token",
+        lambda: {
+            "access_token": "sentinel-not-logged",
+            "expiry": (
+                datetime.now(timezone.utc) - timedelta(minutes=5)
+            ).isoformat(),
+        },
+    )
+
+    with pytest.raises(longbridge_mcp.MCPAuthError, match="expired"):
+        longbridge_mcp.get_stock_data("NVDA", "2026-07-09", "2026-07-10")

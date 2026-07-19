@@ -274,10 +274,16 @@ def test_invalid_vwma_falls_back_to_next_vendor():
 
 @pytest.mark.unit
 def test_all_invalid_indicators_raise_hard_failure():
-    set_config({"data_vendors": {"technical_indicators": "primary,fallback"}})
+    set_config({
+        "data_vendors": {
+            "core_stock_apis": "prices",
+            "technical_indicators": "primary,fallback",
+        }
+    })
     with mock.patch.dict(
         interface.VENDOR_METHODS,
         {
+            "get_stock_data": {"prices": lambda *args: OHLCV},
             "get_indicators": {
                 "primary": lambda *args: "2026-07-10: 101",
                 "fallback": lambda *args: "2026-07-10: -1",

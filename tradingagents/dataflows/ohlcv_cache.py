@@ -323,6 +323,8 @@ def read_cached_ohlcv(
     cache_key: str,
     start_date: str,
     end_date: str,
+    *,
+    expected_vendor: str | None = None,
 ) -> pd.DataFrame | None:
     """
     Return a DataFrame of OHLCV rows filtered to [start_date, end_date] if the
@@ -374,6 +376,20 @@ def read_cached_ohlcv(
         req_start = req_start.tz_localize(None)
 
     window = df[(df["Date"] >= req_start) & (df["Date"] <= req_end)].copy()
+    if expected_vendor and not window.empty:
+        from .ohlcv_model import resolve_ohlcv_provenance
+
+        trading_dates = tuple(window["Date"].dt.strftime("%Y-%m-%d"))
+        provenance = resolve_ohlcv_provenance(
+            cache_dir,
+            cache_key,
+            trading_dates,
+        )
+        if any(
+            provenance.get(trading_date, {}).get("vendor") != expected_vendor
+            for trading_date in trading_dates
+        ):
+            return None
     return window if not window.empty else None
 
 

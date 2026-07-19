@@ -250,6 +250,7 @@ get_cashflow(symbol, freq=None, curr_date=None)
 - vendor 请求失败、认证失败、限流、无数据、字段缺失或能力不支持时必须抛出对应的类型化异常；禁止返回 `"Error ..."`、`"No data ..."`、空字符串、说明性 Markdown 或 `None` 冒充成功数据。
 - vendor 只能返回其原始接口实际提供并可规范化的数据。禁止用 Web Search、新闻摘要、估算值、静态说明或低信息摘要替代请求的数据类型。
 - 同一 vendor 内部的网络重试可以保留，但必须保持同一数据源、同一能力和同一语义；缓存命中也必须经过与在线响应相同的规范化和校验。
+- 多个 vendor 共用规范缓存文件时，adapter 只能命中逐条 provenance 完整且最新审计 vendor 与自身一致的数据；来源缺失、混合或属于其他 vendor 必须视为 cache miss 并回到 router fallback。禁止过期、未配置或被禁用的 vendor 认领另一 vendor 写入的缓存，绕过配置链或污染 vendor ledger / evidence fingerprint。
 - 若某个 fallback 来源需要独立配置、可观测性或质量判断，必须注册为独立 vendor，不得隐藏在另一个 vendor 实现内部。
 - 新闻、宏观和预测市场 vendor 必须返回 `NewsFeed` / `MacroSeries` / `PredictionMarketFeed` 结构化领域对象；发布时间、URL、标的/主题关联、观察期、单位、事件/市场 ID、带时区到期日、概率范围与稳定 `source_id` 在 router 层验证后才能渲染给 LLM。新闻必须包含非空正文或可用于研究的摘要，URL 规范化后去重，发布时间必须精确到时间并且不超过 `information_cutoff`；只有标题的结果不得冒充完整新闻证据。预测市场 `call_id` 由 router 绑定，所有 configured vendor attempt 必须写入 run-scoped ledger。DuckDuckGo 等不提供真实发布时间的结果不得用抓取时间冒充发布时间。
 - FRED 宏观证据必须同时保留指标请求名、series ID/title、单位、频率、观察期、初次发布日期、查询 vintage、修订状态和稳定 `source_id`。历史时点必须查询对应 vintage；由于 FRED vintage 只有日期精度，带时区的日内 `information_cutoff` 统一使用截止日前一日 vintage，宁可少用截止日当天已经发布的数据，也不得泄漏当天稍后发布或修订的值。

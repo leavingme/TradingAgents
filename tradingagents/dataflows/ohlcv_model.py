@@ -107,11 +107,36 @@ def resolve_ohlcv_source_id(
     trading_date: str,
 ) -> str | None:
     """Resolve one cached bar to an exact audited vendor batch."""
+    provenance = resolve_ohlcv_provenance(
+        cache_dir,
+        cache_key,
+        (trading_date,),
+    ).get(trading_date)
+    if provenance is None:
+        return None
+    return (
+        f"ohlcv:{provenance['vendor']}:{provenance['batch_id']}:"
+        f"{trading_date}"
+    )
+
+
+def resolve_ohlcv_provenance(
+    cache_dir: str,
+    cache_key: str,
+    trading_dates: tuple[str, ...] | list[str],
+) -> dict[str, dict[str, str]]:
+    """Resolve cached rows to their newest exact vendor batches in one scan."""
+    unresolved = {
+        str(value) for value in trading_dates if str(value).strip()
+    }
+    resolved: dict[str, dict[str, str]] = {}
+    if not unresolved:
+        return resolved
     path = Path(cache_dir) / "ohlcv_audit.jsonl"
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return None
+        return resolved
     for line in reversed(lines):
         try:
             record = json.loads(line)
@@ -119,13 +144,25 @@ def resolve_ohlcv_source_id(
             continue
         if record.get("cache_key") != cache_key:
             continue
-        # Older range-only records cannot prove that a particular session was
-        # present, so they are intentionally ineligible for evaluation.
-        if trading_date not in (record.get("trading_dates") or []):
-            continue
         vendor = record.get("vendor")
         batch_id = record.get("batch_id")
-        if not vendor or not batch_id:
+        audited_dates = record.get("trading_dates")
+        if (
+            not isinstance(vendor, str)
+            or not vendor
+            or not isinstance(batch_id, str)
+            or not batch_id
+            or not isinstance(audited_dates, list)
+        ):
             continue
-        return f"ohlcv:{vendor}:{batch_id}:{trading_date}"
-    return None
+        for trading_date in unresolved.intersection(
+            str(value) for value in audited_dates
+        ):
+            resolved[trading_date] = {
+                "vendor": vendor,
+                "batch_id": batch_id,
+            }
+        unresolved.difference_update(resolved)
+        if not unresolved:
+            break
+    return resolved

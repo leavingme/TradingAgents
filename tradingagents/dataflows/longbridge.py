@@ -299,7 +299,13 @@ def get_stock_data(
     cache_dir = config["data_cache_dir"]
 
     # --- cache read ---
-    cached = read_cached_ohlcv(cache_dir, cache_key, start_date, end_date)
+    cached = read_cached_ohlcv(
+        cache_dir,
+        cache_key,
+        start_date,
+        end_date,
+        expected_vendor="longbridge",
+    )
     if cached is not None:
         cached = cached.set_index("Date")
         return (

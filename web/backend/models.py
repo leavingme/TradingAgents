@@ -96,7 +96,8 @@ class RunCreateRequest(BaseModel):
 
 RunStatus = Literal[
     "pending", "running", "completed", "review_required", "unavailable", "failed",
-    "cancelled", "market_data_pending", "market_data_unavailable"
+    "cancelled", "market_data_pending", "market_data_unavailable",
+    "outcome_settlement_pending", "outcome_settlement_unavailable"
 ]
 
 

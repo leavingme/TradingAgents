@@ -6,6 +6,8 @@
   "stale_active_after_minutes": 360,
   "market_data_retry_after_minutes": 15,
   "market_data_max_wait_minutes": 240,
+  "outcome_settlement_retry_after_minutes": 15,
+  "outcome_settlement_max_wait_minutes": 240,
   "targets": [
     {
       "symbol": "NVDA",

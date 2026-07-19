@@ -35,6 +35,8 @@ _TERMINAL_COST_STATUSES = {
     "failed",
     "cancelled",
     "market_data_unavailable",
+    "outcome_settlement_pending",
+    "outcome_settlement_unavailable",
 }
 
 

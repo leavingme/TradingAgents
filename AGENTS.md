@@ -365,6 +365,13 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   `OutcomeSettlementDataError` 在 Agent 前 fail closed；不得把这些故障压成 `None` 或记录
   外部异常正文。CLI/API/每日快照必须显示 `retryable_settlement_failure`、安全 failure code
   和累计次数；数据恢复或确认尚未成熟后关闭失败生命周期。
+- 每日 scheduler 必须把 `OutcomeSettlementDataError` 与
+  `OutcomeSettlementInProgressError` 保留为安全类型，并记录为独立的
+  `outcome_settlement_pending` 零 LLM 探测；它们不得消耗普通
+  `max_attempts_per_date`。默认每 15 分钟重试、首次等待 240 分钟后转为
+  `outcome_settlement_unavailable`/exit 1；等待窗口内恢复后，同一 market-data date
+  必须仍能进入完整 Agent 分析。该窗口由独立的 outcome settlement 配置控制，不得与
+  final-bar readiness 或普通分析失败重试混用；CLI/API/Web 和成本汇总必须识别这些状态。
 
 ## 测试和验证注意事项
 

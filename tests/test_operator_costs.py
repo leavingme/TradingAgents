@@ -202,6 +202,41 @@ def test_run_cost_rollups_use_terminal_runs_before_outcome_maturity():
     }
 
 
+def test_retryable_outcome_settlement_probe_cost_remains_operator_visible():
+    class SettlementProbeStore:
+        def list_runs(self, limit):
+            return [{
+                "run_id": "settlement-probe",
+                "ticker": "NVDA",
+                "analysis_date": "2026-07-17",
+                "status": "outcome_settlement_pending",
+                "architecture_version": "production",
+                "architecture_fingerprint": "fp",
+                "started_at": "2026-07-17T20:00:00+00:00",
+                "finished_at": "2026-07-17T20:00:03+00:00",
+            }]
+
+        def get_run(self, run_id):
+            return {
+                "events": [{
+                    "type": "stats",
+                    "content": {
+                        "llm_calls": 0,
+                        "tool_calls": 0,
+                        "tokens_in": 0,
+                        "tokens_out": 0,
+                    },
+                }],
+            }
+
+    rows = load_operator_run_costs(store=SettlementProbeStore(), ticker="NVDA")
+
+    assert len(rows) == 1
+    assert rows[0]["status"] == "outcome_settlement_pending"
+    assert rows[0]["llm_calls"] == 0
+    assert rows[0]["tokens_in"] == 0
+
+
 def _cost_row(
     ticker,
     analysis_date,

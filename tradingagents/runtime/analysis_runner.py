@@ -27,7 +27,13 @@ from tradingagents.architecture import (
 )
 
 from .config_builder import build_runtime_config
-from .events import AnalysisEvent, AnalysisRequest, AnalysisResult, utc_timestamp
+from .events import (
+    AnalysisEvent,
+    AnalysisRequest,
+    AnalysisResult,
+    runtime_error_status,
+    utc_timestamp,
+)
 from .report_throttle import ReportSectionThrottler
 from .stats_handler import StatsCallbackHandler
 
@@ -184,12 +190,20 @@ def run_analysis_stream(request: AnalysisRequest) -> Iterator[AnalysisEvent]:
         )
         err_event = _with_vendor_summary(err_event, history_store)
         history_store.add_event(request.run_id, err_event)
+        history_store.mark_finished(
+            request.run_id, runtime_error_status(type(exc).__name__)
+        )
         raise exc
     finally:
         if not has_error:
             status = "completed"
             if last_event and last_event.type == "error":
-                status = "failed"
+                error_content = (
+                    last_event.content
+                    if isinstance(last_event.content, dict)
+                    else {}
+                )
+                status = runtime_error_status(error_content.get("error_type"))
             elif last_event and last_event.type == "run_cancelled":
                 status = "cancelled"
             elif (
@@ -528,7 +542,9 @@ def run_analysis_once(request: AnalysisRequest) -> AnalysisResult:
     error = next((event for event in events if event.type == "error"), None)
     if error is not None:
         content = error.content if isinstance(error.content, dict) else {}
-        raise RuntimeError(content.get("error", "analysis failed"))
+        from .events import AnalysisExecutionError
+
+        raise AnalysisExecutionError(str(content.get("error_type") or "RuntimeError"))
 
     completed = next((event for event in reversed(events) if event.type == "run_completed"), None)
     content = completed.content if completed and isinstance(completed.content, dict) else {}

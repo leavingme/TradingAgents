@@ -23,6 +23,7 @@ from tradingagents.automation.daily import (
     scheduler_exit_code,
 )
 from tradingagents.runtime.history import RunHistoryStore
+from tradingagents.runtime import AnalysisExecutionError
 
 
 def _schedule() -> DailySchedule:
@@ -216,6 +217,57 @@ def test_schedule_rejects_duplicate_symbols():
     }
     with pytest.raises(ValueError, match="duplicate"):
         DailySchedule.from_dict({"enabled": True, "targets": [target, target]})
+
+
+def test_schedule_loads_independent_outcome_settlement_retry_bounds():
+    schedule = DailySchedule.from_dict({
+        "enabled": True,
+        "outcome_settlement_retry_after_minutes": 30,
+        "outcome_settlement_max_wait_minutes": 180,
+        "targets": [{
+            "symbol": "NVDA",
+            "timezone": "America/New_York",
+            "run_after": "16:30",
+        }],
+    })
+
+    assert schedule.outcome_settlement_retry_after_minutes == 30
+    assert schedule.outcome_settlement_max_wait_minutes == 180
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"outcome_settlement_retry_after_minutes": 14},
+            "outcome_settlement_retry_after_minutes",
+        ),
+        (
+            {"outcome_settlement_max_wait_minutes": 59},
+            "outcome_settlement_max_wait_minutes",
+        ),
+        (
+            {
+                "outcome_settlement_retry_after_minutes": 120,
+                "outcome_settlement_max_wait_minutes": 60,
+            },
+            "cannot exceed",
+        ),
+    ],
+)
+def test_schedule_rejects_invalid_outcome_settlement_retry_bounds(
+    overrides, message
+):
+    with pytest.raises(ValueError, match=message):
+        DailySchedule.from_dict({
+            "enabled": True,
+            **overrides,
+            "targets": [{
+                "symbol": "NVDA",
+                "timezone": "America/New_York",
+                "run_after": "16:30",
+            }],
+        })
 
 
 def test_schedule_allows_paired_shadow_versions_for_same_symbol():
@@ -1058,6 +1110,164 @@ def test_market_data_pending_fails_closed_after_bounded_wait(tmp_path, monkeypat
     assert scheduler_exit_code(outcome) == 1
     recorded = store.get_run("pending-bar")
     assert recorded["status"] == "market_data_unavailable"
+    assert recorded["events"][-1]["content"]["status"] == (
+        "unavailable_after_bounded_wait"
+    )
+
+
+@pytest.mark.parametrize(
+    "runtime_error_type",
+    ["OutcomeSettlementDataError", "OutcomeSettlementInProgressError"],
+)
+def test_outcome_settlement_pending_retries_without_consuming_analysis_attempt(
+    tmp_path, monkeypatch, runtime_error_type
+):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+    schedule = DailySchedule(
+        enabled=True,
+        targets=_schedule().targets,
+        max_attempts_per_date=1,
+        outcome_settlement_retry_after_minutes=15,
+        outcome_settlement_max_wait_minutes=60,
+    )
+    calls = []
+
+    def execute(request):
+        calls.append(request)
+        if len(calls) == 1:
+            store.create_run(
+                request.run_id,
+                request.ticker,
+                request.analysis_date,
+                request.asset_type,
+                request.selected_analysts,
+                request.llm_provider,
+                request.research_depth,
+                status="failed",
+                created_at="2026-07-17T20:45:00+00:00",
+                architecture_version=request.architecture_version,
+            )
+            raise AnalysisExecutionError(runtime_error_type)
+        store.create_run(
+            request.run_id,
+            request.ticker,
+            request.analysis_date,
+            request.asset_type,
+            request.selected_analysts,
+            request.llm_provider,
+            request.research_depth,
+            status="completed",
+            created_at="2026-07-17T21:01:00+00:00",
+            architecture_version=request.architecture_version,
+        )
+        store.mark_finished(
+            request.run_id, "completed", finished_at="2026-07-17T21:02:00+00:00"
+        )
+        return SimpleNamespace(
+            run_id=request.run_id,
+            decision_status="validated",
+            report_path=None,
+        )
+
+    first = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 16, 45, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+    first_run_id = first[0]["run_id"]
+    store.mark_finished(
+        first_run_id,
+        "outcome_settlement_pending",
+        finished_at="2026-07-17T20:46:00+00:00",
+    )
+    waiting = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 16, 50, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+    recovered = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 17, 1, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert first[0]["status"] == "outcome_settlement_pending"
+    assert first[0]["error_type"] == runtime_error_type
+    assert scheduler_exit_code(first) == 0
+    assert waiting[0]["status"] == "outcome_settlement_wait"
+    assert recovered[0]["status"] == "completed"
+    assert len(calls) == 2
+    pending = store.get_run(first_run_id)
+    assert pending["status"] == "outcome_settlement_pending"
+    assert pending["events"][-1]["content"] == {
+        "status": "pending_retry",
+        "error_type": runtime_error_type,
+        "retry_after_minutes": 15,
+        "max_wait_minutes": 60,
+    }
+
+
+def test_outcome_settlement_pending_fails_closed_after_bounded_wait(
+    tmp_path, monkeypatch
+):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+    schedule = DailySchedule(
+        enabled=True,
+        targets=_schedule().targets,
+        outcome_settlement_retry_after_minutes=15,
+        outcome_settlement_max_wait_minutes=60,
+    )
+    store.create_run(
+        "pending-settlement",
+        "NVDA",
+        "2026-07-17",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+        status="outcome_settlement_pending",
+        created_at="2026-07-17T20:45:00+00:00",
+        architecture_version=schedule.targets[0].architecture_version,
+    )
+    store.mark_finished(
+        "pending-settlement",
+        "outcome_settlement_pending",
+        finished_at="2026-07-17T20:46:00+00:00",
+    )
+
+    outcome = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 17, 17, 46, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        execute=lambda request: (_ for _ in ()).throw(
+            AssertionError("bounded wait must fail before another execution")
+        ),
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert outcome[0]["status"] == "outcome_settlement_unavailable"
+    assert outcome[0]["run_status"] == "outcome_settlement_unavailable"
+    assert scheduler_exit_code(outcome) == 1
+    recorded = store.get_run("pending-settlement")
+    assert recorded["status"] == "outcome_settlement_unavailable"
     assert recorded["events"][-1]["content"]["status"] == (
         "unavailable_after_bounded_wait"
     )

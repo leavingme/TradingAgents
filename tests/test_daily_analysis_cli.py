@@ -66,6 +66,8 @@ def _run_daily_cli(tmp_path: Path, command: str) -> tuple[dict, str]:
 def test_daily_status_always_exposes_safe_active_architecture_identity(tmp_path):
     payload, serialized = _run_daily_cli(tmp_path, "status")
 
+    assert payload["outcome_settlement_retry_after_minutes"] == 15
+    assert payload["outcome_settlement_max_wait_minutes"] == 240
     inventory = payload["active_architecture_inventory"]
     assert inventory["status"] == "loaded"
     assert inventory["schedule_enabled"] is True

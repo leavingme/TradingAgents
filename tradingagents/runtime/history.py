@@ -9,7 +9,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from .events import AnalysisEvent
+from .events import AnalysisEvent, runtime_error_status
 from tradingagents.sqlite_utils import configure_wal, connect_sqlite
 from tradingagents.evaluation import DEFAULT_OUTCOME_HORIZON_SESSIONS
 
@@ -1417,7 +1417,11 @@ class RunHistoryStore:
                         decision_status = "unavailable"
                         status = "market_data_unavailable"
                 elif event.type == "error":
-                    status = "failed"
+                    status = runtime_error_status(
+                        event.content.get("error_type")
+                        if isinstance(event.content, dict)
+                        else None
+                    )
                     if isinstance(event.content, dict):
                         error = event.content.get("error")
 
@@ -1543,6 +1547,7 @@ class RunHistoryStore:
                 if row["status"] in (
                     "completed", "review_required", "unavailable", "failed", "cancelled",
                     "market_data_pending", "market_data_unavailable",
+                    "outcome_settlement_pending", "outcome_settlement_unavailable",
                 ):
                     return True
                 conn.execute(

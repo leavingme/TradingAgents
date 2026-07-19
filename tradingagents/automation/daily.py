@@ -32,7 +32,13 @@ from tradingagents.architecture import (
 )
 from tradingagents.dataflows.ohlcv_cache import latest_completed_daily_bar_date
 from tradingagents.dataflows.utils import safe_ticker_component
-from tradingagents.runtime import AnalysisEvent, AnalysisRequest, run_analysis_once
+from tradingagents.runtime import (
+    AnalysisEvent,
+    AnalysisExecutionError,
+    AnalysisRequest,
+    OUTCOME_SETTLEMENT_RETRYABLE_ERROR_TYPES,
+    run_analysis_once,
+)
 from tradingagents.runtime.history import RunHistoryStore, history_store
 from tradingagents.observability import normalize_stats_breakdown
 
@@ -45,9 +51,12 @@ _TERMINAL_STATUSES = {
     "failed",
     "cancelled",
     "market_data_unavailable",
+    "outcome_settlement_pending",
+    "outcome_settlement_unavailable",
 }
 _SCHEDULER_FAILURE_STATUSES = {
-    "failed", "unavailable", "attempts_exhausted", "market_data_unavailable"
+    "failed", "unavailable", "attempts_exhausted", "market_data_unavailable",
+    "outcome_settlement_unavailable",
 }
 ARCHITECTURE_EVALUATION_STATUS_SCHEMA = (
     "tradingagents/architecture-evaluation-status/v5"
@@ -374,6 +383,8 @@ class DailySchedule:
     stale_active_after_minutes: int = 360
     market_data_retry_after_minutes: int = 15
     market_data_max_wait_minutes: int = 240
+    outcome_settlement_retry_after_minutes: int = 15
+    outcome_settlement_max_wait_minutes: int = 240
 
     def __post_init__(self) -> None:
         identities = [
@@ -432,6 +443,12 @@ class DailySchedule:
         market_data_max_wait_minutes = int(
             payload.get("market_data_max_wait_minutes", 240)
         )
+        outcome_settlement_retry_minutes = int(
+            payload.get("outcome_settlement_retry_after_minutes", 15)
+        )
+        outcome_settlement_max_wait_minutes = int(
+            payload.get("outcome_settlement_max_wait_minutes", 240)
+        )
         if max_attempts < 1 or max_attempts > 5:
             raise ValueError("max_attempts_per_date must be between 1 and 5")
         if retry_minutes < 15 or retry_minutes > 1440:
@@ -450,6 +467,25 @@ class DailySchedule:
             raise ValueError(
                 "market_data_retry_after_minutes cannot exceed market_data_max_wait_minutes"
             )
+        if (
+            outcome_settlement_retry_minutes < 15
+            or outcome_settlement_retry_minutes > 240
+        ):
+            raise ValueError(
+                "outcome_settlement_retry_after_minutes must be between 15 and 240"
+            )
+        if (
+            outcome_settlement_max_wait_minutes < 60
+            or outcome_settlement_max_wait_minutes > 1440
+        ):
+            raise ValueError(
+                "outcome_settlement_max_wait_minutes must be between 60 and 1440"
+            )
+        if outcome_settlement_retry_minutes > outcome_settlement_max_wait_minutes:
+            raise ValueError(
+                "outcome_settlement_retry_after_minutes cannot exceed "
+                "outcome_settlement_max_wait_minutes"
+            )
         return cls(
             enabled=payload.get("enabled") is True,
             targets=targets,
@@ -459,6 +495,8 @@ class DailySchedule:
             stale_active_after_minutes=stale_minutes,
             market_data_retry_after_minutes=market_data_retry_minutes,
             market_data_max_wait_minutes=market_data_max_wait_minutes,
+            outcome_settlement_retry_after_minutes=outcome_settlement_retry_minutes,
+            outcome_settlement_max_wait_minutes=outcome_settlement_max_wait_minutes,
         )
 
 
@@ -769,6 +807,45 @@ def _existing_run_disposition(
             if now.astimezone(timezone.utc) < retry_at:
                 return "market_data_wait", {**latest, "retry_at": retry_at.isoformat()}
         return None
+    settlement_runs = [
+        row
+        for row in existing
+        if row.get("status")
+        in {"outcome_settlement_pending", "outcome_settlement_unavailable"}
+    ]
+    if latest.get("status") in {
+        "outcome_settlement_pending",
+        "outcome_settlement_unavailable",
+    }:
+        if any(
+            row.get("status") == "outcome_settlement_unavailable"
+            for row in settlement_runs
+        ):
+            return "outcome_settlement_unavailable", latest
+        first_pending = settlement_runs[-1]
+        pending_since = _parse_timestamp(
+            first_pending.get("started_at") or first_pending.get("created_at")
+        )
+        if (
+            pending_since is not None
+            and now.astimezone(timezone.utc)
+            >= pending_since
+            + timedelta(minutes=schedule.outcome_settlement_max_wait_minutes)
+        ):
+            return "outcome_settlement_unavailable", latest
+        reference = _parse_timestamp(
+            latest.get("finished_at") or latest.get("created_at")
+        )
+        if reference is not None:
+            retry_at = reference + timedelta(
+                minutes=schedule.outcome_settlement_retry_after_minutes
+            )
+            if now.astimezone(timezone.utc) < retry_at:
+                return "outcome_settlement_wait", {
+                    **latest,
+                    "retry_at": retry_at.isoformat(),
+                }
+        return None
     active = [row for row in existing if row.get("status") in {"pending", "running"}]
     if active:
         newest_active = active[0]
@@ -783,7 +860,12 @@ def _existing_run_disposition(
             return "already_recorded", newest_active
     counted_attempts = [
         row for row in existing
-        if row.get("status") not in {"market_data_pending", "market_data_unavailable"}
+        if row.get("status") not in {
+            "market_data_pending",
+            "market_data_unavailable",
+            "outcome_settlement_pending",
+            "outcome_settlement_unavailable",
+        }
     ]
     if len(counted_attempts) >= schedule.max_attempts_per_date:
         return "attempts_exhausted", latest
@@ -903,6 +985,27 @@ def run_due_analyses(
                     )
                     store.add_event(str(latest["run_id"]), timeout_event)
                     store.mark_finished(str(latest["run_id"]), "market_data_unavailable")
+                    latest = {**latest, "status": "market_data_unavailable"}
+                if (
+                    scheduler_status == "outcome_settlement_unavailable"
+                    and latest.get("status") == "outcome_settlement_pending"
+                ):
+                    timeout_event = AnalysisEvent(
+                        type="outcome_settlement_status",
+                        run_id=str(latest["run_id"]),
+                        content={
+                            "status": "unavailable_after_bounded_wait",
+                            "requested_analysis_date": analysis_date,
+                            "max_wait_minutes": (
+                                schedule.outcome_settlement_max_wait_minutes
+                            ),
+                        },
+                    )
+                    store.add_event(str(latest["run_id"]), timeout_event)
+                    store.mark_finished(
+                        str(latest["run_id"]), "outcome_settlement_unavailable"
+                    )
+                    latest = {**latest, "status": "outcome_settlement_unavailable"}
                 outcomes.append(
                     {
                         "symbol": target.symbol,
@@ -976,6 +1079,14 @@ def run_due_analyses(
             try:
                 result = execute(request)
             except Exception as exc:
+                error_type = (
+                    exc.error_type
+                    if isinstance(exc, AnalysisExecutionError)
+                    else type(exc).__name__
+                )
+                settlement_retryable = (
+                    error_type in OUTCOME_SETTLEMENT_RETRYABLE_ERROR_TYPES
+                )
                 # The canonical runtime normally registers the run before doing
                 # any expensive work.  Keep the scheduler's retry budget
                 # authoritative even when an exception happens before that
@@ -990,18 +1101,46 @@ def run_due_analyses(
                         selected_analysts=request.selected_analysts,
                         llm_provider=request.llm_provider,
                         research_depth=request.research_depth,
-                        status="failed",
+                        status=(
+                            "outcome_settlement_pending"
+                            if settlement_retryable
+                            else "failed"
+                        ),
                         architecture_version=request.architecture_version,
                         architecture_fingerprint="pre-runtime-failure",
                     )
+                if settlement_retryable:
+                    store.add_event(
+                        run_id,
+                        AnalysisEvent(
+                            type="outcome_settlement_status",
+                            run_id=run_id,
+                            content={
+                                "status": "pending_retry",
+                                "error_type": error_type,
+                                "retry_after_minutes": (
+                                    schedule.outcome_settlement_retry_after_minutes
+                                ),
+                                "max_wait_minutes": (
+                                    schedule.outcome_settlement_max_wait_minutes
+                                ),
+                            },
+                        ),
+                    )
+                    store.mark_finished(run_id, "outcome_settlement_pending")
+                elif store.get_run(run_id) is not None:
                     store.mark_finished(run_id, "failed")
                 outcomes.append(
                     {
                         "symbol": target.symbol,
                         "analysis_date": analysis_date,
-                        "status": "failed",
+                        "status": (
+                            "outcome_settlement_pending"
+                            if settlement_retryable
+                            else "failed"
+                        ),
                         "run_id": run_id,
-                        "error_type": type(exc).__name__,
+                        "error_type": error_type,
                         "architecture_version": target.architecture_version,
                         "schedule_trigger": schedule_trigger,
                         "planned_execution_order": execution_order,

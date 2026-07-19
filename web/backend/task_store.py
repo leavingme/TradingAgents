@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tradingagents.runtime import AnalysisEvent, history_store
+from tradingagents.runtime import AnalysisEvent, history_store, runtime_error_status
 from tradingagents.architecture import AGENT_ARCHITECTURE_VERSION
 from .models import RunCreateRequest, RunStatus
 
@@ -227,7 +227,11 @@ class TaskStore:
                     "vendor_summary", record.vendor_summary
                 )
             if event.type == "error" and record.status != "cancelled":
-                record.status = "failed"
+                record.status = runtime_error_status(
+                    event.content.get("error_type")
+                    if isinstance(event.content, dict)
+                    else None
+                )
                 if isinstance(event.content, dict):
                     record.error = event.content.get("error")
 
@@ -259,7 +263,9 @@ class TaskStore:
         multiple SSE clients no longer compete for a single queue item.
         """
         terminal = {
-            "completed", "review_required", "unavailable", "failed", "cancelled"
+            "completed", "review_required", "unavailable", "failed", "cancelled",
+            "market_data_pending", "market_data_unavailable",
+            "outcome_settlement_pending", "outcome_settlement_unavailable",
         }
         with self._event_condition:
             return self._event_condition.wait_for(
@@ -280,7 +286,9 @@ class TaskStore:
             if record is None:
                 return False
             if record.status in (
-                "completed", "review_required", "unavailable", "failed", "cancelled"
+                "completed", "review_required", "unavailable", "failed", "cancelled",
+                "market_data_pending", "market_data_unavailable",
+                "outcome_settlement_pending", "outcome_settlement_unavailable",
             ):
                 return True
             record.cancel_requested = True

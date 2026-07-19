@@ -63,6 +63,18 @@ backend URL、token 或请求参数随无人值守日志持久化；失败占位
 `market_data_retry_after_minutes` 与 `market_data_max_wait_minutes` 配置。普通手动 live
 分析仍可显式使用最近完整交易日；这项严格相等约束只由每日无人值守入口开启。
 
+历史 outcome 已到结算期但其行情暂不可用，或另一个 live run 正持有同一结算租约时，
+runtime 会保留安全的原始异常类型，并在任何 Agent/LLM 调用前把 run 标为
+`outcome_settlement_pending`。scheduler 将其作为独立的零 LLM 结算探测处理：默认每
+15 分钟重试，不计入 `max_attempts_per_date` 的普通分析失败次数；数据恢复或租约释放后，
+同一交易日仍可进入完整分析。首次结算等待 240 分钟后仍无法恢复，则最新探测转为
+`outcome_settlement_unavailable` 并以非零状态退出，不能绕过缺失的成熟结果继续决策。
+两个窗口分别由 `outcome_settlement_retry_after_minutes` 和
+`outcome_settlement_max_wait_minutes` 配置，且与最终日 K readiness 的窗口相互独立。
+SQLite、CLI/API/Web 只暴露 `OutcomeSettlementDataError` 或
+`OutcomeSettlementInProgressError` 类型及有界状态，不把 provider 异常正文写入无人值守
+JSON；结算探测的 runtime/vendor 成本仍纳入同一分析日的 operator 成本汇总。
+
 ## 安装与运维
 
 将仓库内的两个 unit 复制到 `~/.config/systemd/user/` 后执行：

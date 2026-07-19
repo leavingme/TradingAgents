@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import threading
 
-from tradingagents.runtime import AnalysisEvent, AnalysisRequest, run_analysis_stream
+from tradingagents.runtime import (
+    AnalysisEvent,
+    AnalysisRequest,
+    run_analysis_stream,
+    runtime_error_status,
+)
 from tradingagents.runtime.stats_handler import StatsCallbackHandler
 
 from .models import RunCreateRequest
@@ -69,7 +74,11 @@ def _run(run_id: str, request: RunCreateRequest, task_store: TaskStore) -> None:
 
             task_store.add_event(run_id, event, persist=False)
             if event.type == "error":
-                final_status = "failed"
+                final_status = runtime_error_status(
+                    event.content.get("error_type")
+                    if isinstance(event.content, dict)
+                    else None
+                )
                 break
             if (
                 event.type == "market_data_status"
@@ -84,7 +93,7 @@ def _run(run_id: str, request: RunCreateRequest, task_store: TaskStore) -> None:
             ):
                 final_status = event.content["decision_status"]
     except Exception as exc:
-        final_status = "failed"
+        final_status = runtime_error_status(type(exc).__name__)
         task_store.add_event(
             run_id,
             AnalysisEvent(

@@ -285,6 +285,7 @@ async def stream_run_events(run_id: str):
             if current.status in (
                 "completed", "review_required", "unavailable", "failed", "cancelled",
                 "market_data_pending", "market_data_unavailable",
+                "outcome_settlement_pending", "outcome_settlement_unavailable",
             ):
                 break
 

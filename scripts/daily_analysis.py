@@ -163,6 +163,12 @@ def main() -> int:
             "stale_active_after_minutes": schedule.stale_active_after_minutes,
             "market_data_retry_after_minutes": schedule.market_data_retry_after_minutes,
             "market_data_max_wait_minutes": schedule.market_data_max_wait_minutes,
+            "outcome_settlement_retry_after_minutes": (
+                schedule.outcome_settlement_retry_after_minutes
+            ),
+            "outcome_settlement_max_wait_minutes": (
+                schedule.outcome_settlement_max_wait_minutes
+            ),
             "targets": [
                 {
                     "symbol": item.symbol,

@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from tradingagents.runtime import (
     AnalysisEvent,
+    AnalysisExecutionError,
     AnalysisRequest,
     run_analysis_once,
     run_analysis_stream,
@@ -854,6 +855,83 @@ def test_run_analysis_once_returns_final_result(monkeypatch, tmp_path):
     assert result.final_state["final_trade_decision"] == "Hold"
     assert result.report_path is not None
     assert result.report_path.exists()
+
+
+def test_run_analysis_once_preserves_safe_runtime_error_type(monkeypatch):
+    from tradingagents.runtime import analysis_runner
+
+    monkeypatch.setattr(
+        analysis_runner,
+        "run_analysis_stream",
+        lambda request: iter((AnalysisEvent(
+            type="error",
+            run_id=request.run_id,
+            content={
+                "error": "credential=sentinel-secret https://example.invalid/v1",
+                "error_type": "OutcomeSettlementDataError",
+            },
+        ),)),
+    )
+
+    with pytest.raises(AnalysisExecutionError) as exc_info:
+        analysis_runner.run_analysis_once(AnalysisRequest(
+            ticker="NVDA", analysis_date="2026-07-05", run_id="typed-error"
+        ))
+
+    assert exc_info.value.error_type == "OutcomeSettlementDataError"
+    assert "sentinel-secret" not in str(exc_info.value)
+    assert "example.invalid" not in str(exc_info.value)
+
+
+def test_run_analysis_once_rejects_unsafe_error_type(monkeypatch):
+    from tradingagents.runtime import analysis_runner
+
+    monkeypatch.setattr(
+        analysis_runner,
+        "run_analysis_stream",
+        lambda request: iter((AnalysisEvent(
+            type="error",
+            run_id=request.run_id,
+            content={"error_type": "BadError credential=sentinel-secret"},
+        ),)),
+    )
+
+    with pytest.raises(AnalysisExecutionError) as exc_info:
+        analysis_runner.run_analysis_once(AnalysisRequest(
+            ticker="NVDA", analysis_date="2026-07-05", run_id="unsafe-type"
+        ))
+
+    assert exc_info.value.error_type == "RuntimeError"
+    assert "sentinel-secret" not in str(exc_info.value)
+
+
+def test_outcome_settlement_failure_stops_before_agent_and_persists_retryable_status(
+    monkeypatch, tmp_path
+):
+    from tradingagents.graph.trading_graph import OutcomeSettlementDataError
+    from tradingagents.runtime import analysis_runner, history_store
+
+    class SettlementFailureGraph(FakeTradingAgentsGraph):
+        def _resolve_pending_entries(self, ticker, as_of_date=None):
+            raise OutcomeSettlementDataError("ohlcv_unavailable")
+
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", SettlementFailureGraph)
+    events = tuple(run_analysis_stream(AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-05",
+        selected_analysts=("market",),
+        report_dir=tmp_path / "reports",
+        run_id="settlement-before-agent",
+    )))
+
+    error = next(event for event in events if event.type == "error")
+    stats = next(event for event in events if event.type == "stats")
+    assert error.content["error_type"] == "OutcomeSettlementDataError"
+    assert stats.content["llm_calls"] == 0
+    assert not any(event.type == "agent_status" for event in events)
+    stored = history_store.get_run("settlement-before-agent")
+    assert stored["status"] == "outcome_settlement_pending"
+    assert stored["finished_at"] is not None
 
 
 def test_point_in_time_run_does_not_resolve_future_outcomes(monkeypatch, tmp_path):

@@ -6,6 +6,40 @@ from fastapi import HTTPException
 from tradingagents.runtime import AnalysisEvent
 
 
+@pytest.mark.parametrize(
+    "error_type",
+    ["OutcomeSettlementDataError", "OutcomeSettlementInProgressError"],
+)
+def test_web_exposes_retryable_outcome_settlement_run_status(error_type):
+    from tradingagents.runtime import history_store
+    from web.backend import main
+
+    run_id = f"settlement-{error_type}"
+    history_store.create_run(
+        run_id,
+        "NVDA",
+        "2026-07-17",
+        "stock",
+        ["market"],
+        "minimax-cn",
+        1,
+    )
+    history_store.add_event(run_id, AnalysisEvent(
+        type="error",
+        run_id=run_id,
+        content={
+            "error": "outcome settlement is temporarily unavailable",
+            "error_type": error_type,
+        },
+    ))
+    persisted = history_store.get_run(run_id)
+
+    assert persisted["status"] == "outcome_settlement_pending"
+    response = asyncio.run(main.get_run(run_id))
+    assert response["status"] == "outcome_settlement_pending"
+    assert main.RunRecordResponse(**response).status == "outcome_settlement_pending"
+
+
 def test_create_run_and_get_status(monkeypatch):
     from web.backend import main
 

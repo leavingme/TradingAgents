@@ -13,6 +13,7 @@ from tradingagents.architecture import AGENT_ARCHITECTURE_VERSION
 EventType = Literal[
     "run_started",
     "market_data_status",
+    "outcome_settlement_status",
     "longitudinal_context_status",
     "message",
     "tool_call",
@@ -24,6 +25,43 @@ EventType = Literal[
     "run_cancelled",
     "error",
 ]
+
+OUTCOME_SETTLEMENT_RETRYABLE_ERROR_TYPES = frozenset({
+    "OutcomeSettlementDataError",
+    "OutcomeSettlementInProgressError",
+})
+
+
+def runtime_error_status(error_type: str | None) -> str:
+    """Map a safe internal error type to its canonical persisted run status."""
+    return (
+        "outcome_settlement_pending"
+        if error_type in OUTCOME_SETTLEMENT_RETRYABLE_ERROR_TYPES
+        else "failed"
+    )
+
+
+class AnalysisExecutionError(RuntimeError):
+    """Safe non-streaming wrapper for a typed runtime error event.
+
+    The original exception body can contain provider URLs or credentials, so
+    orchestration callers receive only the internal exception class name.
+    """
+
+    def __init__(self, error_type: str) -> None:
+        normalized = (
+            error_type
+            if isinstance(error_type, str)
+            and 1 <= len(error_type) <= 128
+            and error_type[0] in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_"
+            and all(
+                char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789"
+                for char in error_type
+            )
+            else "RuntimeError"
+        )
+        self.error_type = normalized
+        super().__init__(f"analysis failed ({normalized})")
 
 
 def utc_timestamp() -> str:

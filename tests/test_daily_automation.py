@@ -63,6 +63,88 @@ def test_target_due_uses_exchange_local_time():
     assert target.is_due(after) is True
 
 
+def test_target_due_catches_latest_completed_weekday_after_outage():
+    target = _schedule().targets[0]
+    saturday = datetime(
+        2026,
+        7,
+        18,
+        9,
+        0,
+        tzinfo=ZoneInfo("America/New_York"),
+    )
+
+    assert target.is_due(saturday) is False
+    assert target.is_analysis_date_due(saturday, "2026-07-17") is True
+    assert target.is_analysis_date_due(saturday, "2026-07-18") is False
+    with pytest.raises(ValueError, match="ISO date"):
+        target.is_analysis_date_due(saturday, "not-a-date")
+
+
+def test_scheduler_catches_latest_completed_date_after_weekend_restart(
+    tmp_path,
+    monkeypatch,
+):
+    store = RunHistoryStore(tmp_path / "runs.db")
+    captured = []
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: datetime(2026, 7, 17),
+    )
+
+    def execute(request):
+        captured.append(request)
+        store.create_run(
+            request.run_id,
+            request.ticker,
+            request.analysis_date,
+            request.asset_type,
+            request.selected_analysts,
+            request.llm_provider,
+            request.research_depth,
+            architecture_version=request.architecture_version,
+        )
+        store.mark_finished(request.run_id, "completed")
+        return SimpleNamespace(
+            run_id=request.run_id,
+            decision_status="validated",
+            report_path=None,
+        )
+
+    saturday = datetime(
+        2026,
+        7,
+        18,
+        9,
+        0,
+        tzinfo=ZoneInfo("America/New_York"),
+    )
+    first = run_due_analyses(
+        _schedule(),
+        now=saturday,
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+    second = run_due_analyses(
+        _schedule(),
+        now=saturday,
+        store=store,
+        preferences={},
+        execute=execute,
+        lock_path=tmp_path / "daily.lock",
+    )
+
+    assert first[0]["status"] == "completed"
+    assert first[0]["analysis_date"] == "2026-07-17"
+    assert first[0]["schedule_trigger"] == "latest_completed_date_catch_up"
+    assert second[0]["status"] == "already_recorded"
+    assert second[0]["schedule_trigger"] == "latest_completed_date_catch_up"
+    assert len(captured) == 1
+    assert captured[0].analysis_date == "2026-07-17"
+
+
 def test_scheduled_architecture_inventory_fails_closed_without_leaking_paths(tmp_path):
     missing = tmp_path / "secret-schedule-name.json"
 
@@ -655,6 +737,7 @@ def test_due_run_reuses_preferences_and_is_idempotent(tmp_path, monkeypatch):
         lock_path=tmp_path / "daily.lock",
     )
     assert first[0]["status"] == "completed"
+    assert first[0]["schedule_trigger"] == "on_time_window"
     assert first[0]["architecture_evaluation_status"]["status"] == "empty"
     persisted = store.get_run(first[0]["run_id"])["events"]
     assert persisted[-1]["type"] == "architecture_evaluation_status"
@@ -984,7 +1067,10 @@ def test_pre_runtime_failure_is_persisted_and_counts_toward_retry_bound(
     )
 
     def fail_before_runtime_registration(request):
-        raise RuntimeError("pre-runtime failure")
+        raise RuntimeError(
+            "pre-runtime failure credential=sentinel-secret "
+            "https://user:secret@example.invalid/v1"
+        )
 
     first = run_due_analyses(
         schedule,
@@ -995,6 +1081,9 @@ def test_pre_runtime_failure_is_persisted_and_counts_toward_retry_bound(
         lock_path=tmp_path / "daily.lock",
     )
     assert first[0]["status"] == "failed"
+    assert first[0]["error_type"] == "RuntimeError"
+    assert "sentinel-secret" not in json.dumps(first)
+    assert "example.invalid" not in json.dumps(first)
     recorded = store.get_run(first[0]["run_id"])
     assert recorded["status"] == "failed"
     assert recorded["architecture_fingerprint"] == "pre-runtime-failure"

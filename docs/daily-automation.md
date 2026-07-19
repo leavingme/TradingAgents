@@ -1,7 +1,8 @@
 # 收盘后每日分析与纵向评估
 
 每日自动化由用户级 systemd timer 托管。timer 每 15 分钟唤醒一次轻量调度器；
-调度器以每个标的的交易所本地时区判断是否已经到达 `run_after`，随后通过
+调度器把 `run_after` 绑定到最新完整 market-data date 的交易所本地日期，判断该窗口
+是否已经到达，随后通过
 `tradingagents.runtime.run_analysis_once()` 启动 canonical runtime。timer 本身
 不直接运行 Graph，也不保存任何凭据。仓库 service 明确设置
 `TimeoutStartSec=infinity`；用户级 systemd manager 常见的 90 秒默认启动超时不能
@@ -41,6 +42,14 @@ server-side 授权门禁，不影响普通单 arm 每日运行。
 若异常早于 canonical runtime 注册 run，scheduler 也会写入明确标记为
 `pre-runtime-failure` 的失败占位，使该失败仍计入同一有界重试预算；不会因为缺少
 SQLite attempt 而每 15 分钟无限重试。
+`Persistent=true` 的恢复语义由调度器补全：若主机从周五收盘前停到周末才恢复，
+周末 wake-up 仍会补跑最新完整的周五交易日，而不会因为恢复当天不是配置工作日就永久
+漏失。补跑只针对当时最新一个完整市场日，不遍历更早日期，也不把当前 live 信息伪装成
+历史时点决策；输出以 `schedule_trigger=latest_completed_date_catch_up` 明确区分正常窗口。
+已有相同 symbol/date/version 的运行仍返回 `already_recorded`，失败重试和成本上限完全
+复用下述 SQLite 状态机。
+运行前异常只在 scheduler JSON/journal 中保留 `error_type`，不复制异常正文，避免
+backend URL、token 或请求参数随无人值守日志持久化；失败占位和重试计数仍照常写入 SQLite。
 运维状态与 canonical decision status 保持一致：`validated → completed/exit 0`，
 `review_required → review_required/exit 0`，`unavailable → unavailable/exit 1`；最终
 `attempts_exhausted` 也保持非零退出，避免 systemd 把“没有形成可用决策”误报为成功。

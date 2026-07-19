@@ -340,6 +340,12 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
 - 必须分别保存和解释 `market_data_date`、`decision_as_of`、`information_cutoff` 与 vendor 自身的 `observed_at`/`published_at`。禁止仅因 `analysis_date` 早于当前自然日就关闭实时信息源。
 - `market_data_date` 只能从通过 deterministic validator 的结构化 OHLCV 最新行确定；验证前必须保持未知，且不得晚于 `analysis_date`。run、terminal event、evaluation 和纵向上下文必须保存该实际日期；架构 paired comparison 必须要求两臂日期非空且相同。
 - live 决策不得使用 `decision_as_of` 所在交易所本地日期当日或更早的收盘价作为可执行 entry 或结果计量起点，即使 `analysis_date` 更早。固定期限评估按原始 run 分别使用决策市场日之后第一个标的/基准共同收盘价入场，再到第 5 个后续共同收盘价结算；计量版本、决策时刻、交易所时区和 entry cutoff 必须持久化并隔离旧 cohort。SQLite 是待结算 run 的权威来源，不得依赖 Markdown pending 条目触发结算。
+- 每日调度的 due 窗口绑定“最新完整 market-data date”而不是恢复进程当下的自然日。
+  `Persistent=true` 在周末或下一交易日收盘前补触发时，必须允许补跑最新一个已完成且
+  尚无同版本 run 的配置工作日；不得遍历更早日期或伪造历史 live 决策。相同 symbol、
+  analysis date 和 architecture version 继续使用 SQLite 幂等与有界重试语义。
+- 无人值守 scheduler 的失败 JSON/journal 只能保留安全状态、run identity 和内部异常类型；
+  不得序列化异常正文，因为 provider/backend 异常可能携带 URL、token 或请求参数。
 
 ## 测试和验证注意事项
 

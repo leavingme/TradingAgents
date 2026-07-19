@@ -3,10 +3,12 @@
 The systemd timer is intentionally a frequent wake-up mechanism, not the
 source of market-time truth.  Each invocation evaluates every target in its
 exchange-local timezone and the canonical runtime chooses the most recent
-completed daily bar.  Existing runs for the same symbol, requested cutoff
-date, and architecture version make the operation idempotent across timer
-retries and host restarts; the verified market-data date remains a separately
-audited runtime field.
+completed daily bar.  The latest completed market date owns its exchange-local
+post-close window, so a persistent-timer wake-up after a host outage can catch
+up that one latest date even on a weekend or before the next session closes.
+Existing runs for the same symbol, requested cutoff date, and architecture
+version make the operation idempotent across timer retries and host restarts;
+the verified market-data date remains a separately audited runtime field.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import os
 import re
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 from uuid import uuid4
@@ -328,7 +330,29 @@ class ScheduledTarget:
 
     def is_due(self, now: datetime) -> bool:
         local = now.astimezone(ZoneInfo(self.timezone))
-        return local.weekday() in self.weekdays and local.time().replace(tzinfo=None) >= self.run_after
+        return self.is_analysis_date_due(now, local.date().isoformat())
+
+    def is_analysis_date_due(self, now: datetime, analysis_date: str) -> bool:
+        """Whether one completed market date's configured window has passed.
+
+        Tying the window to the market-data date preserves catch-up semantics:
+        a persistent timer that resumes on Saturday may still execute Friday's
+        latest completed session. It never walks older dates or reconstructs
+        historical live decisions.
+        """
+        try:
+            candidate = date.fromisoformat(analysis_date)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("analysis_date must be an ISO date") from exc
+        if candidate.weekday() not in self.weekdays:
+            return False
+        local = now.astimezone(ZoneInfo(self.timezone))
+        scheduled_at = datetime.combine(
+            candidate,
+            self.run_after,
+            tzinfo=ZoneInfo(self.timezone),
+        )
+        return local >= scheduled_at
 
 
 @dataclass(frozen=True)
@@ -804,13 +828,13 @@ def run_due_analyses(
         analysis_dates: dict[int, str] = {}
         date_by_symbol: dict[str, str] = {}
         for index, target in enumerate(schedule.targets):
-            if not target.is_due(current):
-                continue
             if target.symbol not in date_by_symbol:
                 date_by_symbol[target.symbol] = latest_completed_daily_bar_date(
                     target.symbol, now=current
                 ).date().isoformat()
-            analysis_dates[index] = date_by_symbol[target.symbol]
+            analysis_date = date_by_symbol[target.symbol]
+            if target.is_analysis_date_due(current, analysis_date):
+                analysis_dates[index] = analysis_date
         ordered_indices = _counterbalanced_target_indices(
             schedule,
             analysis_dates=analysis_dates,
@@ -829,6 +853,14 @@ def run_due_analyses(
             if analysis_date is None:
                 outcomes.append({"symbol": target.symbol, "status": "not_due"})
                 continue
+            local_date = current.astimezone(
+                ZoneInfo(target.timezone)
+            ).date().isoformat()
+            schedule_trigger = (
+                "on_time_window"
+                if analysis_date == local_date
+                else "latest_completed_date_catch_up"
+            )
             group_key = (target.symbol, analysis_date)
             group_positions[group_key] = group_positions.get(group_key, 0) + 1
             execution_order = group_positions[group_key]
@@ -871,6 +903,7 @@ def run_due_analyses(
                         "run_status": latest.get("status"),
                         "decision_status": latest.get("decision_status"),
                         "architecture_version": target.architecture_version,
+                        "schedule_trigger": schedule_trigger,
                         "planned_execution_order": execution_order,
                         "execution_group_size": execution_group_size,
                         **(
@@ -920,6 +953,7 @@ def run_due_analyses(
                             effective_config.get("backend_url")
                         ),
                         "architecture_version": request.architecture_version,
+                        "schedule_trigger": schedule_trigger,
                         "architecture_fingerprint": architecture_fingerprint(manifest),
                         "architecture_manifest_schema": manifest["schema"],
                         "architecture_manifest": manifest,
@@ -959,8 +993,8 @@ def run_due_analyses(
                         "status": "failed",
                         "run_id": run_id,
                         "error_type": type(exc).__name__,
-                        "error": str(exc),
                         "architecture_version": target.architecture_version,
+                        "schedule_trigger": schedule_trigger,
                         "planned_execution_order": execution_order,
                         "execution_group_size": execution_group_size,
                     }
@@ -990,6 +1024,7 @@ def run_due_analyses(
                     "run_id": result.run_id,
                     "decision_status": decision_status,
                     "architecture_version": target.architecture_version,
+                    "schedule_trigger": schedule_trigger,
                     "planned_execution_order": execution_order,
                     "execution_group_size": execution_group_size,
                     "report_path": str(result.report_path) if result.report_path else None,

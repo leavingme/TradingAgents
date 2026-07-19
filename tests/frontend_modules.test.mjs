@@ -53,10 +53,39 @@ test('API client encodes evaluation cohort selectors', { concurrency: false }, a
     challenger: 'candidate/v2',
     baselineFingerprint: 'base+fp',
     challengerFingerprint: 'candidate fp',
+    experimentPlanFingerprint: 'a'.repeat(64),
   });
   assert.equal(
     paths[0],
-    '/api/evaluations?ticker=0700.HK&baseline=baseline+v1&challenger=candidate%2Fv2&baseline_fingerprint=base%2Bfp&challenger_fingerprint=candidate+fp',
+    `/api/evaluations?ticker=0700.HK&baseline=baseline+v1&challenger=candidate%2Fv2&baseline_fingerprint=base%2Bfp&challenger_fingerprint=candidate+fp&experiment_plan_fingerprint=${'a'.repeat(64)}`,
+  );
+});
+
+test('evaluation comparison selects only its exact registered plan', { concurrency: false }, async () => {
+  const { experimentPlanFingerprintForComparison } = await importSource(
+    'components/evaluation-dashboard.js',
+  );
+  const plan = {
+    fingerprint: 'a'.repeat(64),
+    arms: [
+      { version: 'baseline', fingerprint: 'b'.repeat(64) },
+      { version: 'challenger', fingerprint: 'c'.repeat(64) },
+    ],
+  };
+  const baseline = { version: 'baseline', fingerprint: 'b'.repeat(64) };
+  const challenger = { version: 'challenger', fingerprint: 'c'.repeat(64) };
+
+  assert.equal(
+    experimentPlanFingerprintForComparison(plan, baseline, challenger),
+    'a'.repeat(64),
+  );
+  assert.equal(
+    experimentPlanFingerprintForComparison(
+      plan,
+      baseline,
+      { ...challenger, fingerprint: 'd'.repeat(64) },
+    ),
+    undefined,
   );
 });
 
@@ -226,6 +255,16 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
         eligible_paired_samples: 1,
         excluded_paired_samples: 0,
       },
+      experiment_plan: {
+        fingerprint: 'a'.repeat(64),
+        arms: [{
+          architecture_version: 'baseline',
+          architecture_fingerprint: 'b'.repeat(64),
+        }, {
+          architecture_version: 'candidate',
+          architecture_fingerprint: 'fingerprint',
+        }],
+      },
       architectures: [{
         active: true,
         ticker: 'NVDA',
@@ -362,6 +401,12 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   assert.equal(view.cohortCount, 2);
   assert.equal(view.activeArchitectureCount, 1);
   assert.equal(view.activeInventoryStatus, 'loaded');
+  assert.deepEqual(view.experimentPlan, {
+    fingerprint: 'a'.repeat(64),
+    arms: [{ version: 'baseline', fingerprint: 'b'.repeat(64) }, {
+      version: 'candidate', fingerprint: 'fingerprint',
+    }],
+  });
   assert.deepEqual(view.experimentPilot, {
     status: 'collecting',
     recommendedAction: 'collect_pilot_pairs',

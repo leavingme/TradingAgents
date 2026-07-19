@@ -83,6 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--challenger")
     parser.add_argument("--baseline-fingerprint")
     parser.add_argument("--challenger-fingerprint")
+    parser.add_argument("--experiment-plan-fingerprint")
     return parser.parse_args()
 
 
@@ -141,6 +142,9 @@ def main() -> int:
                     challenger=args.challenger,
                     baseline_fingerprint=args.baseline_fingerprint,
                     challenger_fingerprint=args.challenger_fingerprint,
+                    experiment_plan_fingerprint=(
+                        args.experiment_plan_fingerprint
+                    ),
                 )
             except ValueError as exc:
                 raise SystemExit(str(exc)) from None
@@ -149,6 +153,11 @@ def main() -> int:
         elif args.baseline_fingerprint or args.challenger_fingerprint:
             raise SystemExit(
                 "fingerprint selection requires --baseline and --challenger"
+            )
+        elif args.experiment_plan_fingerprint:
+            raise SystemExit(
+                "--experiment-plan-fingerprint requires --baseline and "
+                "--challenger"
             )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0

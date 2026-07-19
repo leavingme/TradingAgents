@@ -34,13 +34,18 @@ def _write_schedule(tmp_path: Path) -> Path:
     return path
 
 
-def _run_daily_cli(tmp_path: Path, command: str) -> tuple[dict, str]:
+def _run_daily_cli(
+    tmp_path: Path,
+    command: str,
+    *command_args: str,
+) -> tuple[dict, str]:
     workspace = Path(__file__).resolve().parents[1]
     schedule = _write_schedule(tmp_path)
     missing_web_config = tmp_path / "missing-web-config.json"
     environment = os.environ.copy()
     environment["TRADINGAGENTS_DB"] = str(tmp_path / "runs.db")
     extra_args = ["--ticker", "NVDA"] if command == "evaluate" else []
+    extra_args.extend(command_args)
     completed = subprocess.run(
         [
             sys.executable,
@@ -107,6 +112,25 @@ def test_daily_evaluate_observes_active_identity_without_runs_or_outcomes(tmp_pa
     assert active["automatic_architecture_mutation_allowed"] is False
     assert active["paired_shadow_authorization_required"] is True
     assert str(tmp_path) not in serialized
+
+
+def test_daily_evaluate_selects_registered_experiment_plan(tmp_path):
+    plan_fingerprint = "a" * 64
+    payload, _ = _run_daily_cli(
+        tmp_path,
+        "evaluate",
+        "--baseline",
+        "baseline",
+        "--challenger",
+        "challenger",
+        "--experiment-plan-fingerprint",
+        plan_fingerprint,
+    )
+
+    assert payload["comparison"]["selected_experiment_plan_fingerprint"] == (
+        plan_fingerprint
+    )
+    assert payload["comparison"]["status"] == "insufficient_data"
 
 
 def test_daily_evaluate_distinguishes_invalid_history_from_maturing_outcome(

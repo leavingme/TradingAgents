@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 from math import isfinite
+import re
 from statistics import fmean
 from typing import Any
 
@@ -28,6 +29,19 @@ RUN_COST_ASSESSMENT_SCHEMA = "tradingagents/run-cost-assessment/v1"
 RUN_COST_WINDOW_SIZES = (5, 10, 20)
 MINIMUM_RUN_COST_DATES = 5
 HIGH_CONTEXT_TOKEN_THRESHOLD = 150_000
+EXPERIMENT_MEMBERSHIP_SCHEMA = (
+    "tradingagents/architecture-experiment-membership/v1"
+)
+_EXPERIMENT_LABEL_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_EXPERIMENT_FIELDS = (
+    "experiment_membership_status",
+    "experiment_id",
+    "experiment_plan_fingerprint",
+    "experiment_architecture_version",
+    "experiment_architecture_fingerprint",
+    "experiment_execution_order",
+)
 _TERMINAL_COST_STATUSES = {
     "completed",
     "review_required",
@@ -56,6 +70,58 @@ def _final_stats(run: Any) -> dict[str, Any] | None:
         ),
         None,
     )
+
+
+def _experiment_membership(run: Any) -> dict[str, Any]:
+    if not isinstance(run, dict) or not isinstance(run.get("events"), list):
+        return {"experiment_membership_status": "not_observed"}
+    memberships = []
+    invalid = False
+    for event in run["events"]:
+        if not isinstance(event, dict) or event.get("type") != (
+            "architecture_experiment_membership"
+        ):
+            continue
+        content = event.get("content")
+        if not isinstance(content, dict):
+            invalid = True
+            continue
+        experiment_id = str(content.get("experiment_id") or "")
+        plan_fingerprint = str(
+            content.get("experiment_plan_fingerprint") or ""
+        )
+        version = str(content.get("architecture_version") or "")
+        architecture_fingerprint = str(
+            content.get("architecture_fingerprint") or ""
+        )
+        order = content.get("planned_execution_order")
+        if (
+            content.get("schema") != EXPERIMENT_MEMBERSHIP_SCHEMA
+            or not _EXPERIMENT_LABEL_RE.fullmatch(experiment_id)
+            or not _SHA256_RE.fullmatch(plan_fingerprint)
+            or not _EXPERIMENT_LABEL_RE.fullmatch(version)
+            or not _SHA256_RE.fullmatch(architecture_fingerprint)
+            or isinstance(order, bool)
+            or order not in {1, 2}
+        ):
+            invalid = True
+            continue
+        memberships.append({
+            "experiment_membership_status": "observed",
+            "experiment_id": experiment_id,
+            "experiment_plan_fingerprint": plan_fingerprint,
+            "experiment_architecture_version": version,
+            "experiment_architecture_fingerprint": architecture_fingerprint,
+            "experiment_execution_order": int(order),
+        })
+    if not memberships and not invalid:
+        return {"experiment_membership_status": "not_observed"}
+    canonical = {
+        tuple(sorted(membership.items())) for membership in memberships
+    }
+    if invalid or len(canonical) != 1:
+        return {"experiment_membership_status": "invalid"}
+    return memberships[0]
 
 
 def _timestamp(value: Any) -> datetime | None:
@@ -302,11 +368,12 @@ def attach_operator_cost_metrics(
     *,
     store: Any,
 ) -> list[dict[str, Any]]:
-    """Attach sanitized per-tool metrics without changing canonical history rows.
+    """Attach sanitized operator metrics without changing canonical history rows.
 
     History stays the source of immutable outcome and Agent-level cost fields.
     This operator boundary performs bounded run lookups for the final stats event,
-    copies only canonical numeric tool counters, and never mutates its input rows.
+    copies only canonical numeric tool counters and validated experiment membership,
+    and never mutates its input rows.
     """
     if len(evaluations) > MAX_OPERATOR_COST_ROWS:
         raise ValueError(
@@ -316,15 +383,20 @@ def attach_operator_cost_metrics(
     enriched: list[dict[str, Any]] = []
     for evaluation in evaluations:
         row = dict(evaluation)
+        for field in _EXPERIMENT_FIELDS:
+            row.pop(field, None)
         run_id = row.get("run_id")
         if not isinstance(run_id, str) or not run_id or len(run_id) > 128:
             row["tool_context_status"] = "not_observed"
+            row["experiment_membership_status"] = "not_observed"
             enriched.append(row)
             continue
         if run_id not in run_cache:
-            stats = _final_stats(store.get_run(run_id))
-            run_cache[run_id] = normalize_stats_snapshot(stats) if stats else None
-        snapshot = run_cache[run_id]
+            run_cache[run_id] = store.get_run(run_id)
+        run = run_cache[run_id]
+        stats = _final_stats(run)
+        snapshot = normalize_stats_snapshot(stats) if stats else None
+        row.update(_experiment_membership(run))
         if snapshot:
             row["runtime_cost_status"] = "observed"
             for field, metric in snapshot["totals"].items():

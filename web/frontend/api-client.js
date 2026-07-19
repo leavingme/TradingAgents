@@ -62,6 +62,7 @@ export const api = {
     challenger,
     baselineFingerprint,
     challengerFingerprint,
+    experimentPlanFingerprint,
   } = {}) {
     const params = new URLSearchParams();
     if (ticker) params.set('ticker', ticker);
@@ -72,6 +73,9 @@ export const api = {
     }
     if (challengerFingerprint) {
       params.set('challenger_fingerprint', challengerFingerprint);
+    }
+    if (experimentPlanFingerprint) {
+      params.set('experiment_plan_fingerprint', experimentPlanFingerprint);
     }
     const query = params.toString();
     return (await request(`/api/evaluations${query ? `?${query}` : ''}`)).json();

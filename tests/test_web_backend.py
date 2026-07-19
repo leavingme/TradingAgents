@@ -119,6 +119,20 @@ def test_evaluation_api_requires_complete_distinct_architecture_selectors():
         ))
     assert fingerprints_without_arms.value.status_code == 422
 
+    with pytest.raises(HTTPException) as plan_without_arms:
+        asyncio.run(main.get_decision_evaluations(
+            experiment_plan_fingerprint="a" * 64,
+        ))
+    assert plan_without_arms.value.status_code == 422
+
+    with pytest.raises(HTTPException) as invalid_plan_fingerprint:
+        asyncio.run(main.get_decision_evaluations(
+            baseline="baseline",
+            challenger="challenger",
+            experiment_plan_fingerprint="not-a-sha256",
+        ))
+    assert invalid_plan_fingerprint.value.status_code == 422
+
     with pytest.raises(HTTPException) as whitespace_selector:
         asyncio.run(main.get_decision_evaluations(
             baseline=" baseline",

@@ -6,6 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite, sqrt
+import re
 from statistics import fmean, median, stdev
 from typing import Any
 
@@ -37,6 +38,8 @@ SINGLE_ARCHITECTURE_OPTIMIZATION_SCHEMA = (
     "tradingagents/single-architecture-optimization-assessment/v2"
 )
 ROLLING_OUTCOME_WINDOW_SIZES = (5, 10, 20)
+_EXPERIMENT_LABEL_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 _RUNTIME_COST_FIELDS = (
     "runtime_seconds",
@@ -164,6 +167,28 @@ def _tool_context_mapping(value: Any) -> dict[str, dict[str, Any]]:
     }
 
 
+def _experiment_membership_key(
+    row: dict[str, Any],
+) -> tuple[str, str, int] | None:
+    experiment_id = str(row.get("experiment_id") or "")
+    plan_fingerprint = str(row.get("experiment_plan_fingerprint") or "")
+    version = str(row.get("experiment_architecture_version") or "")
+    fingerprint = str(row.get("experiment_architecture_fingerprint") or "")
+    order = row.get("experiment_execution_order")
+    if (
+        row.get("experiment_membership_status") != "observed"
+        or not _EXPERIMENT_LABEL_RE.fullmatch(experiment_id)
+        or not _SHA256_RE.fullmatch(plan_fingerprint)
+        or version != str(row.get("architecture_version") or "")
+        or not _SHA256_RE.fullmatch(fingerprint)
+        or fingerprint != str(row.get("architecture_fingerprint") or "")
+        or isinstance(order, bool)
+        or order not in {1, 2}
+    ):
+        return None
+    return experiment_id, plan_fingerprint, int(order)
+
+
 def _architecture_optimization_assessment(
     comparison: dict[str, Any],
 ) -> dict[str, Any]:
@@ -198,6 +223,7 @@ def _architecture_optimization_assessment(
         "provenance_mismatches_excluded",
         "evidence_mismatches_excluded",
         "architecture_input_mismatches_excluded",
+        "experiment_membership_mismatches_excluded",
         "temporal_mismatches_excluded",
     )
     exclusions = {
@@ -1109,6 +1135,7 @@ def compare_architectures(
     challenger: str,
     baseline_fingerprint: str | None = None,
     challenger_fingerprint: str | None = None,
+    experiment_plan_fingerprint: str | None = None,
     horizon_sessions: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
     minimum_samples: int = DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES,
     minimum_paired_samples: int = DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES,
@@ -1154,6 +1181,11 @@ def compare_architectures(
             raise ValueError(
                 f"{label} must be a nonempty string of at most 128 characters"
             )
+    if experiment_plan_fingerprint is not None and (
+        not isinstance(experiment_plan_fingerprint, str)
+        or not _SHA256_RE.fullmatch(experiment_plan_fingerprint)
+    ):
+        raise ValueError("experiment_plan_fingerprint must be a SHA-256 string")
     if (
         isinstance(minimum_samples, bool)
         or not isinstance(minimum_samples, int)
@@ -1193,9 +1225,25 @@ def compare_architectures(
             or str(row.get("architecture_fingerprint", "legacy-unspecified"))
             == selected_fingerprints[str(row.get("architecture_version"))]
         )
+        and (
+            experiment_plan_fingerprint is None
+            or row.get("experiment_membership_status") != "observed"
+            or row.get("experiment_plan_fingerprint")
+            == experiment_plan_fingerprint
+        )
     ]
+    registered_plan_fingerprints = sorted({
+        str(row.get("experiment_plan_fingerprint"))
+        for row in evaluations
+        if row.get("experiment_membership_status") == "observed"
+        and _SHA256_RE.fullmatch(
+            str(row.get("experiment_plan_fingerprint") or "")
+        )
+    })
     selection_payload = {
         "selected_architecture_fingerprints": selected_fingerprints,
+        "selected_experiment_plan_fingerprint": experiment_plan_fingerprint,
+        "observed_experiment_plan_fingerprints": registered_plan_fingerprints,
         "comparison_policy": {
             "horizon_sessions": horizon_sessions,
             "minimum_samples": minimum_samples,
@@ -1231,6 +1279,19 @@ def compare_architectures(
                 for version, row in ((baseline, base), (challenger, challenge))
                 if row is None
             ],
+            "baseline": base,
+            "challenger": challenge,
+        })
+    if experiment_plan_fingerprint is None and len(
+        registered_plan_fingerprints
+    ) > 1:
+        return _with_optimization_assessment({
+            **selection_payload,
+            "status": "invalid_comparison",
+            "reason": (
+                "multiple registered experiment plans are present; select one "
+                "experiment_plan_fingerprint"
+            ),
             "baseline": base,
             "challenger": challenge,
         })
@@ -1337,6 +1398,7 @@ def compare_architectures(
     provenance_mismatches = 0
     evidence_mismatches = 0
     architecture_input_mismatches = 0
+    experiment_membership_mismatches = 0
     temporal_mismatches = 0
     execution_order_counts = {
         "baseline_first": 0,
@@ -1375,6 +1437,16 @@ def compare_architectures(
             continue
         base_row = base_rows[0]
         challenger_row = challenger_rows[0]
+        base_membership = _experiment_membership_key(base_row)
+        challenger_membership = _experiment_membership_key(challenger_row)
+        if (
+            base_membership is None
+            or challenger_membership is None
+            or base_membership[:2] != challenger_membership[:2]
+            or {base_membership[2], challenger_membership[2]} != {1, 2}
+        ):
+            experiment_membership_mismatches += 1
+            continue
         base_architecture_input = base_row.get("architecture_input_fingerprint")
         challenger_architecture_input = challenger_row.get(
             "architecture_input_fingerprint"
@@ -1467,6 +1539,14 @@ def compare_architectures(
             execution_order = "challenger_first"
         else:
             execution_order = "missing_or_tied"
+        planned_order = (
+            "baseline_first"
+            if base_membership[2] == 1
+            else "challenger_first"
+        )
+        if execution_order != planned_order:
+            experiment_membership_mismatches += 1
+            continue
         execution_order_counts[execution_order] += 1
         score_delta = float(challenger_row["score"]) - float(base_row["score"])
         paired_deltas.append(score_delta)
@@ -1542,6 +1622,9 @@ def compare_architectures(
         "provenance_mismatches_excluded": provenance_mismatches,
         "evidence_mismatches_excluded": evidence_mismatches,
         "architecture_input_mismatches_excluded": architecture_input_mismatches,
+        "experiment_membership_mismatches_excluded": (
+            experiment_membership_mismatches
+        ),
         "temporal_mismatches_excluded": temporal_mismatches,
         "maximum_pair_start_gap_seconds": maximum_pair_start_gap_seconds,
     }

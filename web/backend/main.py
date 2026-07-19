@@ -347,6 +347,7 @@ async def get_decision_evaluations(
     challenger: str | None = None,
     baseline_fingerprint: str | None = None,
     challenger_fingerprint: str | None = None,
+    experiment_plan_fingerprint: str | None = None,
 ):
     """Return immutable fixed-horizon outcomes and architecture rollups."""
     from tradingagents.evaluation import (
@@ -379,6 +380,24 @@ async def get_decision_evaluations(
             status_code=422,
             detail="fingerprint selection requires baseline and challenger",
         )
+    if experiment_plan_fingerprint is not None and not baseline:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "experiment_plan_fingerprint requires baseline and challenger"
+            ),
+        )
+    if experiment_plan_fingerprint is not None and (
+        len(experiment_plan_fingerprint) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in experiment_plan_fingerprint
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="experiment_plan_fingerprint must be a SHA-256 string",
+        )
     if baseline and challenger and baseline == challenger:
         raise HTTPException(
             status_code=422,
@@ -391,6 +410,7 @@ async def get_decision_evaluations(
             challenger,
             baseline_fingerprint,
             challenger_fingerprint,
+            experiment_plan_fingerprint,
         )
     ):
         raise HTTPException(
@@ -487,6 +507,7 @@ async def get_decision_evaluations(
                 challenger=challenger,
                 baseline_fingerprint=baseline_fingerprint,
                 challenger_fingerprint=challenger_fingerprint,
+                experiment_plan_fingerprint=experiment_plan_fingerprint,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None

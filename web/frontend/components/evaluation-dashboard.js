@@ -21,6 +21,32 @@ function tickerCohortKey(row) {
   ]);
 }
 
+export function experimentPlanFingerprintForComparison(
+  experimentPlan,
+  baseline,
+  challenger,
+) {
+  if (
+    !/^[0-9a-f]{64}$/.test(String(experimentPlan?.fingerprint || ''))
+    || !Array.isArray(experimentPlan?.arms)
+    || experimentPlan.arms.length !== 2
+  ) return undefined;
+  const selectedIdentities = new Set([
+    `${baseline?.version || ''}\u0000${baseline?.fingerprint || ''}`,
+    `${challenger?.version || ''}\u0000${challenger?.fingerprint || ''}`,
+  ]);
+  const plannedIdentities = new Set(
+    experimentPlan.arms.map(
+      arm => `${arm?.version || ''}\u0000${arm?.fingerprint || ''}`,
+    ),
+  );
+  return (
+    selectedIdentities.size === 2
+    && plannedIdentities.size === 2
+    && [...selectedIdentities].every(identity => plannedIdentities.has(identity))
+  ) ? experimentPlan.fingerprint : undefined;
+}
+
 export function buildEvaluationViewModel(payload = {}) {
   const evaluations = Array.isArray(payload.evaluations) ? payload.evaluations : [];
   const pending = Array.isArray(payload.pending_evaluations)
@@ -56,6 +82,21 @@ export function buildEvaluationViewModel(payload = {}) {
       excludedPairs: Number(
         activeInventory.experiment_pilot.excluded_paired_samples || 0,
       ),
+    }
+    : null;
+  const rawExperimentPlan = activeInventory.experiment_plan
+    && typeof activeInventory.experiment_plan === 'object'
+    ? activeInventory.experiment_plan
+    : null;
+  const experimentPlan = rawExperimentPlan
+    && Array.isArray(rawExperimentPlan.arms)
+    && rawExperimentPlan.arms.length === 2
+    ? {
+      fingerprint: String(rawExperimentPlan.fingerprint || ''),
+      arms: rawExperimentPlan.arms.map(row => ({
+        version: String(row?.architecture_version || ''),
+        fingerprint: String(row?.architecture_fingerprint || ''),
+      })),
     }
     : null;
   const outcomeByKey = new Map(rollups.map(row => [cohortKey(row), row]));
@@ -258,6 +299,7 @@ export function buildEvaluationViewModel(payload = {}) {
     cohortCount: cohorts.length,
     activeArchitectureCount: activeArchitectures.length,
     activeInventoryStatus: String(activeInventory.status || 'not_observed'),
+    experimentPlan,
     experimentPilot,
     runCostSampleCount: Number(
       payload.run_cost_sample_count
@@ -723,6 +765,16 @@ export function createEvaluationDashboard({
         assessment.experiment_integrity?.valid_pair_count ?? 0,
       ),
       comparisonRow(
+        t('experimentPlan'),
+        comparison.selected_experiment_plan_fingerprint
+          ? shortFingerprint(comparison.selected_experiment_plan_fingerprint)
+          : t('evaluationCodeNotObserved'),
+      ),
+      comparisonRow(
+        t('experimentMembershipExclusions'),
+        comparison.paired?.experiment_membership_mismatches_excluded ?? 0,
+      ),
+      comparisonRow(
         t('recommendedAction'),
         codeLabel(assessment.recommended_action || 'continue_sample_collection'),
       ),
@@ -775,12 +827,18 @@ export function createEvaluationDashboard({
     }
     compareButton.disabled = true;
     try {
+      const experimentPlanFingerprint = experimentPlanFingerprintForComparison(
+        view.experimentPlan,
+        baseline,
+        challenger,
+      );
       const payload = await api.getEvaluations({
         ticker: tickerField.value.trim(),
         baseline: baseline.version,
         challenger: challenger.version,
         baselineFingerprint: baseline.fingerprint,
         challengerFingerprint: challenger.fingerprint,
+        experimentPlanFingerprint,
       });
       cachedPayload = payload;
       renderComparison(payload.comparison);

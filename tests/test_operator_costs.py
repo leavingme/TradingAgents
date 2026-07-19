@@ -16,9 +16,24 @@ class FakeStore:
         if run_id == "missing":
             return None
         return {
-            "events": [{
-                "type": "stats",
-                "content": {
+            "events": [
+                {
+                    "type": "architecture_experiment_membership",
+                    "content": {
+                        "schema": (
+                            "tradingagents/architecture-experiment-membership/v1"
+                        ),
+                        "experiment_id": "nvda-rm-v1",
+                        "experiment_plan_fingerprint": "a" * 64,
+                        "architecture_version": "challenger",
+                        "architecture_fingerprint": "b" * 64,
+                        "planned_execution_order": 2,
+                        "secret": "must-not-survive",
+                    },
+                },
+                {
+                    "type": "stats",
+                    "content": {
                     "by_tool": {
                         "get_news": {
                             "tool_calls": 2,
@@ -35,14 +50,15 @@ class FakeStore:
                             "payload": "credential=sentinel-secret",
                         },
                     },
+                    },
                 },
-            }],
+            ],
         }
 
 
 def test_operator_cost_enrichment_is_sanitized_cached_and_non_mutating():
     evaluations = [
-        {"run_id": "shared", "score": 0.01},
+        {"run_id": "shared", "score": 0.01, "experiment_id": "attacker"},
         {"run_id": "shared", "score": 0.02},
         {"run_id": "missing", "score": 0.03},
         {"score": 0.04},
@@ -51,7 +67,9 @@ def test_operator_cost_enrichment_is_sanitized_cached_and_non_mutating():
 
     enriched = attach_operator_cost_metrics(evaluations, store=store)
 
-    assert evaluations[0] == {"run_id": "shared", "score": 0.01}
+    assert evaluations[0] == {
+        "run_id": "shared", "score": 0.01, "experiment_id": "attacker"
+    }
     assert store.calls == ["shared", "missing"]
     assert enriched[0]["tool_context_status"] == "observed"
     assert enriched[0]["tool_context"] == {
@@ -63,8 +81,16 @@ def test_operator_cost_enrichment_is_sanitized_cached_and_non_mutating():
         },
     }
     assert enriched[1]["tool_context"] == enriched[0]["tool_context"]
+    assert enriched[0]["experiment_membership_status"] == "observed"
+    assert enriched[0]["experiment_id"] == "nvda-rm-v1"
+    assert enriched[0]["experiment_plan_fingerprint"] == "a" * 64
+    assert enriched[0]["experiment_architecture_version"] == "challenger"
+    assert enriched[0]["experiment_architecture_fingerprint"] == "b" * 64
+    assert enriched[0]["experiment_execution_order"] == 2
     assert enriched[2]["tool_context_status"] == "not_observed"
+    assert enriched[2]["experiment_membership_status"] == "not_observed"
     assert enriched[3]["tool_context_status"] == "not_observed"
+    assert enriched[3]["experiment_membership_status"] == "not_observed"
     assert "sentinel-secret" not in str(enriched)
     assert "attacker-tool" not in str(enriched)
 

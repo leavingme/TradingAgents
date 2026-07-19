@@ -19,8 +19,14 @@ def _shadow_started_at(index: int, version: str) -> str:
     return f"2026-01-{index + 1:02d}T20:{minute:02d}:00+00:00"
 
 
-def _comparable_input_evidence(index: int) -> dict:
+def _comparable_input_evidence(index: int, version: str) -> dict:
+    architecture_fingerprint = (
+        "b" * 64 if version == "baseline" else "c" * 64
+    )
+    baseline_first = index % 2 == 0
+    is_first = (version == "baseline") == baseline_first
     return {
+        "architecture_fingerprint": architecture_fingerprint,
         "market_data_date": f"2026-01-{index + 1:02d}",
         "analysis_data_status": "available",
         "analysis_evidence_complete": True,
@@ -30,7 +36,44 @@ def _comparable_input_evidence(index: int) -> dict:
         ),
         "architecture_input_complete": True,
         "architecture_input_fingerprint": f"branch-input-{index}",
+        "experiment_membership_status": "observed",
+        "experiment_id": "nvda-rm-context-v1",
+        "experiment_plan_fingerprint": "a" * 64,
+        "experiment_architecture_version": version,
+        "experiment_architecture_fingerprint": architecture_fingerprint,
+        "experiment_execution_order": 1 if is_first else 2,
     }
+
+
+def _registered_paired_outcomes(count: int = 20) -> list[dict]:
+    rows = []
+    for index in range(count):
+        for version, score in (("baseline", 0.0), ("challenger", 0.01)):
+            rows.append({
+                "run_id": f"registered-{version}-{index}",
+                "ticker": "NVDA",
+                "analysis_date": f"2026-01-{index + 1:02d}",
+                "architecture_version": version,
+                "horizon_sessions": 5,
+                "directional_hit": version == "challenger",
+                "raw_return": 0.03,
+                "benchmark_return": 0.01,
+                "alpha_return": 0.02,
+                "entry_date": f"2026-02-{index + 1:02d}",
+                "exit_date": f"2026-03-{index + 1:02d}",
+                "stock_entry_close": 100.0,
+                "stock_exit_close": 103.0,
+                "benchmark_entry_close": 500.0,
+                "benchmark_exit_close": 505.0,
+                "stock_entry_source_id": f"stock-entry-{index}",
+                "stock_exit_source_id": f"stock-exit-{index}",
+                "benchmark_entry_source_id": f"benchmark-entry-{index}",
+                "benchmark_exit_source_id": f"benchmark-exit-{index}",
+                "run_started_at": _shadow_started_at(index, version),
+                "score": score,
+                **_comparable_input_evidence(index, version),
+            })
+    return rows
 
 
 def test_deterministic_direction_and_hold_scoring():
@@ -572,7 +615,9 @@ def test_architecture_comparison_reports_pair_drift_before_sample_minimum():
             "analysis_date": "2026-07-01",
             "market_data_date": "2026-07-01",
             "architecture_version": version,
-            "architecture_fingerprint": f"{version}-fingerprint",
+            "architecture_fingerprint": (
+                "b" * 64 if version == "baseline" else "c" * 64
+            ),
             "horizon_sessions": 5,
             "directional_hit": True,
             "raw_return": 0.03,
@@ -602,6 +647,16 @@ def test_architecture_comparison_reports_pair_drift_before_sample_minimum():
             ),
             "architecture_input_complete": True,
             "architecture_input_fingerprint": "shared-upstream-state",
+            "experiment_membership_status": "observed",
+            "experiment_id": "nvda-rm-context-v1",
+            "experiment_plan_fingerprint": "a" * 64,
+            "experiment_architecture_version": version,
+            "experiment_architecture_fingerprint": (
+                "b" * 64 if version == "baseline" else "c" * 64
+            ),
+            "experiment_execution_order": (
+                1 if version == "baseline" else 2
+            ),
         })
 
     comparison = compare_architectures(
@@ -694,7 +749,7 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
                     } if version == "challenger" else {}),
                 },
                 "score": score,
-                **_comparable_input_evidence(index),
+                **_comparable_input_evidence(index, version),
             })
     comparison = compare_architectures(
         evaluations, baseline="baseline", challenger="challenger"
@@ -813,7 +868,9 @@ def test_architecture_comparison_uses_same_day_shadow_pairs():
     assert different_market_bar["paired"]["outcome_mismatches_excluded"] == 1
     assert different_market_bar["passes_paired_gate"] is False
 
-    evaluations[-1]["market_data_date"] = _comparable_input_evidence(19)[
+    evaluations[-1]["market_data_date"] = _comparable_input_evidence(
+        19, "challenger"
+    )[
         "market_data_date"
     ]
     for index in range(21):
@@ -1221,7 +1278,7 @@ def test_architecture_pairing_requires_identical_ohlcv_provenance():
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
                 "run_started_at": _shadow_started_at(index, version),
                 "score": score,
-                **_comparable_input_evidence(index),
+                **_comparable_input_evidence(index, version),
             })
     # Same prices are insufficient when one challenger used a different source.
     evaluations[-1]["benchmark_exit_source_id"] = "ohlcv:other:bench-exit:19"
@@ -1262,7 +1319,7 @@ def test_architecture_pairing_uses_student_t_not_normal_lower_bound():
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
                 "run_started_at": _shadow_started_at(index, version),
                 "score": score,
-                **_comparable_input_evidence(index),
+                **_comparable_input_evidence(index, version),
             })
     comparison = compare_architectures(
         evaluations, baseline="baseline", challenger="challenger"
@@ -1300,7 +1357,7 @@ def test_architecture_pairing_corrects_overlapping_horizon_autocorrelation():
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
                 "run_started_at": _shadow_started_at(index, version),
                 "score": score,
-                **_comparable_input_evidence(index),
+                **_comparable_input_evidence(index, version),
             })
 
     comparison = compare_architectures(
@@ -1351,7 +1408,7 @@ def test_architecture_pairing_requires_identical_analysis_input_evidence():
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
                 "run_started_at": _shadow_started_at(index, version),
                 "score": score,
-                **_comparable_input_evidence(index),
+                **_comparable_input_evidence(index, version),
             })
     evaluations[-1]["analysis_evidence_fingerprint"] = "different-input"
     comparison = compare_architectures(
@@ -1391,7 +1448,7 @@ def test_paired_comparison_excludes_changed_pre_treatment_agent_state():
                 "benchmark_exit_source_id": f"ohlcv:test:bench-exit:{index}",
                 "run_started_at": _shadow_started_at(index, version),
                 "score": score,
-                **_comparable_input_evidence(index),
+                **_comparable_input_evidence(index, version),
             })
     evaluations[-1]["architecture_input_fingerprint"] = "different-upstream-state"
     comparison = compare_architectures(
@@ -1400,3 +1457,87 @@ def test_paired_comparison_excludes_changed_pre_treatment_agent_state():
     assert comparison["paired"]["sample_count"] == 19
     assert comparison["paired"]["architecture_input_mismatches_excluded"] == 1
     assert comparison["passes_paired_gate"] is False
+
+
+def test_paired_comparison_requires_same_registered_experiment_membership():
+    evaluations = _registered_paired_outcomes()
+    evaluations[-1]["experiment_id"] = "different-experiment"
+
+    comparison = compare_architectures(
+        evaluations,
+        baseline="baseline",
+        challenger="challenger",
+    )
+
+    assert comparison["paired"]["sample_count"] == 19
+    assert comparison["paired"][
+        "experiment_membership_mismatches_excluded"
+    ] == 1
+    assert comparison["passes_paired_gate"] is False
+
+
+def test_paired_comparison_rejects_registered_order_that_did_not_execute():
+    evaluations = _registered_paired_outcomes()
+    evaluations[-1]["experiment_execution_order"] = 2
+    evaluations[-2]["experiment_execution_order"] = 1
+
+    comparison = compare_architectures(
+        evaluations,
+        baseline="baseline",
+        challenger="challenger",
+    )
+
+    assert comparison["paired"]["sample_count"] == 19
+    assert comparison["paired"][
+        "experiment_membership_mismatches_excluded"
+    ] == 1
+    assert comparison["passes_paired_gate"] is False
+
+
+def test_paired_comparison_requires_plan_selection_when_experiments_mix():
+    evaluations = _registered_paired_outcomes()
+    evaluations[-1]["experiment_plan_fingerprint"] = "d" * 64
+    evaluations[-2]["experiment_plan_fingerprint"] = "d" * 64
+
+    mixed = compare_architectures(
+        evaluations,
+        baseline="baseline",
+        challenger="challenger",
+    )
+    selected = compare_architectures(
+        evaluations,
+        baseline="baseline",
+        challenger="challenger",
+        experiment_plan_fingerprint="a" * 64,
+    )
+
+    assert mixed["status"] == "invalid_comparison"
+    assert mixed["observed_experiment_plan_fingerprints"] == ["a" * 64, "d" * 64]
+    assert selected["selected_experiment_plan_fingerprint"] == "a" * 64
+    assert selected["sample_progress"] == {
+        "baseline": 19,
+        "challenger": 19,
+        "minimum_required_each": 20,
+        "sufficient": False,
+    }
+    assert selected["paired"]["sample_count"] == 19
+    assert selected["passes_paired_gate"] is False
+
+
+def test_selected_experiment_plan_reports_missing_membership():
+    evaluations = _registered_paired_outcomes()
+    evaluations[-1]["experiment_membership_status"] = "not_observed"
+    evaluations[-1].pop("experiment_plan_fingerprint")
+
+    selected = compare_architectures(
+        evaluations,
+        baseline="baseline",
+        challenger="challenger",
+        experiment_plan_fingerprint="a" * 64,
+    )
+
+    assert selected["paired"]["sample_count"] == 19
+    assert selected["paired"][
+        "experiment_membership_mismatches_excluded"
+    ] == 1
+    assert selected["passes_paired_gate"] is False

@@ -284,6 +284,17 @@ instrument context 与完整 investment debate history，刻意排除 `past_cont
 达到 `maximum_paired_samples` 后，两臂均返回 `experiment_budget_complete`，不再发起新的
 LLM 分析。dry-run 只展示计划身份，不创建注册文件；默认生产单架构 schedule 不受影响，
 `paired_shadow_authorized=true` 仍是独立的显式成本授权门禁。
+
+计划还必须设置 1–5 组 `pilot_paired_samples`（模板默认 2）。每个正式双臂 run 在决策形成
+后追加不含正文的 `architecture-experiment-membership/v1`，绑定实验/计划 fingerprint、
+arm fingerprint 和执行顺序。scheduler 无需等待 5-session outcome，就会从 SQLite 立即
+核对同日两臂是否都有 validated decision、相同非空 `market_data_date`、完整且相同的
+Research Manager pre-treatment fingerprint，以及完整且相同的 analysis-evidence
+fingerprint。任何一项失败都会把 `architecture-experiment-pilot/v1` 标为 `failed`，下一
+周期两臂均返回 `experiment_pilot_failed` 且 exit 1，不再继续支付完整实验成本；建议动作固定
+为 `implement_shared_pre_treatment_replay`。达到 pilot 数且全部匹配后才允许继续，后续每个
+新 pair 仍持续复核，漂移会再次停损。pilot 状态通过 schedule inventory 进入 CLI、API 和
+Web Evaluations 摘要；它只属于 operator 控制面，不进入 Agent state 或决策 fingerprint。
 查询方式：
 
 ```bash

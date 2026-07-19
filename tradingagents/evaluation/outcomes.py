@@ -25,6 +25,7 @@ LEGACY_OUTCOME_MEASUREMENT_VERSION = "decision-close-v1"
 DEFAULT_HOLD_BAND = 0.02
 DEFAULT_OUTCOME_HORIZON_SESSIONS = 5
 DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES = 20
+DEFAULT_ARCHITECTURE_MINIMUM_SCORE_IMPROVEMENT = 0.002
 LONGITUDINAL_CONTEXT_SCHEMA = "tradingagents/audited-longitudinal-outcomes/v8"
 ARCHITECTURE_OUTCOME_ASSESSMENT_SCHEMA = (
     "tradingagents/architecture-outcome-assessment/v2"
@@ -1111,7 +1112,9 @@ def compare_architectures(
     horizon_sessions: int = DEFAULT_OUTCOME_HORIZON_SESSIONS,
     minimum_samples: int = DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES,
     minimum_paired_samples: int = DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES,
-    minimum_score_improvement: float = 0.002,
+    minimum_score_improvement: float = (
+        DEFAULT_ARCHITECTURE_MINIMUM_SCORE_IMPROVEMENT
+    ),
     maximum_pair_start_gap_seconds: float = 3600.0,
 ) -> dict[str, Any]:
     """Return a conservative promotion gate, never an automatic mutation.

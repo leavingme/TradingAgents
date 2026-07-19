@@ -61,6 +61,7 @@ const expression = `JSON.stringify({
   providersHidden: document.querySelector('#providersView')?.hidden ?? null,
   evaluationsHidden: document.querySelector('#evaluationsView')?.hidden ?? null,
   evaluationCards: document.querySelectorAll('.evaluation-card').length,
+  evaluationSummaryText: document.querySelector('#evaluationSummary')?.textContent?.trim().replace(/\s+/g, ' ').slice(0, 500) || '',
   evaluationText: document.querySelector('#evaluationRollups')?.textContent?.trim().slice(0, 500) || '',
   providerRows: document.querySelectorAll('.provider-item').length,
   longbridgeMcpProviderText: document.querySelector('.provider-item[data-vendor="longbridge_mcp"]')?.textContent?.trim().replace(/\\s+/g, ' ').slice(0, 500) || '',

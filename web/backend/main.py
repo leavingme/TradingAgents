@@ -455,6 +455,7 @@ async def get_decision_evaluations(
     ]
     payload = {
         "ticker_scope": ticker_scope,
+        "evaluation_count": len(evaluations),
         "evaluations": evaluations,
         "pending_evaluation_count": len(pending_rows),
         "blocked_evaluation_count": sum(

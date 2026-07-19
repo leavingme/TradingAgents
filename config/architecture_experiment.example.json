@@ -6,6 +6,7 @@
     "primary_metric": "mean_score_delta",
     "minimum_paired_samples": 20,
     "maximum_paired_samples": 30,
+    "pilot_paired_samples": 2,
     "minimum_score_improvement": 0.002
   },
   "max_attempts_per_date": 1,

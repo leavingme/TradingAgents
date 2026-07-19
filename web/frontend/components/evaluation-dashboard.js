@@ -37,6 +37,27 @@ export function buildEvaluationViewModel(payload = {}) {
   const activeArchitectures = Array.isArray(activeInventory.architectures)
     ? activeInventory.architectures
     : [];
+  const experimentPilot = activeInventory.experiment_pilot
+    && typeof activeInventory.experiment_pilot === 'object'
+    ? {
+      status: String(activeInventory.experiment_pilot.status || 'not_observed'),
+      recommendedAction: String(
+        activeInventory.experiment_pilot.recommended_action || 'collect_pilot_pairs',
+      ),
+      requiredPairs: Number(
+        activeInventory.experiment_pilot.required_paired_samples || 0,
+      ),
+      observedPairs: Number(
+        activeInventory.experiment_pilot.observed_paired_samples || 0,
+      ),
+      eligiblePairs: Number(
+        activeInventory.experiment_pilot.eligible_paired_samples || 0,
+      ),
+      excludedPairs: Number(
+        activeInventory.experiment_pilot.excluded_paired_samples || 0,
+      ),
+    }
+    : null;
   const outcomeByKey = new Map(rollups.map(row => [cohortKey(row), row]));
   const tickerScope = String(payload.ticker_scope || '').toUpperCase();
   const costRowsByKey = new Map();
@@ -237,6 +258,7 @@ export function buildEvaluationViewModel(payload = {}) {
     cohortCount: cohorts.length,
     activeArchitectureCount: activeArchitectures.length,
     activeInventoryStatus: String(activeInventory.status || 'not_observed'),
+    experimentPilot,
     runCostSampleCount: Number(
       payload.run_cost_sample_count
         ?? runCostRollups.reduce(
@@ -338,6 +360,9 @@ export function createEvaluationDashboard({
     hold_architecture_for_outcome_maturity: 'evaluationCodeHoldForOutcomeMaturity',
     continue_active_outcome_collection: 'evaluationCodeContinueActiveOutcomes',
     review_active_architecture_assessment: 'evaluationCodeReviewActiveAssessment',
+    collecting: 'evaluationCodePilotCollecting',
+    passed: 'evaluationCodePilotPassed',
+    failed: 'evaluationCodePilotFailed',
   };
 
   function codeLabel(value) {
@@ -372,13 +397,20 @@ export function createEvaluationDashboard({
   }
 
   function renderSummary(view) {
-    summaryElement.replaceChildren(
+    const cards = [
       metric(t('evaluatedResults'), view.evaluationCount),
       metric(t('pendingResults'), view.pendingCount),
       metric(t('architectureCohorts'), view.cohortCount),
       metric(t('activeArchitectures'), view.activeArchitectureCount),
       metric(t('costRuns'), view.runCostSampleCount),
-    );
+    ];
+    if (view.experimentPilot) {
+      cards.push(metric(
+        t('experimentPilot'),
+        `${codeLabel(view.experimentPilot.status)} · ${view.experimentPilot.eligiblePairs}/${view.experimentPilot.requiredPairs}`,
+      ));
+    }
+    summaryElement.replaceChildren(...cards);
   }
 
   function rollingTable(rows) {

@@ -212,3 +212,62 @@ def test_unavailable_active_inventory_exposes_only_error_type():
     assert payload["architectures"] == []
     assert payload["error_type"] == "FileNotFoundError"
     assert "/secret/path" not in str(payload)
+
+
+def test_active_inventory_exposes_only_validated_experiment_pilot_fields():
+    inventory = {
+        "status": "loaded",
+        "schedule_enabled": True,
+        "paired_shadow_authorized": True,
+        "architectures": [_identity()],
+        "experiment_plan": {
+            "schema": "tradingagents/architecture-experiment-plan/v1",
+            "experiment_id": "nvda-rm-v1",
+            "fingerprint": "c" * 64,
+            "treatment": "research_manager_longitudinal_context",
+            "primary_metric": "mean_score_delta",
+            "minimum_paired_samples": 20,
+            "maximum_paired_samples": 30,
+            "minimum_score_improvement": 0.002,
+            "pilot_paired_samples": 2,
+            "pilot_required_match_rate": 1.0,
+            "arms": [
+                {
+                    "architecture_version": "baseline",
+                    "architecture_fingerprint": "d" * 64,
+                    "longitudinal_context_mode": "portfolio_only",
+                },
+                {
+                    "architecture_version": "challenger",
+                    "architecture_fingerprint": "e" * 64,
+                    "longitudinal_context_mode": "research_and_portfolio",
+                },
+            ],
+            "secret": "must-not-survive",
+        },
+        "experiment_pilot": {
+            "schema": "tradingagents/architecture-experiment-pilot/v1",
+            "status": "failed",
+            "recommended_action": "implement_shared_pre_treatment_replay",
+            "required_paired_samples": 2,
+            "required_match_rate": 1.0,
+            "observed_paired_samples": 1,
+            "eligible_paired_samples": 0,
+            "excluded_paired_samples": 1,
+            "architecture_input_mismatches_excluded": 1,
+            "secret": "must-not-survive",
+        },
+    }
+
+    payload = active_architecture_inventory_payload(
+        inventory,
+        evaluations=[],
+        terminal_runs=[],
+    )
+
+    assert payload["experiment_plan"]["fingerprint"] == "c" * 64
+    assert payload["experiment_pilot"]["status"] == "failed"
+    assert payload["experiment_pilot"][
+        "architecture_input_mismatches_excluded"
+    ] == 1
+    assert "secret" not in str(payload)

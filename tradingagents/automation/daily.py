@@ -33,7 +33,10 @@ from tradingagents.architecture import (
 )
 from tradingagents.dataflows.ohlcv_cache import latest_completed_daily_bar_date
 from tradingagents.dataflows.utils import safe_ticker_component
-from tradingagents.evaluation import DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES
+from tradingagents.evaluation import (
+    DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES,
+    DEFAULT_ARCHITECTURE_MINIMUM_SCORE_IMPROVEMENT,
+)
 from tradingagents.runtime import (
     AnalysisEvent,
     AnalysisExecutionError,
@@ -41,7 +44,11 @@ from tradingagents.runtime import (
     OUTCOME_SETTLEMENT_RETRYABLE_ERROR_TYPES,
     run_analysis_once,
 )
-from tradingagents.runtime.history import RunHistoryStore, history_store
+from tradingagents.runtime.history import (
+    RunHistoryStore,
+    analysis_evidence_identity,
+    history_store,
+)
 from tradingagents.observability import normalize_stats_breakdown
 
 
@@ -56,10 +63,11 @@ _TERMINAL_STATUSES = {
     "outcome_settlement_pending",
     "outcome_settlement_unavailable",
     "experiment_budget_complete",
+    "experiment_pilot_failed",
 }
 _SCHEDULER_FAILURE_STATUSES = {
     "failed", "unavailable", "attempts_exhausted", "market_data_unavailable",
-    "outcome_settlement_unavailable",
+    "outcome_settlement_unavailable", "experiment_pilot_failed",
 }
 ARCHITECTURE_EVALUATION_STATUS_SCHEMA = (
     "tradingagents/architecture-evaluation-status/v5"
@@ -73,10 +81,16 @@ SCHEDULED_ARCHITECTURE_INVENTORY_SCHEMA = (
     "tradingagents/scheduled-architecture-inventory/v1"
 )
 MAX_SCHEDULED_ARCHITECTURES = 128
-EXPERIMENT_MINIMUM_SCORE_IMPROVEMENT = 0.002
 ARCHITECTURE_EXPERIMENT_PLAN_SCHEMA = (
     "tradingagents/architecture-experiment-plan/v1"
 )
+ARCHITECTURE_EXPERIMENT_MEMBERSHIP_SCHEMA = (
+    "tradingagents/architecture-experiment-membership/v1"
+)
+ARCHITECTURE_EXPERIMENT_PILOT_SCHEMA = (
+    "tradingagents/architecture-experiment-pilot/v1"
+)
+EXPERIMENT_PILOT_REQUIRED_MATCH_RATE = 1.0
 _EXPERIMENT_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,80}$")
 _SETTING_KEYS = {
     "research_depth",
@@ -389,6 +403,7 @@ class ArchitectureExperimentPlan:
     minimum_paired_samples: int
     maximum_paired_samples: int
     minimum_score_improvement: float
+    pilot_paired_samples: int = 2
     primary_metric: str = "mean_score_delta"
 
     @classmethod
@@ -403,6 +418,7 @@ class ArchitectureExperimentPlan:
             raise ValueError("experiment_plan primary_metric must be mean_score_delta")
         minimum_paired_samples = int(payload.get("minimum_paired_samples", 0))
         maximum_paired_samples = int(payload.get("maximum_paired_samples", 0))
+        pilot_paired_samples = int(payload.get("pilot_paired_samples", 2))
         if minimum_paired_samples != DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES:
             raise ValueError(
                 "experiment_plan minimum_paired_samples must match the canonical "
@@ -415,10 +431,17 @@ class ArchitectureExperimentPlan:
             raise ValueError(
                 "experiment_plan maximum_paired_samples must be between the minimum and 200"
             )
+        if pilot_paired_samples < 1 or pilot_paired_samples > 5:
+            raise ValueError(
+                "experiment_plan pilot_paired_samples must be between 1 and 5"
+            )
         minimum_score_improvement = float(
             payload.get("minimum_score_improvement", -1)
         )
-        if minimum_score_improvement != EXPERIMENT_MINIMUM_SCORE_IMPROVEMENT:
+        if (
+            minimum_score_improvement
+            != DEFAULT_ARCHITECTURE_MINIMUM_SCORE_IMPROVEMENT
+        ):
             raise ValueError(
                 "experiment_plan minimum_score_improvement must match the canonical "
                 "architecture comparison policy"
@@ -429,6 +452,7 @@ class ArchitectureExperimentPlan:
             minimum_paired_samples=minimum_paired_samples,
             maximum_paired_samples=maximum_paired_samples,
             minimum_score_improvement=minimum_score_improvement,
+            pilot_paired_samples=pilot_paired_samples,
         )
 
     def identity(
@@ -454,6 +478,8 @@ class ArchitectureExperimentPlan:
             "minimum_paired_samples": self.minimum_paired_samples,
             "maximum_paired_samples": self.maximum_paired_samples,
             "minimum_score_improvement": self.minimum_score_improvement,
+            "pilot_paired_samples": self.pilot_paired_samples,
+            "pilot_required_match_rate": EXPERIMENT_PILOT_REQUIRED_MATCH_RATE,
             "arms": arms,
         }
         canonical = json.dumps(
@@ -796,9 +822,193 @@ def _experiment_plan_identity(
     return schedule.experiment_plan.identity(identities)
 
 
+def _record_experiment_membership(
+    store: RunHistoryStore,
+    *,
+    run_id: str,
+    architecture_version: str,
+    experiment_plan: dict[str, Any] | None,
+    planned_execution_order: int,
+) -> None:
+    if experiment_plan is None:
+        return
+    arm = next(
+        (
+            row
+            for row in experiment_plan["arms"]
+            if row["architecture_version"] == architecture_version
+        ),
+        None,
+    )
+    if arm is None:
+        raise ValueError("scheduled architecture is absent from experiment plan")
+    store.add_event(
+        run_id,
+        AnalysisEvent(  # type: ignore[arg-type]
+            type="architecture_experiment_membership",
+            run_id=run_id,
+            content={
+                "schema": ARCHITECTURE_EXPERIMENT_MEMBERSHIP_SCHEMA,
+                "experiment_id": experiment_plan["experiment_id"],
+                "experiment_plan_fingerprint": experiment_plan["fingerprint"],
+                "architecture_version": architecture_version,
+                "architecture_fingerprint": arm["architecture_fingerprint"],
+                "planned_execution_order": planned_execution_order,
+            },
+        ),
+    )
+
+
+def _architecture_experiment_pilot_status(
+    store: RunHistoryStore,
+    *,
+    symbol: str,
+    experiment_plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Assess immediate pair integrity before paying for the full experiment."""
+    arms = {
+        str(row["architecture_version"]): str(row["architecture_fingerprint"])
+        for row in experiment_plan["arms"]
+    }
+    grouped: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for summary in store.list_runs(limit=10_000):
+        version = str(summary.get("architecture_version") or "")
+        if (
+            str(summary.get("ticker") or "").upper() != symbol
+            or version not in arms
+            or str(summary.get("architecture_fingerprint") or "") != arms[version]
+        ):
+            continue
+        run = store.get_run(str(summary["run_id"]))
+        if not isinstance(run, dict):
+            continue
+        membership = next(
+            (
+                event.get("content")
+                for event in reversed(run.get("events") or [])
+                if event.get("type") == "architecture_experiment_membership"
+                and isinstance(event.get("content"), dict)
+                and event["content"].get("experiment_plan_fingerprint")
+                == experiment_plan["fingerprint"]
+            ),
+            None,
+        )
+        if membership is None:
+            continue
+        analysis_date = str(run.get("analysis_date") or "")
+        grouped.setdefault(analysis_date, {}).setdefault(version, []).append(run)
+
+    observed_pairs = 0
+    eligible_pairs = 0
+    ambiguous_pairs = 0
+    decision_unusable = 0
+    market_date_mismatches = 0
+    architecture_input_mismatches = 0
+    evidence_mismatches = 0
+    for variants in grouped.values():
+        if set(variants) != set(arms):
+            continue
+        if any(len(variants[version]) != 1 for version in arms):
+            ambiguous_pairs += 1
+            continue
+        observed_pairs += 1
+        pair = [variants[version][0] for version in sorted(arms)]
+        terminals = [
+            next(
+                (
+                    event.get("content")
+                    for event in reversed(run.get("events") or [])
+                    if event.get("type") == "run_completed"
+                    and isinstance(event.get("content"), dict)
+                ),
+                None,
+            )
+            for run in pair
+        ]
+        if any(
+            terminal is None or terminal.get("decision_status") != "validated"
+            for terminal in terminals
+        ):
+            decision_unusable += 1
+            continue
+        market_dates = {str(run.get("market_data_date") or "") for run in pair}
+        if len(market_dates) != 1 or "" in market_dates:
+            market_date_mismatches += 1
+            continue
+        architecture_inputs = {
+            (
+                terminal.get("architecture_input_schema"),
+                terminal.get("architecture_input_fingerprint"),
+            )
+            for terminal in terminals
+            if terminal is not None and terminal.get("architecture_input_complete")
+        }
+        if (
+            any(
+                terminal is None
+                or not terminal.get("architecture_input_complete")
+                or not terminal.get("architecture_input_schema")
+                or not terminal.get("architecture_input_fingerprint")
+                for terminal in terminals
+            )
+            or len(architecture_inputs) != 1
+        ):
+            architecture_input_mismatches += 1
+            continue
+        evidence = [
+            analysis_evidence_identity(store.get_vendor_calls(str(run["run_id"])))
+            for run in pair
+        ]
+        evidence_identities = {
+            (row.get("schema"), row.get("fingerprint"))
+            for row in evidence
+            if row.get("complete")
+        }
+        evidence_incomplete = any(not row.get("complete") for row in evidence)
+        if evidence_incomplete or len(evidence_identities) != 1:
+            evidence_mismatches += 1
+            continue
+        eligible_pairs += 1
+
+    excluded_pairs = (
+        ambiguous_pairs
+        + decision_unusable
+        + market_date_mismatches
+        + architecture_input_mismatches
+        + evidence_mismatches
+    )
+    required_pairs = int(experiment_plan["pilot_paired_samples"])
+    if excluded_pairs:
+        status = "failed"
+        recommended_action = "implement_shared_pre_treatment_replay"
+    elif eligible_pairs >= required_pairs:
+        status = "passed"
+        recommended_action = "continue_preregistered_experiment"
+    else:
+        status = "collecting"
+        recommended_action = "collect_pilot_pairs"
+    return {
+        "schema": ARCHITECTURE_EXPERIMENT_PILOT_SCHEMA,
+        "status": status,
+        "recommended_action": recommended_action,
+        "required_paired_samples": required_pairs,
+        "required_match_rate": EXPERIMENT_PILOT_REQUIRED_MATCH_RATE,
+        "observed_paired_samples": observed_pairs,
+        "eligible_paired_samples": eligible_pairs,
+        "excluded_paired_samples": excluded_pairs,
+        "ambiguous_pairs_excluded": ambiguous_pairs,
+        "decision_unusable_pairs_excluded": decision_unusable,
+        "market_date_mismatches_excluded": market_date_mismatches,
+        "architecture_input_mismatches_excluded": architecture_input_mismatches,
+        "evidence_mismatches_excluded": evidence_mismatches,
+        "automatic_architecture_mutation_allowed": False,
+    }
+
+
 def load_scheduled_architecture_inventory(
     schedule_path: Path | None = None,
     preferences_path: Path | None = None,
+    store: RunHistoryStore = history_store,
 ) -> dict[str, Any]:
     """Load active schedule identities without exposing configuration errors.
 
@@ -817,6 +1027,7 @@ def load_scheduled_architecture_inventory(
                 "schedule_enabled": False,
                 "paired_shadow_authorized": schedule.paired_shadow_authorized,
                 "experiment_plan": experiment_plan,
+                "experiment_pilot": None,
                 "architectures": [],
             }
         if len(schedule.targets) > MAX_SCHEDULED_ARCHITECTURES:
@@ -827,12 +1038,22 @@ def load_scheduled_architecture_inventory(
             scheduled_architecture_identity(target, preferences)
             for target in schedule.targets
         ]
+        experiment_pilot = (
+            _architecture_experiment_pilot_status(
+                store,
+                symbol=schedule.targets[0].symbol,
+                experiment_plan=experiment_plan,
+            )
+            if experiment_plan is not None
+            else None
+        )
         return {
             "schema": SCHEDULED_ARCHITECTURE_INVENTORY_SCHEMA,
             "status": "loaded",
             "schedule_enabled": True,
             "paired_shadow_authorized": schedule.paired_shadow_authorized,
             "experiment_plan": experiment_plan,
+            "experiment_pilot": experiment_pilot,
             "architectures": identities,
         }
     except Exception as exc:
@@ -842,6 +1063,7 @@ def load_scheduled_architecture_inventory(
             "schedule_enabled": None,
             "paired_shadow_authorized": False,
             "experiment_plan": None,
+            "experiment_pilot": None,
             "architectures": [],
             "error_type": type(exc).__name__,
         }
@@ -1146,15 +1368,34 @@ def run_due_analyses(
             group_positions[group_key] = group_positions.get(group_key, 0) + 1
             execution_order = group_positions[group_key]
             execution_group_size = group_sizes[group_key]
+            pilot_status = (
+                _architecture_experiment_pilot_status(
+                    store,
+                    symbol=target.symbol,
+                    experiment_plan=experiment_plan,
+                )
+                if experiment_plan is not None and execution_group_size == 2
+                else None
+            )
             experiment_fields = (
                 {
                     "experiment_id": experiment_plan["experiment_id"],
                     "experiment_plan_fingerprint": experiment_plan["fingerprint"],
+                    "experiment_pilot": pilot_status,
                 }
                 if experiment_plan is not None and execution_group_size == 2
                 else {}
             )
             if experiment_plan is not None and execution_group_size == 2:
+                if pilot_status is not None and pilot_status["status"] == "failed":
+                    outcomes.append({
+                        "symbol": target.symbol,
+                        "analysis_date": analysis_date,
+                        "status": "experiment_pilot_failed",
+                        "architecture_version": target.architecture_version,
+                        **experiment_fields,
+                    })
+                    continue
                 completed_pairs = _completed_shadow_pair_count(
                     store,
                     symbol=target.symbol,
@@ -1356,6 +1597,13 @@ def run_due_analyses(
                         architecture_version=request.architecture_version,
                         architecture_fingerprint="pre-runtime-failure",
                     )
+                _record_experiment_membership(
+                    store,
+                    run_id=run_id,
+                    architecture_version=target.architecture_version,
+                    experiment_plan=experiment_plan,
+                    planned_execution_order=execution_order,
+                )
                 if settlement_retryable:
                     store.add_event(
                         run_id,
@@ -1397,6 +1645,13 @@ def run_due_analyses(
                 )
                 continue
             decision_status = str(result.decision_status)
+            _record_experiment_membership(
+                store,
+                run_id=result.run_id,
+                architecture_version=target.architecture_version,
+                experiment_plan=experiment_plan,
+                planned_execution_order=execution_order,
+            )
             scheduler_status = {
                 "validated": "completed",
                 "review_required": "review_required",

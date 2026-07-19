@@ -987,6 +987,7 @@ def test_evaluation_endpoint_returns_rows_and_rollups(monkeypatch):
         "awaiting_first_active_run"
     )
     assert active["architectures"][0]["terminal_run_count"] == 0
+    assert response["evaluation_count"] == 1
     assert len(response["evaluations"]) == 1
     assert response["pending_evaluation_count"] == 1
     assert response["blocked_evaluation_count"] == 1

@@ -218,6 +218,14 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
     ticker_scope: 'NVDA',
     active_architecture_inventory: {
       status: 'loaded',
+      experiment_pilot: {
+        status: 'collecting',
+        recommended_action: 'collect_pilot_pairs',
+        required_paired_samples: 2,
+        observed_paired_samples: 1,
+        eligible_paired_samples: 1,
+        excluded_paired_samples: 0,
+      },
       architectures: [{
         active: true,
         ticker: 'NVDA',
@@ -354,6 +362,14 @@ test('evaluation view model exposes rolling and pending evidence', { concurrency
   assert.equal(view.cohortCount, 2);
   assert.equal(view.activeArchitectureCount, 1);
   assert.equal(view.activeInventoryStatus, 'loaded');
+  assert.deepEqual(view.experimentPilot, {
+    status: 'collecting',
+    recommendedAction: 'collect_pilot_pairs',
+    requiredPairs: 2,
+    observedPairs: 1,
+    eligiblePairs: 1,
+    excludedPairs: 0,
+  });
   assert.equal(view.cohorts[0].active, true);
   assert.equal(view.cohorts[0].architectureStatus, 'active_outcome_observed');
   assert.deepEqual(view.cohorts[0].measurementContinuity, {

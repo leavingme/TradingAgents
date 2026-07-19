@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .outcomes import DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES
+from .outcomes import (
+    DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES,
+    DEFAULT_ARCHITECTURE_MINIMUM_SCORE_IMPROVEMENT,
+)
 
 
 ACTIVE_ARCHITECTURE_OBSERVATION_SCHEMA = (
@@ -16,6 +19,7 @@ ARCHITECTURE_MEASUREMENT_CONTINUITY_SCHEMA = (
 )
 MAX_ACTIVE_ARCHITECTURES = 128
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_EXPERIMENT_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,80}$")
 _IDENTITY_FIELDS = (
     "schema",
     "ticker",
@@ -30,6 +34,123 @@ _IDENTITY_FIELDS = (
     "deep_think_llm",
     "longitudinal_context_mode",
 )
+
+
+def _validated_experiment_plan(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("architecture experiment plan must be an object")
+    experiment_id = str(value.get("experiment_id") or "")
+    fingerprint = str(value.get("fingerprint") or "")
+    schema = str(value.get("schema") or "")
+    treatment = str(value.get("treatment") or "")
+    primary_metric = str(value.get("primary_metric") or "")
+    if schema != "tradingagents/architecture-experiment-plan/v1":
+        raise ValueError("architecture experiment plan has invalid schema")
+    if not _EXPERIMENT_ID_RE.fullmatch(experiment_id):
+        raise ValueError("architecture experiment plan has invalid experiment_id")
+    if not _SHA256_RE.fullmatch(fingerprint):
+        raise ValueError("architecture experiment plan has invalid fingerprint")
+    if treatment != "research_manager_longitudinal_context":
+        raise ValueError("architecture experiment plan has invalid treatment")
+    if primary_metric != "mean_score_delta":
+        raise ValueError("architecture experiment plan has invalid primary metric")
+    raw_arms = value.get("arms")
+    if not isinstance(raw_arms, list) or len(raw_arms) != 2:
+        raise ValueError("architecture experiment plan must have exactly two arms")
+    arms = []
+    for row in raw_arms:
+        if not isinstance(row, dict):
+            raise ValueError("architecture experiment arm must be an object")
+        version = str(row.get("architecture_version") or "")
+        arm_fingerprint = str(row.get("architecture_fingerprint") or "")
+        mode = str(row.get("longitudinal_context_mode") or "")
+        if (
+            not _EXPERIMENT_ID_RE.fullmatch(version)
+            or not _SHA256_RE.fullmatch(arm_fingerprint)
+        ):
+            raise ValueError("architecture experiment arm has invalid identity")
+        if mode not in {"portfolio_only", "research_and_portfolio"}:
+            raise ValueError("architecture experiment arm has invalid treatment mode")
+        arms.append({
+            "architecture_version": version,
+            "architecture_fingerprint": arm_fingerprint,
+            "longitudinal_context_mode": mode,
+        })
+    minimum_samples = int(value.get("minimum_paired_samples") or 0)
+    maximum_samples = int(value.get("maximum_paired_samples") or 0)
+    minimum_improvement = float(value.get("minimum_score_improvement") or 0)
+    pilot_samples = int(value.get("pilot_paired_samples") or 0)
+    pilot_match_rate = float(value.get("pilot_required_match_rate") or 0)
+    if (
+        minimum_samples != DEFAULT_ARCHITECTURE_EVALUATION_MINIMUM_SAMPLES
+        or maximum_samples < minimum_samples
+        or maximum_samples > 200
+        or minimum_improvement != DEFAULT_ARCHITECTURE_MINIMUM_SCORE_IMPROVEMENT
+        or pilot_samples < 1
+        or pilot_samples > 5
+        or pilot_match_rate != 1.0
+    ):
+        raise ValueError("architecture experiment plan has invalid policy")
+    return {
+        "schema": schema,
+        "experiment_id": experiment_id,
+        "fingerprint": fingerprint,
+        "treatment": treatment,
+        "primary_metric": primary_metric,
+        "minimum_paired_samples": minimum_samples,
+        "maximum_paired_samples": maximum_samples,
+        "minimum_score_improvement": minimum_improvement,
+        "pilot_paired_samples": pilot_samples,
+        "pilot_required_match_rate": pilot_match_rate,
+        "arms": arms,
+    }
+
+
+def _validated_experiment_pilot(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("architecture experiment pilot must be an object")
+    schema = str(value.get("schema") or "")
+    if schema != "tradingagents/architecture-experiment-pilot/v1":
+        raise ValueError("architecture experiment pilot has invalid schema")
+    status = str(value.get("status") or "")
+    action = str(value.get("recommended_action") or "")
+    if status not in {"collecting", "passed", "failed"}:
+        raise ValueError("architecture experiment pilot has invalid status")
+    if action not in {
+        "collect_pilot_pairs",
+        "continue_preregistered_experiment",
+        "implement_shared_pre_treatment_replay",
+    }:
+        raise ValueError("architecture experiment pilot has invalid action")
+    count_fields = (
+        "required_paired_samples",
+        "observed_paired_samples",
+        "eligible_paired_samples",
+        "excluded_paired_samples",
+        "ambiguous_pairs_excluded",
+        "decision_unusable_pairs_excluded",
+        "market_date_mismatches_excluded",
+        "architecture_input_mismatches_excluded",
+        "evidence_mismatches_excluded",
+    )
+    counts = {field: int(value.get(field) or 0) for field in count_fields}
+    if any(count < 0 or count > 10_000 for count in counts.values()):
+        raise ValueError("architecture experiment pilot has invalid count")
+    required_match_rate = float(value.get("required_match_rate") or 0)
+    if required_match_rate != 1.0 or not 1 <= counts["required_paired_samples"] <= 5:
+        raise ValueError("architecture experiment pilot has invalid policy")
+    return {
+        "schema": schema,
+        "status": status,
+        "recommended_action": action,
+        "required_match_rate": required_match_rate,
+        **counts,
+        "automatic_architecture_mutation_allowed": False,
+    }
 
 
 def _validated_identity(row: Any) -> dict[str, Any]:
@@ -212,6 +333,14 @@ def active_architecture_inventory_payload(
         "terminal_run_rows_scanned": len(terminal_runs),
         "architectures": observed,
     }
+    experiment_plan = _validated_experiment_plan(inventory.get("experiment_plan"))
+    experiment_pilot = _validated_experiment_pilot(
+        inventory.get("experiment_pilot")
+    )
+    if experiment_plan is not None:
+        payload["experiment_plan"] = experiment_plan
+    if experiment_pilot is not None:
+        payload["experiment_pilot"] = experiment_pilot
     if status == "unavailable" and inventory.get("error_type"):
         payload["error_type"] = str(inventory["error_type"])
     return payload

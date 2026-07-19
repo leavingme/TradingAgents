@@ -14,8 +14,11 @@ from tradingagents.automation.daily import (
     DailySchedule,
     ScheduledTarget,
     _architecture_evaluation_status,
+    _architecture_experiment_pilot_status,
     _context_cost_diagnostic,
+    _experiment_plan_identity,
     _record_architecture_evaluation_status,
+    _record_experiment_membership,
     _register_experiment_plan,
     load_runtime_preferences,
     load_scheduled_architecture_inventory,
@@ -24,7 +27,7 @@ from tradingagents.automation.daily import (
     scheduler_exit_code,
 )
 from tradingagents.runtime.history import RunHistoryStore
-from tradingagents.runtime import AnalysisExecutionError
+from tradingagents.runtime import AnalysisEvent, AnalysisExecutionError
 
 
 def _schedule() -> DailySchedule:
@@ -46,9 +49,66 @@ def _experiment_plan(**overrides):
         "primary_metric": "mean_score_delta",
         "minimum_paired_samples": 20,
         "maximum_paired_samples": 30,
+        "pilot_paired_samples": 2,
         "minimum_score_improvement": 0.002,
         **overrides,
     }
+
+
+def _record_eligible_pilot_pair(store, plan, analysis_date):
+    for order, arm in enumerate(plan["arms"], start=1):
+        version = arm["architecture_version"]
+        run_id = f"pilot-{analysis_date}-{version}"
+        store.create_run(
+            run_id,
+            "NVDA",
+            analysis_date,
+            "stock",
+            ["market"],
+            "minimax-cn",
+            1,
+            architecture_version=version,
+            architecture_fingerprint=arm["architecture_fingerprint"],
+        )
+        _record_experiment_membership(
+            store,
+            run_id=run_id,
+            architecture_version=version,
+            experiment_plan=plan,
+            planned_execution_order=order,
+        )
+        store.add_vendor_call({
+            "run_id": run_id,
+            "call_id": f"call-{run_id}",
+            "attempt": 1,
+            "category": "core_stock_apis",
+            "method": "get_stock_data",
+            "vendor": "longbridge",
+            "agent": "Market Analyst",
+            "symbol": "NVDA",
+            "status": "available",
+            "selected": True,
+            "arguments_json": json.dumps({"symbol": "NVDA"}),
+            "result_hash": f"evidence-{analysis_date}",
+            "started_at": f"{analysis_date}T20:30:00+00:00",
+            "finished_at": f"{analysis_date}T20:30:01+00:00",
+        })
+        store.add_event(
+            run_id,
+            AnalysisEvent(
+                type="run_completed",
+                run_id=run_id,
+                content={
+                    "decision_status": "validated",
+                    "market_data_date": analysis_date,
+                    "architecture_input_schema": (
+                        "tradingagents/research-manager-pre-context-input/v1"
+                    ),
+                    "architecture_input_fingerprint": f"input-{analysis_date}",
+                    "architecture_input_complete": True,
+                },
+            ),
+        )
 
 
 def test_systemd_assets_preserve_long_run_and_persistent_timer_contract():
@@ -169,6 +229,7 @@ def test_scheduled_architecture_inventory_fails_closed_without_leaking_paths(tmp
         "schedule_enabled": None,
         "paired_shadow_authorized": False,
         "experiment_plan": None,
+        "experiment_pilot": None,
         "architectures": [],
         "error_type": "FileNotFoundError",
     }
@@ -656,6 +717,157 @@ def test_paired_shadow_stops_at_preregistered_sample_budget(tmp_path, monkeypatc
     assert {row["experiment_id"] for row in result} == {
         "nvda-rm-context-test-v1"
     }
+
+
+def test_paired_shadow_stops_after_pilot_detects_upstream_drift(
+    tmp_path, monkeypatch
+):
+    common = {
+        "symbol": "NVDA",
+        "timezone": "America/New_York",
+        "run_after": "16:30",
+    }
+    schedule = DailySchedule.from_dict({
+        "enabled": True,
+        "paired_shadow_authorized": True,
+        "experiment_plan": _experiment_plan(),
+        "targets": [
+            {
+                **common,
+                "architecture_version": "baseline",
+                "longitudinal_context_mode": "portfolio_only",
+            },
+            {
+                **common,
+                "architecture_version": "challenger",
+                "longitudinal_context_mode": "research_and_portfolio",
+            },
+        ],
+    })
+    plan = _experiment_plan_identity(schedule, {})
+    assert plan is not None
+    store = RunHistoryStore(tmp_path / "runs.db")
+    for order, arm in enumerate(plan["arms"], start=1):
+        version = arm["architecture_version"]
+        run_id = f"pilot-{version}"
+        store.create_run(
+            run_id,
+            "NVDA",
+            "2026-07-17",
+            "stock",
+            ["market"],
+            "minimax-cn",
+            1,
+            architecture_version=version,
+            architecture_fingerprint=arm["architecture_fingerprint"],
+        )
+        _record_experiment_membership(
+            store,
+            run_id=run_id,
+            architecture_version=version,
+            experiment_plan=plan,
+            planned_execution_order=order,
+        )
+        store.add_event(
+            run_id,
+            AnalysisEvent(
+                type="run_completed",
+                run_id=run_id,
+                content={
+                    "decision_status": "validated",
+                    "market_data_date": "2026-07-17",
+                    "architecture_input_schema": (
+                        "tradingagents/research-manager-pre-context-input/v1"
+                    ),
+                    "architecture_input_fingerprint": f"different-{version}",
+                    "architecture_input_complete": True,
+                },
+            ),
+        )
+
+    pilot = _architecture_experiment_pilot_status(
+        store,
+        symbol="NVDA",
+        experiment_plan=plan,
+    )
+    assert pilot["status"] == "failed"
+    assert pilot["architecture_input_mismatches_excluded"] == 1
+    assert pilot["recommended_action"] == "implement_shared_pre_treatment_replay"
+
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: now,
+    )
+    result = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 20, 16, 45, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        dry_run=True,
+    )
+
+    assert [row["status"] for row in result] == [
+        "experiment_pilot_failed",
+        "experiment_pilot_failed",
+    ]
+    assert scheduler_exit_code(result) == 1
+
+
+def test_paired_shadow_continues_only_after_complete_pilot_pairs(
+    tmp_path, monkeypatch
+):
+    common = {
+        "symbol": "NVDA",
+        "timezone": "America/New_York",
+        "run_after": "16:30",
+    }
+    schedule = DailySchedule.from_dict({
+        "enabled": True,
+        "paired_shadow_authorized": True,
+        "experiment_plan": _experiment_plan(),
+        "targets": [
+            {
+                **common,
+                "architecture_version": "baseline",
+                "longitudinal_context_mode": "portfolio_only",
+            },
+            {
+                **common,
+                "architecture_version": "challenger",
+                "longitudinal_context_mode": "research_and_portfolio",
+            },
+        ],
+    })
+    plan = _experiment_plan_identity(schedule, {})
+    assert plan is not None
+    store = RunHistoryStore(tmp_path / "runs.db")
+    _record_eligible_pilot_pair(store, plan, "2026-07-16")
+    _record_eligible_pilot_pair(store, plan, "2026-07-17")
+
+    pilot = _architecture_experiment_pilot_status(
+        store,
+        symbol="NVDA",
+        experiment_plan=plan,
+    )
+    assert pilot["status"] == "passed"
+    assert pilot["observed_paired_samples"] == 2
+    assert pilot["eligible_paired_samples"] == 2
+    assert pilot["excluded_paired_samples"] == 0
+
+    monkeypatch.setattr(
+        "tradingagents.automation.daily.latest_completed_daily_bar_date",
+        lambda symbol, now: now,
+    )
+    result = run_due_analyses(
+        schedule,
+        now=datetime(2026, 7, 20, 16, 45, tzinfo=ZoneInfo("America/New_York")),
+        store=store,
+        preferences={},
+        dry_run=True,
+    )
+
+    assert [row["status"] for row in result] == ["would_run", "would_run"]
+    assert {row["experiment_pilot"]["status"] for row in result} == {"passed"}
 
 
 def test_runtime_preferences_reuse_server_models_and_vendor_order(tmp_path):

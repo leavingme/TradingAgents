@@ -6,7 +6,7 @@ import math
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from .events import AnalysisEvent
@@ -23,6 +23,7 @@ OUTCOME_SETTLEMENT_ISSUE_CODES = frozenset({
     "decision_as_of_missing",
     "decision_as_of_invalid",
 })
+OUTCOME_SETTLEMENT_LEASE_SECONDS = 3600
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -227,6 +228,18 @@ class RunHistoryStore:
                         resolved_at           TEXT,
                         PRIMARY KEY (run_id, horizon_sessions),
                         FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS decision_evaluation_claims (
+                        run_id                TEXT NOT NULL,
+                        horizon_sessions      INTEGER NOT NULL,
+                        claimed_by_run_id     TEXT NOT NULL,
+                        claimed_at            TEXT NOT NULL,
+                        expires_at            TEXT NOT NULL,
+                        PRIMARY KEY (run_id, horizon_sessions),
+                        FOREIGN KEY (run_id) REFERENCES runs(run_id),
+                        FOREIGN KEY (claimed_by_run_id) REFERENCES runs(run_id)
                     )
                 """)
                 conn.execute(
@@ -450,6 +463,8 @@ class RunHistoryStore:
                         SELECT runs.*, terminal.timestamp AS decision_as_of
                              , issue.issue_code AS settlement_issue_code
                              , issue.first_detected_at AS settlement_issue_detected_at
+                             , claim.claimed_by_run_id AS settlement_claimed_by_run_id
+                             , claim.expires_at AS settlement_claim_expires_at
                         FROM runs
                         LEFT JOIN decision_evaluations
                           ON decision_evaluations.run_id = runs.run_id
@@ -465,14 +480,118 @@ class RunHistoryStore:
                           ON issue.run_id = runs.run_id
                          AND issue.horizon_sessions = ?
                          AND issue.resolved_at IS NULL
+                        LEFT JOIN decision_evaluation_claims AS claim
+                          ON claim.run_id = runs.run_id
+                         AND claim.horizon_sessions = ?
+                         AND julianday(claim.expires_at) > julianday('now')
                         WHERE runs.decision_status = 'validated'
                           {ticker_clause}
                           AND decision_evaluations.run_id IS NULL
                         ORDER BY runs.analysis_date, runs.created_at, runs.run_id
                         """,
-                        [params[0], params[0], *params[1:]],
+                        [params[0], params[0], params[0], *params[1:]],
                     ).fetchall()
                 ]
+
+    def claim_decision_evaluation(
+        self,
+        run_id: str,
+        *,
+        horizon_sessions: int,
+        claimed_by_run_id: str,
+        lease_seconds: int = OUTCOME_SETTLEMENT_LEASE_SECONDS,
+    ) -> str:
+        """Atomically claim one pending outcome across runtime processes.
+
+        Returns ``claimed``, ``already_evaluated``, or ``busy``. A bounded
+        lease makes a crashed worker recoverable without allowing two live
+        runs to fetch and attribute the same outcome concurrently.
+        """
+        horizon = int(horizon_sessions)
+        lease = int(lease_seconds)
+        if horizon <= 0:
+            raise ValueError("horizon_sessions must be positive")
+        if lease <= 0 or lease > 86400:
+            raise ValueError("lease_seconds must be between 1 and 86400")
+        claimed_at = _canonical_utc_timestamp(_now(), "claimed_at")
+        expires_at = (
+            datetime.fromisoformat(claimed_at) + timedelta(seconds=lease)
+        ).isoformat()
+        with self._lock:
+            with self._conn() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if conn.execute(
+                    """
+                    SELECT 1 FROM decision_evaluations
+                    WHERE run_id=? AND horizon_sessions=?
+                    """,
+                    (run_id, horizon),
+                ).fetchone() is not None:
+                    return "already_evaluated"
+                for candidate, field in (
+                    (run_id, "run_id"),
+                    (claimed_by_run_id, "claimed_by_run_id"),
+                ):
+                    if conn.execute(
+                        "SELECT 1 FROM runs WHERE run_id=?", (candidate,)
+                    ).fetchone() is None:
+                        raise ValueError(
+                            f"decision evaluation claim {field} does not exist"
+                        )
+                conn.execute(
+                    """
+                    INSERT INTO decision_evaluation_claims (
+                        run_id, horizon_sessions, claimed_by_run_id,
+                        claimed_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(run_id, horizon_sessions) DO UPDATE SET
+                        claimed_by_run_id=excluded.claimed_by_run_id,
+                        claimed_at=excluded.claimed_at,
+                        expires_at=excluded.expires_at
+                    WHERE decision_evaluation_claims.claimed_by_run_id =
+                              excluded.claimed_by_run_id
+                       OR julianday(decision_evaluation_claims.expires_at) <=
+                              julianday(excluded.claimed_at)
+                    """,
+                    (
+                        run_id,
+                        horizon,
+                        claimed_by_run_id,
+                        claimed_at,
+                        expires_at,
+                    ),
+                )
+                owner = conn.execute(
+                    """
+                    SELECT claimed_by_run_id FROM decision_evaluation_claims
+                    WHERE run_id=? AND horizon_sessions=?
+                    """,
+                    (run_id, horizon),
+                ).fetchone()
+                return (
+                    "claimed"
+                    if owner and owner["claimed_by_run_id"] == claimed_by_run_id
+                    else "busy"
+                )
+
+    def release_decision_evaluation_claim(
+        self,
+        run_id: str,
+        *,
+        horizon_sessions: int,
+        claimed_by_run_id: str,
+    ) -> None:
+        """Release only the caller's own settlement lease."""
+        with self._lock:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    DELETE FROM decision_evaluation_claims
+                    WHERE run_id=? AND horizon_sessions=?
+                      AND claimed_by_run_id=?
+                    """,
+                    (run_id, int(horizon_sessions), claimed_by_run_id),
+                )
 
     def record_decision_evaluation_issue(
         self,

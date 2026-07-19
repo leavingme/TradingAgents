@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 import pytest
 
 from tradingagents.evaluation import (
@@ -312,6 +315,135 @@ def test_history_exposes_typed_settlement_issue_and_resolution(tmp_path):
             horizon_sessions=5,
             issue_code="provider said credential=secret",
         )
+
+
+def test_history_claims_pending_outcome_once_and_recovers_expired_lease(
+    tmp_path, monkeypatch
+):
+    from tradingagents.runtime import history as history_module
+
+    db_path = tmp_path / "runs.db"
+    owner_store = RunHistoryStore(db_path)
+    contender_store = RunHistoryStore(db_path)
+    for run_id in ("pending-outcome", "settler-a", "settler-b"):
+        owner_store.create_run(
+            run_id, "NVDA", "2026-07-01", "stock", ["market"],
+            "minimax-cn", 1,
+        )
+    owner_store.add_event("pending-outcome", AnalysisEvent(
+        type="run_completed",
+        run_id="pending-outcome",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-01T21:00:00+00:00",
+        },
+    ))
+
+    assert owner_store.claim_decision_evaluation(
+        "pending-outcome",
+        horizon_sessions=5,
+        claimed_by_run_id="settler-a",
+    ) == "claimed"
+    visible_claim = owner_store.list_unevaluated_validated_runs(
+        ticker="NVDA"
+    )[0]
+    assert visible_claim["settlement_claimed_by_run_id"] == "settler-a"
+    assert visible_claim["settlement_claim_expires_at"]
+    owner_store.release_decision_evaluation_claim(
+        "pending-outcome",
+        horizon_sessions=5,
+        claimed_by_run_id="settler-a",
+    )
+
+    monkeypatch.setattr(
+        history_module, "_now", lambda: "2026-07-10T10:00:00+00:00"
+    )
+    assert owner_store.claim_decision_evaluation(
+        "pending-outcome",
+        horizon_sessions=5,
+        claimed_by_run_id="settler-a",
+    ) == "claimed"
+    assert contender_store.claim_decision_evaluation(
+        "pending-outcome",
+        horizon_sessions=5,
+        claimed_by_run_id="settler-b",
+    ) == "busy"
+    # A non-owner cannot clear the lease.
+    contender_store.release_decision_evaluation_claim(
+        "pending-outcome",
+        horizon_sessions=5,
+        claimed_by_run_id="settler-b",
+    )
+    assert contender_store.claim_decision_evaluation(
+        "pending-outcome",
+        horizon_sessions=5,
+        claimed_by_run_id="settler-b",
+    ) == "busy"
+
+    # A crashed owner becomes replaceable after the bounded lease expires.
+    monkeypatch.setattr(
+        history_module, "_now", lambda: "2026-07-10T11:00:01+00:00"
+    )
+    assert contender_store.claim_decision_evaluation(
+        "pending-outcome",
+        horizon_sessions=5,
+        claimed_by_run_id="settler-b",
+    ) == "claimed"
+    contender_store.release_decision_evaluation_claim(
+        "pending-outcome",
+        horizon_sessions=5,
+        claimed_by_run_id="settler-b",
+    )
+
+    with pytest.raises(ValueError, match="claimed_by_run_id does not exist"):
+        owner_store.claim_decision_evaluation(
+            "pending-outcome",
+            horizon_sessions=5,
+            claimed_by_run_id="missing-run",
+        )
+
+
+def test_history_concurrent_settlement_claim_has_exactly_one_owner(tmp_path):
+    db_path = tmp_path / "runs.db"
+    setup_store = RunHistoryStore(db_path)
+    for run_id in ("pending-outcome", "settler-a", "settler-b"):
+        setup_store.create_run(
+            run_id, "NVDA", "2026-07-01", "stock", ["market"],
+            "minimax-cn", 1,
+        )
+    setup_store.add_event("pending-outcome", AnalysisEvent(
+        type="run_completed",
+        run_id="pending-outcome",
+        timestamp="2026-07-01T21:00:00+00:00",
+        content={
+            "decision": "Rating: Buy",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-01T21:00:00+00:00",
+        },
+    ))
+    stores = (RunHistoryStore(db_path), RunHistoryStore(db_path))
+    barrier = Barrier(2)
+
+    def claim(index: int) -> str:
+        barrier.wait()
+        return stores[index].claim_decision_evaluation(
+            "pending-outcome",
+            horizon_sessions=5,
+            claimed_by_run_id=f"settler-{'a' if index == 0 else 'b'}",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(claim, (0, 1)))
+
+    assert sorted(statuses) == ["busy", "claimed"]
+    with setup_store._conn() as conn:
+        claims = conn.execute(
+            "SELECT claimed_by_run_id FROM decision_evaluation_claims"
+        ).fetchall()
+    assert len(claims) == 1
+    assert claims[0]["claimed_by_run_id"] in {"settler-a", "settler-b"}
 
 
 def test_history_rejects_evaluation_without_exact_ohlcv_provenance(tmp_path):

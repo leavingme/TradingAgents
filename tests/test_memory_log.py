@@ -803,6 +803,7 @@ class TestDeferredReflection:
     def test_resolve_keeps_markdown_pending_if_canonical_evaluation_write_fails(
         self, tmp_path, monkeypatch
     ):
+        from tradingagents.runtime.audit_context import bind_run_id, reset_run_id
         from tradingagents.runtime.history import history_store
 
         log = make_log(tmp_path)
@@ -833,11 +834,135 @@ class TestDeferredReflection:
             "add_decision_evaluation",
             lambda record: (_ for _ in ()).throw(RuntimeError("sqlite unavailable")),
         )
-        with pytest.raises(RuntimeError, match="sqlite unavailable"):
+        monkeypatch.setattr(
+            history_store,
+            "claim_decision_evaluation",
+            lambda *args, **kwargs: "claimed",
+        )
+        released = []
+        monkeypatch.setattr(
+            history_store,
+            "release_decision_evaluation_claim",
+            lambda *args, **kwargs: released.append((args, kwargs)),
+        )
+        token = bind_run_id("current-run")
+        try:
+            with pytest.raises(RuntimeError, match="sqlite unavailable"):
+                TradingAgentsGraph._resolve_pending_entries(
+                    mock_graph, "NVDA", as_of_date="2026-01-12"
+                )
+        finally:
+            reset_run_id(token)
+        assert len(log.get_pending_entries()) == 1
+        assert released == [(('prior-run',), {
+            "horizon_sessions": 5,
+            "claimed_by_run_id": "current-run",
+        })]
+
+    def test_resolve_fails_closed_before_agent_when_another_run_owns_claim(
+        self, tmp_path, monkeypatch
+    ):
+        from tradingagents.graph.trading_graph import (
+            OutcomeSettlementInProgressError,
+        )
+        from tradingagents.runtime.audit_context import bind_run_id, reset_run_id
+        from tradingagents.runtime.history import history_store
+
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.memory_log = make_log(tmp_path)
+        mock_graph._resolve_benchmark.return_value = "SPY"
+        monkeypatch.setattr(
+            history_store,
+            "list_unevaluated_validated_runs",
+            lambda **kwargs: [{
+                "run_id": "prior-run",
+                "analysis_date": "2026-01-05",
+                "market_data_date": "2026-01-05",
+                "architecture_version": "baseline",
+            }],
+        )
+        monkeypatch.setattr(history_store, "get_run", lambda run_id: {
+            "events": [{
+                "type": "run_completed",
+                "timestamp": "2026-01-05T22:00:00+00:00",
+                "content": {
+                    "decision": DECISION_BUY,
+                    "decision_status": "validated",
+                    "decision_as_of": "2026-01-05T22:00:00+00:00",
+                },
+            }],
+        })
+        monkeypatch.setattr(
+            history_store,
+            "claim_decision_evaluation",
+            lambda *args, **kwargs: "busy",
+        )
+        token = bind_run_id("current-run")
+        try:
+            with pytest.raises(
+                OutcomeSettlementInProgressError,
+                match="another run",
+            ):
+                TradingAgentsGraph._resolve_pending_entries(
+                    mock_graph, "NVDA", as_of_date="2026-01-12"
+                )
+        finally:
+            reset_run_id(token)
+        mock_graph._fetch_returns.assert_not_called()
+
+    def test_resolve_releases_claim_when_outcome_is_not_mature(
+        self, tmp_path, monkeypatch
+    ):
+        from tradingagents.runtime.audit_context import bind_run_id, reset_run_id
+        from tradingagents.runtime.history import history_store
+
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        mock_graph.memory_log = make_log(tmp_path)
+        mock_graph._resolve_benchmark.return_value = "SPY"
+        mock_graph._fetch_returns.return_value = None
+        monkeypatch.setattr(
+            history_store,
+            "list_unevaluated_validated_runs",
+            lambda **kwargs: [{
+                "run_id": "prior-run",
+                "analysis_date": "2026-01-05",
+                "market_data_date": "2026-01-05",
+                "architecture_version": "baseline",
+            }],
+        )
+        monkeypatch.setattr(history_store, "get_run", lambda run_id: {
+            "events": [{
+                "type": "run_completed",
+                "timestamp": "2026-01-05T22:00:00+00:00",
+                "content": {
+                    "decision": DECISION_BUY,
+                    "decision_status": "validated",
+                    "decision_as_of": "2026-01-05T22:00:00+00:00",
+                },
+            }],
+        })
+        monkeypatch.setattr(
+            history_store,
+            "claim_decision_evaluation",
+            lambda *args, **kwargs: "claimed",
+        )
+        released = []
+        monkeypatch.setattr(
+            history_store,
+            "release_decision_evaluation_claim",
+            lambda *args, **kwargs: released.append((args, kwargs)),
+        )
+        token = bind_run_id("current-run")
+        try:
             TradingAgentsGraph._resolve_pending_entries(
                 mock_graph, "NVDA", as_of_date="2026-01-12"
             )
-        assert len(log.get_pending_entries()) == 1
+        finally:
+            reset_run_id(token)
+        assert released == [(('prior-run',), {
+            "horizon_sessions": 5,
+            "claimed_by_run_id": "current-run",
+        })]
 
     def test_resolve_scores_each_architecture_run_from_its_own_decision(
         self, tmp_path, monkeypatch

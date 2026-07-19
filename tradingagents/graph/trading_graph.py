@@ -44,6 +44,10 @@ from .tool_error_handling import recover_invalid_tool_arguments
 logger = logging.getLogger(__name__)
 
 
+class OutcomeSettlementInProgressError(RuntimeError):
+    """A different audited run owns the fixed-horizon settlement lease."""
+
+
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
@@ -464,48 +468,83 @@ class TradingAgentsGraph:
                 horizon_sessions=DEFAULT_OUTCOME_HORIZON_SESSIONS,
                 resolved_by_run_id=evaluating_run_id,
             )
-            purpose_token = bind_vendor_call_purpose("outcome_evaluation")
+            claim_acquired = False
+            if evaluating_run_id:
+                claim_status = history_store.claim_decision_evaluation(
+                    prior_run["run_id"],
+                    horizon_sessions=DEFAULT_OUTCOME_HORIZON_SESSIONS,
+                    claimed_by_run_id=evaluating_run_id,
+                )
+                if claim_status == "already_evaluated":
+                    continue
+                if claim_status == "busy":
+                    raise OutcomeSettlementInProgressError(
+                        "a pending outcome is being settled by another run"
+                    )
+                if claim_status != "claimed":
+                    raise RuntimeError(
+                        "outcome settlement claim returned an invalid status"
+                    )
+                claim_acquired = True
             try:
-                measurement = self._fetch_returns(
-                    ticker,
-                    prior_run["analysis_date"],
-                    benchmark=benchmark,
-                    as_of_date=as_of_date,
-                    return_details=True,
-                    decision_as_of=decision_as_of,
+                purpose_token = bind_vendor_call_purpose("outcome_evaluation")
+                try:
+                    measurement = self._fetch_returns(
+                        ticker,
+                        prior_run["analysis_date"],
+                        benchmark=benchmark,
+                        as_of_date=as_of_date,
+                        return_details=True,
+                        decision_as_of=decision_as_of,
+                    )
+                finally:
+                    reset_vendor_call_purpose(purpose_token)
+                if measurement is None:
+                    continue
+                if not isinstance(measurement, OutcomeMeasurement):
+                    raise RuntimeError("audited outcome resolver returned no provenance")
+                if (
+                    measurement.horizon_sessions
+                    != DEFAULT_OUTCOME_HORIZON_SESSIONS
+                ):
+                    raise RuntimeError(
+                        "audited outcome resolver returned the wrong horizon"
+                    )
+                scored = score_outcome(rating, measurement.alpha_return)
+                history_store.add_decision_evaluation({
+                    "run_id": prior_run["run_id"],
+                    "horizon_sessions": measurement.horizon_sessions,
+                    "evaluated_by_run_id": evaluating_run_id,
+                    "ticker": ticker,
+                    "analysis_date": prior_run["analysis_date"],
+                    "rating": rating,
+                    "benchmark": benchmark,
+                    "raw_return": measurement.raw_return,
+                    "benchmark_return": measurement.benchmark_return,
+                    "alpha_return": measurement.alpha_return,
+                    "exposure": scored["exposure"],
+                    "directional_hit": scored["directional_hit"],
+                    "score": scored["score"],
+                    "scoring_version": scored["scoring_version"],
+                    "hold_band": scored["hold_band"],
+                    "architecture_version": prior_run.get(
+                        "architecture_version", "legacy"
+                    ),
+                    "architecture_fingerprint": prior_run.get(
+                        "architecture_fingerprint", "legacy-unspecified"
+                    ),
+                    **measurement.__dict__,
+                })
+                resolved_by_date.setdefault(
+                    prior_run["analysis_date"], measurement
                 )
             finally:
-                reset_vendor_call_purpose(purpose_token)
-            if measurement is None:
-                continue
-            if not isinstance(measurement, OutcomeMeasurement):
-                raise RuntimeError("audited outcome resolver returned no provenance")
-            scored = score_outcome(rating, measurement.alpha_return)
-            history_store.add_decision_evaluation({
-                "run_id": prior_run["run_id"],
-                "horizon_sessions": measurement.horizon_sessions,
-                "evaluated_by_run_id": current_run_id(),
-                "ticker": ticker,
-                "analysis_date": prior_run["analysis_date"],
-                "rating": rating,
-                "benchmark": benchmark,
-                "raw_return": measurement.raw_return,
-                "benchmark_return": measurement.benchmark_return,
-                "alpha_return": measurement.alpha_return,
-                "exposure": scored["exposure"],
-                "directional_hit": scored["directional_hit"],
-                "score": scored["score"],
-                "scoring_version": scored["scoring_version"],
-                "hold_band": scored["hold_band"],
-                "architecture_version": prior_run.get(
-                    "architecture_version", "legacy"
-                ),
-                "architecture_fingerprint": prior_run.get(
-                    "architecture_fingerprint", "legacy-unspecified"
-                ),
-                **measurement.__dict__,
-            })
-            resolved_by_date.setdefault(prior_run["analysis_date"], measurement)
+                if claim_acquired:
+                    history_store.release_decision_evaluation_claim(
+                        prior_run["run_id"],
+                        horizon_sessions=DEFAULT_OUTCOME_HORIZON_SESSIONS,
+                        claimed_by_run_id=evaluating_run_id,
+                    )
 
         # Markdown reflection remains a best-effort compatibility view. It is
         # updated only after canonical SQLite persistence succeeds and never

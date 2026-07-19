@@ -135,15 +135,49 @@ def test_daily_evaluate_distinguishes_invalid_history_from_maturing_outcome(
         issue_code="validated_decision_missing",
         detected_by_run_id="auditor-run",
     )
+    for run_id in ("claimed-outcome", "settler-run"):
+        store.create_run(
+            run_id,
+            "NVDA",
+            "2026-07-02",
+            "stock",
+            ["market"],
+            "minimax-cn",
+            1,
+        )
+    store.add_event("claimed-outcome", AnalysisEvent(
+        type="run_completed",
+        run_id="claimed-outcome",
+        timestamp="2026-07-02T21:00:00+00:00",
+        content={
+            "decision": "Rating: Hold",
+            "decision_status": "validated",
+            "decision_as_of": "2026-07-02T21:00:00+00:00",
+        },
+    ))
+    assert store.claim_decision_evaluation(
+        "claimed-outcome",
+        horizon_sessions=5,
+        claimed_by_run_id="settler-run",
+    ) == "claimed"
 
     payload, serialized = _run_daily_cli(tmp_path, "evaluate")
 
-    assert payload["pending_evaluation_count"] == 1
+    assert payload["pending_evaluation_count"] == 2
     assert payload["blocked_evaluation_count"] == 1
-    assert payload["pending_evaluations"][0]["status"] == (
-        "blocked_invalid_history"
-    )
-    assert payload["pending_evaluations"][0]["settlement_issue_code"] == (
+    assert payload["in_progress_evaluation_count"] == 1
+    pending_by_status = {
+        row["status"]: row for row in payload["pending_evaluations"]
+    }
+    assert pending_by_status["blocked_invalid_history"][
+        "settlement_issue_code"
+    ] == (
         "validated_decision_missing"
     )
+    assert pending_by_status["settlement_in_progress"][
+        "settlement_claimed_by_run_id"
+    ] == "settler-run"
+    assert pending_by_status["settlement_in_progress"][
+        "settlement_claim_expires_at"
+    ]
     assert "auditor-run" not in serialized

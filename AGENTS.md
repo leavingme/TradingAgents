@@ -354,6 +354,11 @@ venv/bin/python run_smoke.py NVDA 2026-07-05
   `decision_evaluation_issues` 并保持 outcome fail closed；不得生成评分、进入纵向上下文，
   也不得让该历史“毒丸”阻断其他成熟结果或当天新分析。CLI/API/每日架构快照必须区分正常
   等待成熟与 `blocked_invalid_history`；只允许保存白名单 issue code，不得保存异常正文。
+- 同一个 run + horizon 的 outcome 结算必须先获取 SQLite 原子租约。并发 live run 中只允许
+  一个 owner 调用 vendor、写 evaluation 和兼容反思；其他 run 必须在构造 Agent 前以类型化
+  `OutcomeSettlementInProgressError` fail closed，不得用尚未包含该成熟结果的旧上下文继续。
+  租约固定有界并允许崩溃后接管，非 owner 不得释放；CLI/API/每日快照必须把活跃租约显示为
+  `settlement_in_progress`，不得把它误报为普通等待或损坏历史。
 
 ## 测试和验证注意事项
 

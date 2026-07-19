@@ -8,7 +8,7 @@ import { createEventStream } from './event-stream.js?v=20260718-architecture-eva
 import { createRouter } from './router.js';
 import { createSettingsController } from './components/settings-controller.js';
 import { createI18n } from './i18n.js';
-import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260719-settlement-issues';
+import { createEvaluationDashboard } from './components/evaluation-dashboard.js?v=20260719-settlement-claims';
 
 /**
  * TradingAgents Web UI — Enhanced Application Script
@@ -275,6 +275,7 @@ const translations = {
     change: 'Change',
     awaitingOutcome: 'awaiting fixed-horizon outcome',
     settlementBlocked: 'settlement blocked by invalid historical evidence',
+    settlementInProgress: 'outcome settlement in progress',
     comparisonUnavailable: 'Select two distinct architecture cohorts when both are available.',
     comparisonRequiresDistinct: 'Baseline and challenger must use distinct architecture labels.',
     assessmentStatus: 'Assessment status',
@@ -635,6 +636,7 @@ const translations = {
     change: '变化',
     awaitingOutcome: '等待固定期限结果',
     settlementBlocked: '历史证据无效，结果结算已隔离',
+    settlementInProgress: '结果正在由另一运行结算',
     comparisonUnavailable: '当存在两个不同架构 cohort 时可进行比较。',
     comparisonRequiresDistinct: '基线和挑战者必须使用不同的架构标签。',
     assessmentStatus: '评估状态',

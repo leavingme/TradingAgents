@@ -869,6 +869,7 @@ def test_evaluation_endpoint_returns_rows_and_rollups(monkeypatch):
     assert len(response["evaluations"]) == 1
     assert response["pending_evaluation_count"] == 1
     assert response["blocked_evaluation_count"] == 1
+    assert response["in_progress_evaluation_count"] == 0
     pending_response = dict(response["pending_evaluations"][0])
     assert pending_response.pop("settlement_issue_detected_at")
     assert pending_response == {
@@ -884,6 +885,8 @@ def test_evaluation_endpoint_returns_rows_and_rollups(monkeypatch):
         "horizon_sessions": 5,
         "status": "blocked_invalid_history",
         "settlement_issue_code": "validated_decision_missing",
+        "settlement_claimed_by_run_id": None,
+        "settlement_claim_expires_at": None,
     }
     assert response["evaluations"][0]["runtime_seconds"] == 120.0
     assert response["evaluations"][0]["tokens_in"] == 900

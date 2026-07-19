@@ -618,6 +618,8 @@ export function createEvaluationDashboard({
           `${row.architecture_version || 'unknown'} · ${
             row.status === 'blocked_invalid_history'
               ? `${t('settlementBlocked')} (${row.settlement_issue_code || 'unknown'})`
+              : row.status === 'settlement_in_progress'
+              ? t('settlementInProgress')
               : t('awaitingOutcome')
           }`,
         ),

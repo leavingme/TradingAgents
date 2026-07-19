@@ -107,6 +107,11 @@ AGENTS.md 的项目级版本；做任何非平凡操作前都要先读。
   建议，固定不得形成收益结论、自动改动架构或影响 outcome/paired promotion gate。
 - 历史 run 和刷新语义必须从 SQLite + persisted events 恢复。刷新页面后，已完成
   agent 仍应显示完成状态；运行中的任务应通过 SSE replay + live queue 继续呈现。
+- canonical runtime 的完整报告必须按 run ID 写入独立目录，禁止同 ticker/date 的重跑、
+  remediation 或不同 fingerprint 覆盖旧 run 文件。`run_completed` 必须保存完整报告的
+  SHA-256；`/api/runs/{run_id}/report` 只在路径位于服务端 results root 且 hash 完整匹配时
+  返回内容。缺少旧版 hash 或文件被改写必须 409 fail closed，SQLite terminal decision
+  始终是权威结论，不能让可变 Markdown 冒充另一 run 的审计证据。
 - 每个完成 Graph 的每日调度 live run 应在 canonical decision 已形成后追加
   `architecture_evaluation_status`，仅记录当前 architecture identity、扫描/待结算/cohort
   数量、实验就绪度、建议动作，以及最多三个 Agent/工具的有界数字成本热点。不得在该

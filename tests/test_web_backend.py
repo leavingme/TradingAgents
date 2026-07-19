@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import httpx
 import pytest
 from fastapi import HTTPException
@@ -516,6 +517,7 @@ def test_get_run_report_returns_markdown(monkeypatch, tmp_path):
 
     report_path = tmp_path / "complete_report.md"
     report_path.write_text("# Report\n\nHold", encoding="utf-8")
+    report_hash = hashlib.sha256(report_path.read_bytes()).hexdigest()
 
     def fake_start_background_run(run_id, request, task_store):
         task_store.mark_started(run_id)
@@ -524,7 +526,11 @@ def test_get_run_report_returns_markdown(monkeypatch, tmp_path):
             AnalysisEvent(
                 type="run_completed",
                 run_id=run_id,
-                content={"decision": "Hold", "report_path": str(report_path)},
+                content={
+                    "decision": "Hold",
+                    "report_path": str(report_path),
+                    "report_sha256": report_hash,
+                },
             ),
         )
         task_store.mark_finished(run_id, "completed")
@@ -541,6 +547,42 @@ def test_get_run_report_returns_markdown(monkeypatch, tmp_path):
 
     assert response.media_type == "text/markdown"
     assert response.body.decode("utf-8") == "# Report\n\nHold"
+
+
+@pytest.mark.parametrize("integrity_mode", ["missing", "mismatch"])
+def test_get_run_report_fails_closed_without_matching_integrity_metadata(
+    monkeypatch, tmp_path, integrity_mode
+):
+    from web.backend import main
+
+    monkeypatch.setitem(main.DEFAULT_CONFIG, "results_dir", str(tmp_path))
+    report_path = tmp_path / "complete_report.md"
+    report_path.write_text("# Canonical report", encoding="utf-8")
+
+    def fake_start_background_run(run_id, request, task_store):
+        task_store.mark_started(run_id)
+        content = {"decision": "Hold", "report_path": str(report_path)}
+        if integrity_mode == "mismatch":
+            content["report_sha256"] = "0" * 64
+        task_store.add_event(
+            run_id,
+            AnalysisEvent(type="run_completed", run_id=run_id, content=content),
+        )
+        task_store.mark_finished(run_id, "completed")
+
+    monkeypatch.setattr(main, "start_background_run", fake_start_background_run)
+
+    async def exercise():
+        created = await main.create_run(
+            main.RunCreateRequest(ticker="AAPL", analysis_date="2026-07-05")
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await main.get_run_report(created["run_id"])
+        return exc_info.value
+
+    error = asyncio.run(exercise())
+    assert error.status_code == 409
+    assert "integrity" in error.detail
 
 
 def test_get_run_vendor_calls_returns_run_scoped_ledger(monkeypatch):

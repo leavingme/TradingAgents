@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.util
 import json
 import os
@@ -478,8 +479,30 @@ async def get_run_report(run_id: str):
         raise HTTPException(status_code=403, detail="report path is outside approved root")
     if not resolved_report.is_file():
         raise HTTPException(status_code=404, detail="report file not found")
+    terminal = next(
+        (
+            event
+            for event in reversed(record.events)
+            if event.type == "run_completed"
+            and isinstance(event.content, dict)
+        ),
+        None,
+    )
+    expected_hash = terminal.content.get("report_sha256") if terminal else None
+    if (
+        not isinstance(expected_hash, str)
+        or len(expected_hash) != 64
+        or any(char not in "0123456789abcdef" for char in expected_hash)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="report integrity metadata is unavailable",
+        )
+    report_bytes = resolved_report.read_bytes()
+    if hashlib.sha256(report_bytes).hexdigest() != expected_hash:
+        raise HTTPException(status_code=409, detail="report integrity check failed")
     return PlainTextResponse(
-        resolved_report.read_text(encoding="utf-8"), media_type="text/markdown"
+        report_bytes.decode("utf-8"), media_type="text/markdown"
     )
 
 

@@ -1,6 +1,8 @@
+import hashlib
 import json
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
 import pytest
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -219,6 +221,9 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert len(completed.content["architecture_input_fingerprint"]) == 64
     assert completed.content["architecture_input_complete"] is False
     assert Path(completed.content["report_path"]).exists()
+    assert completed.content["report_sha256"] == hashlib.sha256(
+        Path(completed.content["report_path"]).read_bytes()
+    ).hexdigest()
     stored = history_store.get_run("run-1")
     assert stored["market_data_date"] == "2026-07-03"
     manifest = json.loads(stored["architecture_manifest_json"])
@@ -240,6 +245,52 @@ def test_run_analysis_stream_emits_events_and_writes_report(monkeypatch, tmp_pat
     assert manifest["llm_provider"] == "minimax-cn"
     assert manifest["quick_think_llm"] == "MiniMax-M3"
     assert manifest["longitudinal_context_mode"] == "research_and_portfolio"
+    persisted_terminal = next(
+        event for event in stored["events"] if event["type"] == "run_completed"
+    )
+    assert persisted_terminal["content"]["report_sha256"] == (
+        completed.content["report_sha256"]
+    )
+
+
+def test_same_date_runtime_reports_are_immutable_and_run_scoped(
+    monkeypatch, tmp_path
+):
+    from tradingagents.runtime import analysis_runner
+
+    monkeypatch.setattr(analysis_runner, "TradingAgentsGraph", FakeTradingAgentsGraph)
+    common = {
+        "ticker": "NVDA",
+        "analysis_date": "2026-07-05",
+        "selected_analysts": ("market",),
+        "results_dir": tmp_path,
+    }
+    first = run_analysis_once(AnalysisRequest(**common, run_id="same-date-first"))
+    first_bytes = first.report_path.read_bytes()
+    second = run_analysis_once(AnalysisRequest(**common, run_id="same-date-second"))
+
+    assert first.report_path != second.report_path
+    assert first.report_path.parent.name == "same-date-first"
+    assert second.report_path.parent.name == "same-date-second"
+    assert first.report_path.read_bytes() == first_bytes
+    assert first.report_path.exists()
+    assert second.report_path.exists()
+
+
+def test_unsafe_run_id_cannot_escape_report_root(tmp_path):
+    from tradingagents.runtime.analysis_runner import _report_dir
+
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-05",
+        report_dir=tmp_path / "reports",
+        run_id="../../outside report",
+    )
+    report_dir = _report_dir(request, {"results_dir": str(tmp_path)})
+
+    assert report_dir.parent == tmp_path / "reports"
+    assert report_dir.name.startswith("run-")
+    assert ".." not in report_dir.name
 
 
 def test_exact_market_date_defers_before_graph_and_llm_construction(

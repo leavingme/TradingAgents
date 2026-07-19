@@ -34,6 +34,14 @@ server-side 授权门禁，不影响普通单 arm 每日运行。
 `TRADINGAGENTS_DB` 可以覆盖。canonical 路径不可访问时必须 fail closed，禁止静默
 回退到工作区 `.tradingagents/runs.db` 形成第二套历史。
 
+每个 canonical runtime run 的完整报告位于
+`results/<SYMBOL>/<analysis_date>/reports/<run_id>/complete_report.md`。同日重试、
+remediation 与不同 architecture fingerprint 不共享目录，因此旧 run 的历史链接不会被
+后续报告覆盖。`run_completed` 事件同时保存完整报告字节的 SHA-256；Web 报告接口在读取
+前重新计算并比较，路径越出服务端 results root 返回 403，文件不存在返回 404，缺少旧版
+完整性元数据或 hash 不匹配返回 409。SQLite terminal decision 才是结论权威来源；报告
+用于展示，不得从后来变化的 Markdown 反向重建 decision、outcome 或架构绩效。
+
 同一 symbol + 请求截止日 + architecture version 已有 `pending`、`running`、`completed` 或
 `review_required` run 时不会重复启动。`failed`、`cancelled`、`unavailable` 默认
 等待 60 分钟后重试一次；每天最多两次，防止故障时无限消耗 token。进程级文件锁

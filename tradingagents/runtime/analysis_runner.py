@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Iterator
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -495,7 +496,12 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
                     content={"status": "completed"},
                 )
 
-        report_path = write_report_tree(final_state, request.ticker, _report_dir(request, config))
+        report_path = write_report_tree(
+            final_state,
+            request.ticker,
+            _report_dir(request, config),
+        )
+        report_sha256 = hashlib.sha256(report_path.read_bytes()).hexdigest()
         stats_event, last_stats = _stats_event(request.run_id, callbacks, last_stats, force=True)
         if stats_event is not None:
             yield stats_event
@@ -518,6 +524,7 @@ def _run_analysis_stream_impl(request: AnalysisRequest) -> Iterator[AnalysisEven
                 "architecture_input_fingerprint": experiment_input["fingerprint"],
                 "architecture_input_complete": experiment_input["complete"],
                 "report_path": str(report_path),
+                "report_sha256": report_sha256,
             },
         )
     except Exception as exc:
@@ -837,10 +844,18 @@ def _extract_content(content: Any) -> str | None:
 
 def _report_dir(request: AnalysisRequest, config: dict[str, Any]) -> Path:
     if request.report_dir is not None:
-        return Path(request.report_dir)
-    return (
-        Path(config["results_dir"])
-        / safe_ticker_component(request.ticker)
-        / str(request.analysis_date)
-        / "reports"
-    )
+        report_root = Path(request.report_dir)
+    else:
+        report_root = (
+            Path(config["results_dir"])
+            / safe_ticker_component(request.ticker)
+            / str(request.analysis_date)
+            / "reports"
+        )
+    try:
+        run_component = safe_ticker_component(request.run_id, max_len=128)
+    except ValueError:
+        run_component = (
+            "run-" + hashlib.sha256(request.run_id.encode("utf-8")).hexdigest()[:24]
+        )
+    return report_root / run_component

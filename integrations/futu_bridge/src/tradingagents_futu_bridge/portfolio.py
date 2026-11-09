@@ -15,7 +15,7 @@ def _as_rows(value: Any) -> list[dict[str, Any]]:
         if not value:
             return []
         for key in (
-            "structuredContent", "result", "data", "accounts", "positions", "list",
+            "structuredContent", "result", "data", "d", "accounts", "positions", "list",
             "acc_list", "position_list", "items", "rows",
         ):
             child = value.get(key)
@@ -45,14 +45,15 @@ def unwrap_mcp_result(value: Any) -> Any:
         return value["structuredContent"]
     content = value.get("content")
     if isinstance(content, list):
-        values = []
+        decoded = []
         for block in content:
             if isinstance(block, dict) and isinstance(block.get("text"), str):
-                parsed = _as_rows(block["text"])
-                if parsed:
-                    values.extend(parsed)
-        if values:
-            return values
+                try:
+                    decoded.append(json.loads(block["text"]))
+                except json.JSONDecodeError:
+                    continue
+        if decoded:
+            return decoded[0] if len(decoded) == 1 else decoded
     return value
 
 
@@ -94,7 +95,15 @@ def _is_real_account(row: dict[str, Any]) -> bool:
 def real_accounts(response: Any) -> list[dict[str, Any]]:
     result = unwrap_mcp_result(response)
     rows = _as_rows(result)
-    return [row for row in rows if _field(row, "acc_id", "account_id") is not None and _is_real_account(row)]
+    authorized = [row for row in rows if _field(row, "acc_id", "account_id") is not None]
+    # account_authorized_trd_accs is the Futu MCP's live authorized-account
+    # selector and may omit trd_env from its compact account records. When the
+    # server does provide an environment, enforce REAL explicitly.
+    has_environment = any(
+        _field(row, "trd_env", "trade_env", "environment") is not None
+        for row in authorized
+    )
+    return [row for row in authorized if not has_environment or _is_real_account(row)]
 
 
 @dataclass(frozen=True)
